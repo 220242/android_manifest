@@ -1,0 +1,10 @@
+# Generated delivery artifacts, not source.
+#
+# edge1-tv14-port.patch is produced by `git format-patch` from the commit that
+# is already in this repository's history. Committing it would store the same
+# diff twice and go stale the moment the branch moves.
+/*.patch
+
+# Rockchip build outputs, if a tree is ever built in place.
+/out/
+/rockdev/
