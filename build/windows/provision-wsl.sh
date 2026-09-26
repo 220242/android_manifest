@@ -321,8 +321,13 @@ stage_report() {
         local total; total=$(wc -l < "$f")
         echo
         echo "===== $(basename "$f")  (${total} lines) ====="
+        # The pattern list earns its keep only if it catches the FIRST real
+        # error. It missed the kernel's actual failure once already: Rockchip's
+        # gcc-wrapper.py prints "error, forbidden warning:file.c:398" - a comma,
+        # not a colon - and make prints "*** [...] Error 1", so a 2727-line log
+        # reported a single unrelated grep warning and nothing else.
         echo "--- matches for error patterns (max 200 lines) ---"
-        grep -nE 'error:|ERROR|FAILED:|fatal error|ninja: build stopped|No such file|Killed|out of memory|cannot find|undefined reference|Permission denied' \
+        grep -nE 'error[:,]|ERROR|FAILED:|fatal error|forbidden warning|internal compiler error|multiple definition|collect2:|\*\*\* \[|\*\*\* No rule|ninja: build stopped|No such file|Killed|out of memory|cannot find|undefined reference|Permission denied|Segmentation fault' \
             "$f" 2>/dev/null | head -200 || echo "(none)"
         echo "--- last 120 lines ---"
         tail -120 "$f" 2>/dev/null

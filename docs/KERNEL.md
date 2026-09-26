@@ -91,8 +91,57 @@ the vendor image.
 
 ## Toolchain
 
-The Android 10 BSP built this kernel with GCC 6.3. `build-kernel.sh` uses AOSP's
-clang instead, since the platform no longer ships a GCC prebuilt and 4.19 builds
-cleanly with clang. The clang path in that script is pinned
-(`clang-r487747c`) and must be updated to whatever the synced tree actually
-contains.
+The Android 10 BSP built this kernel with GCC 6.3. AOSP 14 ships no aarch64 GCC
+prebuilt at all (only host x86_64 and mingw), so `build-kernel.sh` defaults to
+the distro cross toolchain, `aarch64-linux-gnu-` from Ubuntu's
+`gcc-aarch64-linux-gnu`, which is a complete and self-consistent compiler plus
+binutils. `KERNEL_USE_CLANG=1` switches to AOSP's clang instead; the version
+directory is discovered at build time rather than pinned, because it changes with
+every AOSP release and a stale path fails only after defconfig has already run.
+
+Three things have to be set on the make **command line**, not exported. The
+kernel Makefile assigns `CC` with `=`, and an environment variable never
+overrides a variable assigned inside a makefile - only a command-line assignment
+does.
+
+### `CC=<compiler>` - bypasses `scripts/gcc-wrapper.py`
+
+Rockchip's tree routes the compiler through `scripts/gcc-wrapper.py`, which reads
+the compiler's stderr and fails the build on any warning from a file that is not
+in its hardcoded allowlist. It ignores `-Werror` entirely, so relaxing warnings
+does not reach it. GCC 11 on 2019 code trips it within minutes:
+
+```
+../drivers/net/phy/phy_device.c:398:17: warning: 'sprintf' argument 3 overlaps
+    destination object 'buf' [-Wrestrict]
+error, forbidden warning:phy_device.c:398
+```
+
+That one is a debug sysfs node writing `sprintf(buf, "%s...", buf, ...)`, and
+`net/` failed the same way in the same run. Passing the real compiler as `CC`
+retires the class rather than chasing files; the wrapper only ever promoted
+warnings to errors. If a future tree uses `override CC`, the command line loses
+and the wrapper needs patching instead - the script logs every `gcc-wrapper`
+line in the Makefile so that case is visible in the log.
+
+### `HOSTCFLAGS=-fcommon` - links the host tools
+
+GCC 10 changed the default to `-fno-common`, so tentative definitions of one
+symbol in two translation units no longer merge. `scripts/dtc` has exactly that
+shape - `yylloc` is defined in both `dtc-lexer.lex.c` and `dtc-parser.tab.c` -
+and the host link fails with `multiple definition of 'yylloc'`. Upstream added
+`extern`, but not in 4.19. In 4.19 `HOSTCFLAGS` is *appended* to
+`KBUILD_HOSTCFLAGS`, so this adds a flag instead of replacing the set, and it
+touches host tools only.
+
+### `KCFLAGS=-Wno-error <probed list>` - keeps the log readable
+
+With the wrapper bypassed these warnings are no longer fatal, but a quiet compile
+keeps real errors findable in a 3000-line log. Each name is probed in its
+positive form (`-Wrestrict`) with `-Werror` before its `-Wno-` form is used: an
+unknown `-Wno-foo` is accepted silently and resurfaces later attached to an
+unrelated diagnostic, which is how the GCC 12-only `-Wno-dangling-pointer`
+produced `cc1: note: unrecognized command-line option` in the middle of someone
+else's error on a GCC 11 host. An unknown `-Wfoo` is a diagnostic in its own
+right, so the probe is a clean yes/no and the same list works across GCC
+versions and clang.

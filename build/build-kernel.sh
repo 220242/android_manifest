@@ -69,14 +69,42 @@ if [[ "${KERNEL_USE_CLANG:-0}" == "1" ]]; then
     fi
     export PATH="$CLANG_DIR/bin:$PATH"
     echo "==> toolchain: $(basename "$CLANG_DIR") (clang) + $CROSS binutils"
+    CC_BIN=clang
     MAKE_ARGS+=(
-        CC=clang
         HOSTCC=clang
         HOSTCXX=clang++
         "CLANG_TRIPLE=$CROSS"
     )
 else
-    echo "==> toolchain: $("${CROSS}gcc" --version | head -1)"
+    CC_BIN="${CROSS}gcc"
+    echo "==> toolchain: $("$CC_BIN" --version | head -1)"
+fi
+
+# CC has to be set on the make command line, and not only because of the
+# environment-vs-makefile rule above.
+#
+# Rockchip's 4.19 tree routes the compiler through scripts/gcc-wrapper.py, which
+# reads the compiler's stderr and fails the build on any warning coming from a
+# file that is not in its hardcoded allowlist. It does this regardless of
+# -Werror, so relaxing warnings does not reach it. On GCC 11, 2019-vintage code
+# trips it immediately:
+#
+#   ../drivers/net/phy/phy_device.c:398:17: warning: 'sprintf' argument 3
+#       overlaps destination object 'buf' [-Wrestrict]
+#   error, forbidden warning:phy_device.c:398
+#
+# That warning is about a debug sysfs node, and there are dozens more like it
+# across net/ and drivers/ - the log above showed both net and drivers failing.
+# Handing make the real compiler retires the whole class at once instead of
+# chasing files one at a time, and loses nothing: the wrapper only ever turned
+# warnings into errors.
+MAKE_ARGS+=( "CC=$CC_BIN" )
+
+if [[ -f scripts/gcc-wrapper.py ]]; then
+    echo "==> scripts/gcc-wrapper.py present; bypassed with CC=$CC_BIN"
+    echo "    Makefile references to it (an 'override' here would beat the"
+    echo "    command line, and would need a different fix):"
+    grep -n 'gcc-wrapper' Makefile | sed 's/^/      /' || true
 fi
 
 # HOSTCFLAGS=-fcommon is not optional on any modern distro compiler.
@@ -94,11 +122,37 @@ fi
 MAKE_ARGS+=( "HOSTCFLAGS=-fcommon" )
 
 # GCC 11 and clang 17+ both raise warnings on 2019 kernel code that 4.19 never
-# saw. None are set -Werror by 4.19 itself, but subsystem makefiles that do add
-# -Werror would stop the build on code that is not ours to fix.
-MAKE_ARGS+=(
-    "KCFLAGS=-Wno-error -Wno-attribute-alias -Wno-stringop-truncation -Wno-stringop-overflow -Wno-array-bounds -Wno-maybe-uninitialized -Wno-misleading-indentation -Wno-zero-length-bounds -Wno-dangling-pointer"
+# saw. With gcc-wrapper.py bypassed these are no longer fatal, but a quiet
+# compile is still the goal: it keeps the real errors findable in a 3000-line log.
+#
+# Every name is probed in its positive form. An unknown -Wno-foo is accepted
+# silently by GCC and only surfaces much later, attached to an unrelated
+# diagnostic - which is exactly what the GCC 12-only -Wno-dangling-pointer did
+# on this GCC 11 host:
+#
+#   cc1: note: unrecognized command-line option '-Wno-dangling-pointer' may have
+#        been intended to silence earlier diagnostics
+#
+# An unknown -Wfoo, by contrast, is a diagnostic in its own right, so -Werror
+# turns the probe into a clean yes/no.
+WARN_CANDIDATES=(
+    attribute-alias restrict stringop-truncation stringop-overflow
+    array-bounds maybe-uninitialized misleading-indentation zero-length-bounds
+    dangling-pointer format-overflow format-truncation packed-not-aligned
+    address-of-packed-member unused-but-set-variable sizeof-pointer-div
+    memset-elt-size int-in-bool-context alloc-size-larger-than frame-address
 )
+WARN_OFF=()
+probe_c="$(mktemp --suffix=.c)"
+echo 'int main(void) { return 0; }' > "$probe_c"
+for w in "${WARN_CANDIDATES[@]}"; do
+    if "$CC_BIN" -Werror "-W$w" -c "$probe_c" -o /dev/null >/dev/null 2>&1; then
+        WARN_OFF+=( "-Wno-$w" )
+    fi
+done
+rm -f "$probe_c"
+echo "==> warnings disabled (${#WARN_OFF[@]} of ${#WARN_CANDIDATES[@]} known to this compiler)"
+MAKE_ARGS+=( "KCFLAGS=-Wno-error ${WARN_OFF[*]-}" )
 
 readonly JOBS="$(nproc)"
 
