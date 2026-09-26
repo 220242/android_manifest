@@ -281,6 +281,39 @@ function Test-FileSha256 {
     return $false
 }
 
+# Brings the device tree inside the distro up to date with origin.
+#
+# This is the fix for a bug that wasted two full runs: Stage-Provision used
+#   test -d ~/.../.git || git clone ...
+# so once the clone existed it was never updated again. Every fix pushed to the
+# repo reached the Windows-side clone (the user pulls it to get this script) but
+# never reached the copy inside the distro -- and the copy inside the distro is
+# the one that runs sync, the kernel build and the platform build. Worse, the
+# stale copy was gated behind a completed stage, so even -Stage Provision -Force
+# re-ran the OLD provision-wsl.sh and its old dependency list.
+#
+# Done with inline git rather than provision-wsl.sh's own clone stage on purpose:
+# using the in-distro script to update the in-distro script is the chicken-and-egg
+# that caused this.
+function Update-DistroRepo {
+    $repo = '~/android_khadas/android_manifest'
+
+    Invoke-InDistro -Command ("mkdir -p ~/android_khadas && test -d $repo/.git || " +
+                              "git clone --branch $($script:RepoBranch) $($script:RepoUrl) $repo")
+
+    # reset --hard, not pull: the working tree in the distro is never edited by
+    # hand, and a merge conflict there would be a dead end with no way to resolve
+    # it from this script.
+    Invoke-InDistro -Command ("git -C $repo fetch --quiet origin $($script:RepoBranch) && " +
+                              "git -C $repo checkout --quiet -B $($script:RepoBranch) origin/$($script:RepoBranch) && " +
+                              "git -C $repo reset --hard --quiet origin/$($script:RepoBranch)")
+
+    Invoke-InDistro -Command "chmod +x $repo/build/*.sh $repo/build/windows/*.sh"
+
+    $head = (Invoke-WslCapture -Command "git -C $repo log --oneline -1").Trim()
+    Write-Good "device tree in the distro: $head"
+}
+
 function Start-BuildLog {
     New-Item -ItemType Directory -Path $script:LogDir -Force | Out-Null
     try {
@@ -693,13 +726,10 @@ function Stage-Provision {
     Write-Info 'installing git'
     Invoke-InDistro -AsRoot -Command 'export DEBIAN_FRONTEND=noninteractive; apt-get update -qq && apt-get install -y -qq git ca-certificates curl'
 
-    Write-Info 'cloning the device tree'
-    $clone = "test -d ~/android_khadas/android_manifest/.git || " +
-             "git clone --branch $($script:RepoBranch) $($script:RepoUrl) ~/android_khadas/android_manifest"
-    Invoke-InDistro -Command "mkdir -p ~/android_khadas && $clone"
+    Write-Info 'fetching the device tree'
+    Update-DistroRepo
 
     Write-Info 'running the provisioning script (deps, preflight, verification)'
-    Invoke-InDistro -Command 'chmod +x ~/android_khadas/android_manifest/build/*.sh ~/android_khadas/android_manifest/build/windows/*.sh'
     Invoke-InDistro -Command '~/android_khadas/android_manifest/build/windows/provision-wsl.sh deps'
     Invoke-InDistro -Command '~/android_khadas/android_manifest/build/windows/provision-wsl.sh preflight'
     Write-Good 'environment provisioned'
@@ -776,12 +806,43 @@ Write-Host 'Khadas Edge1 - Android TV 14 build driver (Windows/WSL2)' -Foregroun
 Write-Host "root: $Root   stage: $Stage" -ForegroundColor DarkGray
 Write-Host "log:  $($script:Transcript)" -ForegroundColor DarkGray
 
+# The Windows-side clone holds this very script, so if it is behind origin the
+# user is running yesterday's fixes without knowing it.
+try {
+    $selfRepo = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+    if (Test-Path (Join-Path $selfRepo '.git')) {
+        & git -C $selfRepo fetch --quiet origin $script:RepoBranch 2>$null
+        $local  = (& git -C $selfRepo rev-parse HEAD 2>$null)
+        $remote = (& git -C $selfRepo rev-parse "origin/$($script:RepoBranch)" 2>$null)
+        if ($local -and $remote -and $local -ne $remote) {
+            $behind = (& git -C $selfRepo rev-list --count "HEAD..origin/$($script:RepoBranch)" 2>$null)
+            Write-Warn2 "this clone is $behind commit(s) behind origin. Run 'git pull' in $selfRepo"
+        } else {
+            Write-Host "repo:  up to date with origin" -ForegroundColor DarkGray
+        }
+    }
+} catch { }
+
 # -Stage Report is diagnostics only: collect and exit without touching anything.
 if ($Stage -eq 'Report') {
     $path = Collect-Report
     Write-Host ''
     Write-Host "Send this file: $path" -ForegroundColor Cyan
     exit 0
+}
+
+# Unconditional, before any stage runs. Provision is skipped once complete, so
+# leaving the update inside it means a resumed run keeps using whatever the distro
+# happened to have. Only possible once the distro exists; on a first run
+# Stage-Provision does it.
+try {
+    $registered = @((& wsl.exe --list --quiet) -split "`r?`n" | ForEach-Object { $_.Trim() })
+    if ($registered -contains $script:DistroName) {
+        Write-Stage 'Updating the device tree inside the distro'
+        Update-DistroRepo
+    }
+} catch {
+    Write-Warn2 "could not refresh the in-distro device tree: $($_.Exception.Message)"
 }
 
 $started = Get-Date

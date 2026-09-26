@@ -105,6 +105,15 @@ stage_preflight() {
 }
 
 stage_sync() {
+    # The overlay now drops the 11 Pixel *-kernel projects, but repo leaves the
+    # directories of removed projects on disk. device/google/bluejay-kernel in
+    # particular is left half checked out from the runs that failed on it, and a
+    # stale directory for a project no longer in the manifest makes repo complain.
+    if compgen -G "$TREE/device/google/*-kernel" >/dev/null 2>&1; then
+        log "removing directories for projects the overlay drops"
+        rm -rf "$TREE"/device/google/*-kernel
+    fi
+
     log "syncing AOSP 14 + Khadas overlay (this is the long one: 100+ GiB)"
     # Resolve the newest android-14 tag rather than trusting the hardcoded
     # default in sync.sh, which could not be verified when it was written.
@@ -170,9 +179,13 @@ stage_report() {
     df -h "$HOME" /tmp 2>&1 || true
     echo
     echo "--- toolchain ---"
-    for t in git repo python3 java make ninja ccache; do
+    # git-lfs is listed because its absence, combined with repo init --git-lfs,
+    # is what broke checkout of the LFS-backed projects - and nothing in the
+    # failure said so.
+    for t in git git-lfs repo python3 java make ninja ccache; do
         printf '%-8s %s\n' "$t" "$(command -v $t 2>/dev/null || echo MISSING)"
     done
+    echo "git-lfs:    $(git lfs version 2>&1 | head -1)"
     echo "repo ver:   $(repo --version 2>&1 | head -2 | tr '\n' ' ')"
     echo "ccache:     $(ccache -s 2>/dev/null | head -4 | tr '\n' ' ')"
     echo
