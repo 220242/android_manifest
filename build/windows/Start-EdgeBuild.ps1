@@ -690,10 +690,18 @@ function Stage-Build {
     Write-Warn2 'HALs are incomplete, so the build uses AOSP fallbacks and the'
     Write-Warn2 'resulting image will have no display or audio output. See'
     Write-Warn2 'docs/STATUS.md. Running this verifies the build, not the ROM.'
-    Invoke-InDistro -Command '~/android_khadas/android_manifest/build/windows/provision-wsl.sh build' -AllowFailure | Out-Null
+    $rc = Invoke-InDistro -Command '~/android_khadas/android_manifest/build/windows/provision-wsl.sh build' -AllowFailure
 
     Write-Info "logs and any update.img are under the distro's home, reachable"
     Write-Info "from Explorer at: \\wsl.localhost\$($script:DistroName)\home\builder\android_khadas"
+
+    if ($rc -ne 0) {
+        # Deliberately NOT Set-Done. -AllowFailure exists only so the paths above
+        # still print on a failure; marking the stage complete anyway would make
+        # the next run skip it, so a failed build would never be retried. That is
+        # the one place where the resume logic could silently hide a failure.
+        throw "the platform build failed (exit $rc). Error lines are in the report; the full log is platform.log inside the distro."
+    }
     Set-Done 'Build'
 }
 
