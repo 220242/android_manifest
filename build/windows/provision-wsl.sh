@@ -7,7 +7,7 @@
 # makes quoting unreadable and is a common source of silent breakage.
 #
 #   usage: provision-wsl.sh <stage>
-#   stages: deps | clone | preflight | sync | aidl | kernel | build | all
+#   stages: deps | clone | preflight | sync | aidl | probe | kernel | build | all
 #           report  - consolidated diagnostics on stdout, for the Windows report
 #
 set -euo pipefail
@@ -163,6 +163,113 @@ stage_aidl() {
     echo "From Windows: \\\\wsl.localhost\\Edge1Build\\home\\builder\\android_khadas\\aidl-surface.txt"
 }
 
+stage_probe() {
+    # Validates every module name device.mk asks for against the synced tree, and
+    # dumps what the generic implementations actually provide.
+    #
+    # Why: device.mk names around fifty PRODUCT_PACKAGES, many of them AOSP
+    # "-service.example" / "-service.default" modules written down from memory.
+    # A wrong name fails the build at Kati with "module not found", one name per
+    # attempt. Checking them all in a single pass turns a long fix-fail loop into
+    # one answer.
+    local out="$WORK/module-probe.txt"
+    local dmk="$MANIFEST/device/khadas/edge/device.mk"
+
+    [[ -d "$TREE/hardware/interfaces" ]] || {
+        echo "tree not synced at $TREE" >&2; return 1; }
+
+    log "probing the tree for the modules device.mk requests"
+
+    local pats="$WORK/.probe-patterns"
+    python3 - "$dmk" > "$pats" <<'PY_INNER'
+import re, sys
+s = open(sys.argv[1]).read()
+names = set()
+for m in re.finditer(r'PRODUCT_PACKAGES \+=((?:[^\n]*\\\n)*[^\n]*)', s):
+    for t in m.group(1).replace('\\', '').split():
+        if t and not t.startswith('$'):
+            names.add(t)
+for n in sorted(names):
+    print(n)
+PY_INNER
+
+    {
+        echo "##### MODULE PROBE #####"
+        echo "tree: $TREE"
+        echo "device.mk requests $(wc -l < "$pats") modules"
+        echo
+
+        # One grep pass over the directories that can define a module. Searching
+        # the whole tree per name would take hours.
+        local dirs=(hardware frameworks system device external packages vendor build prebuilts)
+        local found="$WORK/.probe-found"
+        : > "$found"
+        ( cd "$TREE" && grep -rhoE 'name: "[^"]+"|LOCAL_MODULE *:= *[A-Za-z0-9._@+-]+' \
+              --include=Android.bp --include=Android.mk "${dirs[@]}" 2>/dev/null \
+          | sed -E 's/name: "([^"]+)"/\1/; s/LOCAL_MODULE *:= *//' \
+          | sort -u ) > "$found" || true
+        echo "tree defines $(wc -l < "$found") module names"
+        echo
+
+        # Two very different kinds of missing, so they are reported apart.
+        # A missing AOSP module means a name was written down wrong and must be
+        # corrected. A missing Rockchip module is expected: those are the vendor
+        # components still to be forward-ported, and device.mk keeps them behind
+        # EDGE1_ENABLE_INCOMPLETE_HALS for exactly that reason.
+        local miss_aosp=0 miss_vendor=0
+        local aosp_list="" vendor_list=""
+        while read -r n; do
+            [[ -n "$n" ]] || continue
+            grep -qxF "$n" "$found" && continue
+            case "$n" in
+                *rk3399*|*_rk|libcodec2_rk|librockchip*|libvpu|libGLES_mali|vulkan.rk*)
+                    vendor_list+="  $n"$'\n'; miss_vendor=$((miss_vendor+1)) ;;
+                *)
+                    aosp_list+="  $n"$'\n'; miss_aosp=$((miss_aosp+1)) ;;
+            esac
+        done < "$pats"
+
+        echo "--- MISSING AOSP MODULES (wrong name - must be fixed) ---"
+        if (( miss_aosp )); then printf '%s' "$aosp_list"; else echo "  (none)"; fi
+        echo
+        echo "--- MISSING VENDOR MODULES (expected: not yet ported) ---"
+        if (( miss_vendor )); then printf '%s' "$vendor_list"; else echo "  (none)"; fi
+        echo
+        echo "missing: $miss_aosp AOSP, $miss_vendor vendor"
+        echo
+
+        echo "##### drm_hwcomposer (generic DRM composer3) #####"
+        if [[ -d "$TREE/external/drm_hwcomposer" ]]; then
+            echo "present. top level:"
+            ls "$TREE/external/drm_hwcomposer" | sed 's/^/  /'
+            echo "modules it defines:"
+            grep -rhoE 'name: "[^"]+"' "$TREE/external/drm_hwcomposer" \
+                --include=Android.bp 2>/dev/null | sed -E 's/name: "([^"]+)"/  \1/' | sort -u
+            echo "hwc3 / composer3 references:"
+            grep -rl 'composer3' "$TREE/external/drm_hwcomposer" 2>/dev/null | head -10 | sed 's/^/  /'
+        else
+            echo "ABSENT at $TREE/external/drm_hwcomposer"
+        fi
+        echo
+
+        echo "##### audio AIDL reference implementation #####"
+        local ad="$TREE/hardware/interfaces/audio/aidl/default"
+        if [[ -d "$ad" ]]; then
+            echo "present. top level:"
+            ls "$ad" | sed 's/^/  /'
+            echo "modules it defines:"
+            grep -rhoE 'name: "[^"]+"' "$ad" --include=Android.bp 2>/dev/null \
+                | sed -E 's/name: "([^"]+)"/  \1/' | sort -u
+        else
+            echo "ABSENT at $ad"
+        fi
+        echo "##### END MODULE PROBE #####"
+    } > "$out" 2>&1
+
+    log "written to $out ($(wc -l < "$out") lines)"
+    sed -n '/^--- MISSING AOSP/,/^missing:/p' "$out"
+}
+
 stage_report() {
     # Emits a consolidated diagnostic to stdout. Start-EdgeBuild.ps1 captures it
     # into the Windows-side report, so this must stay quiet on stderr and never
@@ -225,6 +332,7 @@ case "$STAGE" in
     kernel)    stage_kernel ;;
     build)     stage_build ;;
     aidl)      stage_aidl ;;
+    probe)     stage_probe ;;
     report)    stage_report ;;
     all)       stage_deps; stage_clone; stage_preflight; stage_sync
                stage_kernel; stage_build ;;
