@@ -44,12 +44,15 @@ ENABLE_SCHEDBOOST := true
 # build/build-kernel.sh, which this tree consumes as a prebuilt so that a
 # platform-only rebuild does not re-run the kernel build.
 # ---------------------------------------------------------------------------
-TARGET_KERNEL_SOURCE := kernel
+# kernel/khadas/edge, not "kernel": a project at path "kernel" would nest the
+# upstream kernel/configs, kernel/tests and 26 kernel/prebuilts/* projects, and
+# repo rejects overlapping paths. See manifests/khadas_edge_tv14.xml.
+TARGET_KERNEL_SOURCE := kernel/khadas/edge
 TARGET_KERNEL_CONFIG := kedge_defconfig
 TARGET_KERNEL_DTS := rk3399-khadas-edge-android
 TARGET_KERNEL_ARCH := arm64
-TARGET_PREBUILT_KERNEL := kernel/arch/arm64/boot/Image
-BOARD_PREBUILT_DTBOIMAGE := kernel/resource.img
+TARGET_PREBUILT_KERNEL := kernel/khadas/edge/out/arch/arm64/boot/Image
+BOARD_PREBUILT_DTBOIMAGE := kernel/khadas/edge/resource.img
 
 BOARD_KERNEL_CMDLINE := \
     console=ttyFIQ0 \

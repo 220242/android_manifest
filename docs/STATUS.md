@@ -79,6 +79,46 @@ sources rather than assuming:
 * A boot control HAL was declared alongside a non-A/B partition layout. Removed,
   along with the `bootctrl` project in the manifest.
 
+## What the GitHub AOSP mirror resolved, and what it did not
+
+`github.com/aosp-mirror` is reachable from this container, so it was checked
+empirically rather than assumed. It is a **partial reference mirror**, not a
+buildable tree.
+
+Present: `platform_manifest` (with real `android-14.0.0_r1`..`r75` branches),
+`platform_build`, `platform_frameworks_base`, `platform_system_core`,
+`platform_hardware_libhardware`.
+
+Absent, and each one is disqualifying on its own: every `prebuilts/*` repo (so no
+clang, no build-tools, no JDK - nothing can compile), `platform_build_soong`,
+`platform_hardware_interfaces`, `platform_frameworks_native`,
+`platform_frameworks_av`, `device/google/atv`, `packages/apps/TV`. The upstream
+manifest lists 1357 projects; the mirror carries a few hundred.
+
+So it cannot be used to build here, and it is irrelevant on a host where
+`android.googlesource.com` is reachable - there the mirror would be strictly
+worse. What it *did* settle, by reading the real AOSP 14 manifest at
+`android-14.0.0_r75`:
+
+* `device/google/atv` **is** in AOSP 14 (project and path both
+  `device/google/atv`), so `edge1_tv.mk` inheriting `atv_base.mk` rests on a real
+  project rather than an assumption.
+* `packages/apps/TV` **is** present, so `LiveTv` is buildable.
+* The `android-14.0.0_r*` tag series was confirmed, closing item 4 below.
+* **It found a real bug in the overlay.** The manifest was checking the kernel
+  out at path `kernel`, which would nest 28 upstream projects inside it -
+  `kernel/configs`, `kernel/tests` and 26 `kernel/prebuilts/*` GKI trees - and
+  repo rejects overlapping paths. `repo sync` would have failed immediately. The
+  Android 10 manifest got away with `path="kernel"` because AOSP 10 had far fewer
+  `kernel/*` projects. Fixed by moving to `kernel/khadas/edge`, verified clear in
+  the upstream manifest, which needs no `<remove-project>` entries at all.
+* `hardware/interfaces` is **not** mirrored, so the AIDL signatures for the
+  unwritten shims remain unverifiable. That gap stands.
+
+Also fixed while there: `build-kernel.sh` had a hardcoded clang version
+(`clang-r487747c`) that would break on any release shipping a different one. It
+now discovers the newest `clang-r*` prebuilt at run time.
+
 ## Also worth correcting in the original brief
 
 * **There is no `device/khadas/edge` in the khadas-edge-Qt manifest.** The
@@ -107,9 +147,9 @@ Ordered by what blocks what.
 2. **audio.core `createOutputStream`.** No sound without it.
 3. **Forward-port `libgralloc_rk3399`** (the gralloc0 module the allocator shim
    loads) and `audio.primary.rk3399` to build against the 14 VNDK.
-4. **Verify the AOSP tag.** `build/sync.sh` defaults to `android-14.0.0_r50`,
-   which could not be confirmed against the unreachable AOSP host. Check with
-   `git ls-remote --tags .../platform/manifest 'android-14.0.0_r*'`.
+4. ~~**Verify the AOSP tag.**~~ Resolved: the `android-14.0.0_r*` series runs
+   r1..r75, confirmed from `aosp-mirror/platform_manifest`. `sync.sh` now
+   defaults to r75, and `provision-wsl.sh` resolves the newest at run time.
 5. **Run `check_vintf`.** `vintf/manifest.xml` declares `target-level="8"`
    (Android 14 FCM) and 22 AIDL HALs. The exact permitted versions must be
    validated against the real framework compatibility matrix; if it rejects the

@@ -26,22 +26,30 @@
   <remote name="khadas" fetch="https://github.com/khadas/" />
 
   <!-- ==================================================================
-       Removals.
-       The kernel is checked out at path "kernel", which would nest the
-       upstream kernel/configs and kernel/tests projects inside it.
-       Neither is required to build a device target.
-       ================================================================== -->
-  <remove-project name="kernel/configs" />
-  <remove-project name="kernel/tests" />
-
-  <!-- ==================================================================
        Kernel: 4.19.111 (khadas-edge-Qt).
        4.19 is the minimum kernel an Android 14 *upgrade* device may ship
        (launch devices require 5.15). Board DTS:
          arch/arm64/boot/dts/rockchip/rk3399-khadas-edge-android.dts
        Defconfig: arch/arm64/configs/kedge_defconfig
+
+       Checked out at kernel/khadas/edge, NOT at "kernel".
+
+       Verified against the real AOSP 14 manifest (aosp-mirror/platform_manifest
+       at android-14.0.0_r75): a project at path "kernel" would nest 28 upstream
+       projects inside itself - kernel/configs, kernel/tests and 26
+       kernel/prebuilts/* GKI trees - and repo rejects overlapping paths. The
+       Android 10 manifest got away with path="kernel" because the AOSP 10
+       manifest had far fewer kernel/* projects.
+
+       Removing all 28 with <remove-project> would work but is fragile: the set
+       changes between releases. Using a non-colliding path needs no removals at
+       all. kernel/khadas is confirmed clear in the upstream manifest.
+
+       The kernel/prebuilts/* GKI trees remain synced and unused; this is a
+       non-GKI vendor kernel. Add <remove-project> entries for them if the extra
+       disk matters.
        ================================================================== -->
-  <project name="linux" path="kernel" remote="khadas"
+  <project name="linux" path="kernel/khadas/edge" remote="khadas"
            revision="a82a1a93e7def23c8c30db102aacffaf2f6b674c" />
 
   <!-- ==================================================================

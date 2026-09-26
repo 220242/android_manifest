@@ -7,7 +7,7 @@
 set -euo pipefail
 
 readonly TREE="${1:-$HOME/aosp-14-edge1}"
-readonly KERNEL="$TREE/kernel"
+readonly KERNEL="$TREE/kernel/khadas/edge"
 readonly DEVICE_DIR="$TREE/device/khadas/edge"
 readonly DEFCONFIG="kedge_defconfig"
 readonly DTS="rk3399-khadas-edge-android"
@@ -23,7 +23,19 @@ export CROSS_COMPILE=aarch64-linux-android-
 # AOSP's own clang, so the kernel and platform agree on toolchain. The Android 10
 # BSP built this kernel with GCC 6.3; 4.19 builds clean with AOSP clang and the
 # platform no longer ships a GCC prebuilt.
-export PATH="$TREE/prebuilts/clang/host/linux-x86/clang-r487747c/bin:$PATH"
+#
+# The version directory is discovered rather than hardcoded: it changes with
+# every AOSP release, and a stale pinned path fails with "clang: not found"
+# after the build has already spent minutes on defconfig.
+CLANG_DIR=$(find "$TREE/prebuilts/clang/host/linux-x86" -maxdepth 1 -type d \
+                 -name 'clang-r*' 2>/dev/null | sort -V | tail -1)
+if [[ -z "$CLANG_DIR" ]]; then
+    echo "no clang prebuilt under $TREE/prebuilts/clang/host/linux-x86" >&2
+    echo "is the tree synced? ('repo sync prebuilts/clang/host/linux-x86')" >&2
+    exit 1
+fi
+echo "==> toolchain: $(basename "$CLANG_DIR")"
+export PATH="$CLANG_DIR/bin:$PATH"
 export CC=clang
 export CLANG_TRIPLE=aarch64-linux-gnu-
 

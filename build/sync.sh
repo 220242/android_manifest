@@ -9,11 +9,14 @@
 set -euo pipefail
 
 readonly TREE="${1:-$HOME/aosp-14-edge1}"
-# NOTE: verify this tag exists before relying on it -
-#   git ls-remote --tags https://android.googlesource.com/platform/manifest 'android-14.0.0_r*'
-# It could not be verified when this script was written because the AOSP host was
-# unreachable from that environment (see docs/STATUS.md). Override with argument 2.
-readonly AOSP_TAG="${2:-android-14.0.0_r50}"
+# Verified to exist: the android-14.0.0_r* series runs r1..r75, confirmed by
+# listing aosp-mirror/platform_manifest (a GitHub mirror of the AOSP manifest)
+# because android.googlesource.com was unreachable from the authoring
+# environment. r75 was the newest at the time.
+#
+# build/windows/provision-wsl.sh resolves the newest tag at run time instead of
+# using this default; override here with argument 2.
+readonly AOSP_TAG="${2:-android-14.0.0_r75}"
 readonly MANIFEST_REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 echo "tree:     $TREE"

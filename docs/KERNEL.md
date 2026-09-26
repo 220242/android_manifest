@@ -11,6 +11,10 @@ PATCHLEVEL = 19
 SUBLEVEL = 111
 ```
 
+It is checked out at **`kernel/khadas/edge`**, not `kernel`: a project at path
+`kernel` would nest the upstream `kernel/configs`, `kernel/tests` and 26
+`kernel/prebuilts/*` projects inside itself, and repo rejects overlapping paths.
+
 Board support is present: `arch/arm64/configs/kedge_defconfig`, and
 `arch/arm64/boot/dts/rockchip/rk3399-khadas-edge-android.dts` with
 `rk3399-khadas-edge.dtsi`. The GPU driver is `drivers/gpu/arm/midgard`, correct
