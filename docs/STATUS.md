@@ -138,6 +138,62 @@ now discovers the newest `clang-r*` prebuilt at run time.
   There is no upstream Khadas Android 14 for the RK3399 Edge1, which is why this
   is a port rather than a rebase.
 
+## What a synced tree changed (android-14.0.0_r75)
+
+Two probes against the real tree replaced most of the guesswork, and one of them
+overturned the plan for the largest gap.
+
+**All 21 declared AIDL HALs exist at the declared versions.** `vintf/manifest.xml`
+was valid. `IAllocator` V2 has exactly the four methods the shim implements.
+`IWifi` V1 is the generic AOSP interface, confirming that shipping no vendor Wi-Fi
+HAL was right.
+
+**AOSP 14 already ships the whole graphics stack**, so the two biggest gaps are
+gone rather than solved:
+
+| | |
+|---|---|
+| `android.hardware.graphics.allocator-service.minigbm` | AIDL allocator V2 |
+| `mapper.minigbm` | IMapper 5 (stable-c) |
+| `gralloc.minigbm` | gralloc0 backend |
+| `hwcomposer.drm_minigbm` | drm_hwcomposer HWC2 |
+| `android.hardware.graphics.composer@2.4-service` | HIDL passthrough composer |
+
+minigbm has a rockchip backend and drm_hwcomposer is a generic atomic-KMS
+composer, which the Rockchip DRM driver supports. That retires the hand-written
+allocator shim, the unported `libgralloc_rk3399`, and an unwritten composer3
+service whose `IComposerClient` has 48 methods. Audio is the same shape:
+`android.hardware.audio.service-aidl.example` is a full ALSA-backed AIDL HAL, and
+this board's audio is tinyalsa, so wrapping the Android 10 `audio_hw_device` is no
+longer the plan either.
+
+The cost is honest: minigbm's rockchip backend does not implement the RK3399's
+AFBC layouts, so composition is less efficient than Rockchip's own gralloc, and
+without the Mali blob GLES falls back to software. Both are fine for bringing the
+rest of the port up, and the Rockchip path stays behind
+`EDGE1_ENABLE_INCOMPLETE_HALS`.
+
+**Composer is HIDL @2.4, not AIDL composer3.** AOSP 14's drm_hwcomposer snapshot
+is HWC2 only - its tree has `hwc2_device/` and no reference to composer3 at all.
+That was verified, not assumed, and it is why the manifest declares
+`composer@2.4`. If `check_vintf` rejects HIDL composer at FCM level 8, lowering
+`target-level` is defensible for an upgrade device at shipping API 29.
+
+**Ten module names were wrong** and would each have failed the build separately:
+`audio.effect-service.example` is really `audio.effect.service-aidl.example`;
+`keymint-service.nonsecure` is really `keymint-service`;
+`tv.hdmi.cec-service.example` is really `tv.hdmi.cec-service`. Four had no AOSP
+equivalent at all and were removed: there is no software Gatekeeper (only
+`.trusty`/`.remote`), no `light-service.example` (only `.cuttlefish`), no
+`c2@1.2-service.software` (the software codecs live in the framework), no
+`drm@4.0-service.widevine` (Widevine is not in AOSP), and `libwpa_client` was
+deleted with the legacy Wi-Fi path. `brcm_patchram_plus` is a Rockchip vendor
+tool, now gated - without it Bluetooth will not come up, though Wi-Fi is
+unaffected.
+
+Dropping Gatekeeper means keyguard falls back to framework credential checking:
+PIN and pattern work, without hardware-enforced throttling.
+
 ## Remaining work before this boots
 
 Ordered by what blocks what.

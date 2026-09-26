@@ -246,7 +246,14 @@ PY_INNER
             grep -rhoE 'name: "[^"]+"' "$TREE/external/drm_hwcomposer" \
                 --include=Android.bp 2>/dev/null | sed -E 's/name: "([^"]+)"/  \1/' | sort -u
             echo "hwc3 / composer3 references:"
-            grep -rl 'composer3' "$TREE/external/drm_hwcomposer" 2>/dev/null | head -10 | sed 's/^/  /'
+            # '|| true' matters: under set -euo pipefail a grep that finds nothing
+            # exits 1, head closing the pipe makes it a pipeline failure, and the
+            # whole { } block aborts - truncating the report right before the
+            # sections that were the point of running it. That is exactly what
+            # happened, and the absence of matches was itself the answer: AOSP 14's
+            # drm_hwcomposer is HWC2 only.
+            grep -rl 'composer3' "$TREE/external/drm_hwcomposer" 2>/dev/null \
+                | head -10 | sed 's/^/  /' || echo "  (none - this snapshot is HWC2 only)"
         else
             echo "ABSENT at $TREE/external/drm_hwcomposer"
         fi

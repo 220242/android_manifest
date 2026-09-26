@@ -85,31 +85,72 @@ DEVICE_PACKAGE_OVERLAYS += $(LOCAL_PATH)/overlay
 #                   follow-up, tracked in docs/HAL_MIGRATION.md
 #      composer  -> AIDL android.hardware.graphics.composer3-V3
 # ---------------------------------------------------------------------------
-# The allocator shim is implemented (shims/graphics/allocator).
+# ---------------------------------------------------------------------------
+# Verified against the module list of a synced android-14.0.0_r75 tree
+# (build/windows/provision-wsl.sh probe). AOSP 14 ships a complete graphics
+# stack that needs no vendor code:
+#
+#   android.hardware.graphics.allocator-service.minigbm  AIDL allocator V2
+#   mapper.minigbm                                       IMapper 5 (stable-c)
+#   gralloc.minigbm                                      gralloc0 backend
+#   hwcomposer.drm_minigbm                               drm_hwcomposer HWC2
+#   android.hardware.graphics.composer@2.4-service       HIDL passthrough composer
+#
+# minigbm has a rockchip backend and drm_hwcomposer is a generic atomic-KMS
+# composer, which the Rockchip DRM driver supports. Together they replace three
+# things that were blocking this port: the hand-written allocator shim, the
+# unported libgralloc_rk3399, and an unwritten composer3 service whose
+# IComposerClient has 48 methods.
+#
+# Note drm_hwcomposer in AOSP 14 is HWC2 only - its tree contains hwc2_device/
+# and no composer3 references at all - so the composer is declared as HIDL
+# @2.4 rather than AIDL composer3. That is why vintf/manifest.xml declares
+# composer@2.4.
+#
+# The tradeoff: minigbm's rockchip backend does not implement the RK3399's AFBC
+# layouts, so composition is less efficient than Rockchip's own gralloc. A
+# working display beats an unwritten shim; the Rockchip path is still available
+# behind EDGE1_ENABLE_INCOMPLETE_HALS.
+# ---------------------------------------------------------------------------
+ifeq ($(EDGE1_ENABLE_INCOMPLETE_HALS),true)
+
+# Rockchip stack: Mali-T860 userspace blob, Rockchip gralloc, Rockchip composer.
+# None of these modules exist in the tree yet - they need forward-porting from
+# the Android 10 revisions the overlay pins.
 PRODUCT_PACKAGES += \
     android.hardware.graphics.allocator-service.rk3399 \
+    android.hardware.graphics.composer3-service.rk3399 \
     libgralloc_rk3399 \
-    libGLES_mali
-
-# The composer3 shim is not written yet. There is no usable AOSP fallback for a
-# real display - drm_hwcomposer would have to be built against the Rockchip DRM
-# driver - so without this the build produces an image that cannot composite.
-# This is the single largest remaining gap; see docs/STATUS.md.
-ifeq ($(EDGE1_ENABLE_INCOMPLETE_HALS),true)
-PRODUCT_PACKAGES += android.hardware.graphics.composer3-service.rk3399
-endif
-
-# Mali-T860 userspace (proprietary, from vendor/rockchip).
-# libRSDriverArm is deliberately absent: RenderScript was removed from the
-# platform in Android 12, so the Android 10 tree's RS driver has no consumer.
-PRODUCT_PACKAGES += \
+    libGLES_mali \
     vulkan.rk3399
 
 PRODUCT_PROPERTY_OVERRIDES += \
     ro.hardware.egl=mali \
     ro.hardware.vulkan=rk3399 \
     ro.hardware.gralloc=rk3399 \
-    ro.hardware.hwcomposer=rk3399 \
+    ro.hardware.hwcomposer=rk3399
+
+else
+
+PRODUCT_PACKAGES += \
+    android.hardware.graphics.allocator-service.minigbm \
+    mapper.minigbm \
+    gralloc.minigbm \
+    android.hardware.graphics.composer@2.4-service \
+    hwcomposer.drm_minigbm
+
+# No ro.hardware.egl: without the Mali blob there is no hardware GLES driver, so
+# the platform falls back to its software renderer. Slow, but it boots and draws,
+# which is what is needed to validate the rest of the port.
+PRODUCT_PROPERTY_OVERRIDES += \
+    ro.hardware.gralloc=minigbm \
+    ro.hardware.hwcomposer=drm_minigbm
+
+endif
+
+BOARD_USES_MINIGBM := true
+
+PRODUCT_PROPERTY_OVERRIDES += \
     ro.surface_flinger.max_frame_buffer_acquired_buffers=3 \
     ro.surface_flinger.has_wide_color_display=false \
     ro.surface_flinger.has_HDR_display=true \
@@ -149,10 +190,14 @@ PRODUCT_PACKAGES += \
     android.hardware.audio.effect-service.rk3399 \
     audio.primary.rk3399
 else
-# AOSP's AIDL effect service is generic and usable as-is; only the core module
-# is board-specific.
+# AOSP's reference audio HAL. hardware/interfaces/audio/aidl/default is a full
+# AIDL implementation with ALSA support, and this board's audio is tinyalsa over
+# the HDMI i2s and S/PDIF cards, so it is a far better starting point than
+# wrapping the Android 10 audio_hw_device. Real module names, from the probe:
+# .service-aidl.example, not -service.example.
 PRODUCT_PACKAGES += \
-    android.hardware.audio.effect-service.example
+    android.hardware.audio.service-aidl.example \
+    android.hardware.audio.effect.service-aidl.example
 endif
 
 PRODUCT_COPY_FILES += \
@@ -196,8 +241,8 @@ else
 # dw-hdmi-cec exposes. HDMI-CEC may well work with these unchanged.
 PRODUCT_PACKAGES += \
     android.hardware.tv.input-service.example \
-    android.hardware.tv.hdmi.cec-service.example \
-    android.hardware.tv.hdmi.connection-service.example
+    android.hardware.tv.hdmi.cec-service \
+    android.hardware.tv.hdmi.connection-service
 endif
 
 PRODUCT_COPY_FILES += \
@@ -225,8 +270,7 @@ PRODUCT_PACKAGES += \
     wpa_supplicant \
     wpa_supplicant.conf \
     hostapd \
-    wificond \
-    libwpa_client
+    wificond
 
 PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/wifi/wpa_supplicant_overlay.conf:$(TARGET_COPY_OUT_VENDOR)/etc/wifi/wpa_supplicant_overlay.conf \
@@ -246,10 +290,17 @@ PRODUCT_PROPERTY_OVERRIDES += \
 #      BCM4359 supports once firmware patchram is loaded - handled by the
 #      init.edge1.rc brcm_patchram_plus stage rather than by a HAL.
 # ---------------------------------------------------------------------------
+# brcm_patchram_plus is a Broadcom tool from the Rockchip vendor tree, not AOSP,
+# so it is gated. Without it the BCM4359 never gets its firmware patch and
+# Bluetooth will not come up - Wi-Fi is unaffected.
 PRODUCT_PACKAGES += \
-    android.hardware.bluetooth-service.default \
+    android.hardware.bluetooth-service.default
+
+ifeq ($(EDGE1_ENABLE_INCOMPLETE_HALS),true)
+PRODUCT_PACKAGES += \
     brcm_patchram_plus \
     libbt-vendor
+endif
 
 PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/bluetooth/bt_vendor.conf:$(TARGET_COPY_OUT_VENDOR)/etc/bluetooth/bt_vendor.conf
@@ -268,19 +319,24 @@ PRODUCT_PROPERTY_OVERRIDES += \
 # A10 shipped OMX IL components; Codec2 is mandatory for new codecs on 14, so
 # the OMX components are kept only as a fallback behind the Codec2 store.
 # ---------------------------------------------------------------------------
+# Rockchip MPP userspace: Android 10 revisions, not yet building against the 14
+# VNDK, so gated with the rest.
+ifeq ($(EDGE1_ENABLE_INCOMPLETE_HALS),true)
 PRODUCT_PACKAGES += \
     libvpu \
     librockchip_mpp
+endif
 
 ifeq ($(EDGE1_ENABLE_INCOMPLETE_HALS),true)
 PRODUCT_PACKAGES += \
     android.hardware.media.c2@1.2-service.rk3399 \
     libcodec2_rk
 else
-# Software Codec2 only. 4K HEVC/VP9 will not play at full rate without the MPP
-# hardware decoder, but the device boots and plays SD/HD software-decoded video.
-PRODUCT_PACKAGES += \
-    android.hardware.media.c2@1.2-service.software
+# No vendor Codec2 service. The probe shows AOSP 14 has no
+# c2@1.2-service.software - the software codecs live in the framework's own
+# Codec2 store (libcodec2_soft_*), which needs no vendor HAL. 4K HEVC/VP9 will
+# not play at full rate without the MPP hardware decoder, but SD/HD software
+# decode works.
 endif
 
 PRODUCT_COPY_FILES += \
@@ -304,9 +360,11 @@ endif
 
 # DRM: Widevine L3 only. L1 needs an OP-TEE trusted app, and
 # PRODUCT_HAVE_OPTEE is false for this target.
+# clearkey only. Widevine is not in AOSP - drm@4.0-service.widevine comes from
+# vendor/widevine, which this overlay does not sync. Add that project and this
+# package together if Widevine L3 is wanted.
 PRODUCT_PACKAGES += \
-    android.hardware.drm-service.clearkey \
-    android.hardware.drm@4.0-service.widevine
+    android.hardware.drm-service.clearkey
 
 # ---------------------------------------------------------------------------
 # Remaining HALs, all HIDL -> AIDL.
@@ -343,11 +401,13 @@ PRODUCT_PACKAGES += \
     android.hardware.memtrack-service.rk3399
 else
 # AOSP examples. Consequence of each fallback, so the tradeoff is visible:
-#   light    - the blue power LED and HDMI backlight node are not driven
+#   light    - absent entirely, see above
 #   power    - no RK3399 big.LITTLE/devfreq boost hints, so UI latency is worse
 #   memtrack - Mali allocations are missing from dumpsys meminfo
+# No light HAL: the only AOSP variant is .cuttlefish, which drives a virtio
+# device. The Edge1's single power LED is not worth a HAL, and the framework
+# copes with its absence.
 PRODUCT_PACKAGES += \
-    android.hardware.light-service.example \
     android.hardware.power-service.example \
     android.hardware.memtrack-service.example
 endif
@@ -358,9 +418,15 @@ endif
 # TEE on the Edge1 and PRODUCT_HAVE_OPTEE is false, so there is no hardware
 # keystore. Consequence: hardware key attestation is unavailable and the build
 # cannot pass CTS/GTS attestation tests. See docs/HAL_MIGRATION.md.
+# keymint-service is AOSP's software KeyMint. There is no '.nonsecure' variant -
+# the probe shows only the plain service plus .rust/.trusty/.strongbox/.remote.
 PRODUCT_PACKAGES += \
-    android.hardware.security.keymint-service.nonsecure \
-    android.hardware.gatekeeper-service.nonsecure
+    android.hardware.security.keymint-service
+
+# No Gatekeeper HAL. AOSP 14 ships only .trusty and .remote variants, both of
+# which need a TEE this board does not have. Without it, keyguard falls back to
+# the framework's own credential checking: PIN and pattern still work, but
+# without hardware-enforced throttling.
 
 PRODUCT_PROPERTY_OVERRIDES += \
     ro.hardware.power=rk3399 \

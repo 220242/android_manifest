@@ -74,30 +74,38 @@ for d in sepolicy/vendor vintf; do
 done
 echo
 
-# --- 4. VINTF consistency -----------------------------------------------------
-# Every HAL in a per-shim fragment must also be in the device manifest, or
-# check_vintf fails at build time with a message that does not name the file.
-echo "[4] VINTF: shim fragments vs device manifest"
-manifest_hals=$(python3 - "$DEV/vintf/manifest.xml" <<'PY'
+# --- 4. VINTF: fragments must NOT duplicate the device manifest ----------------
+#
+# This check used to assert the opposite - that every HAL in a shim fragment also
+# appeared in vintf/manifest.xml - and that was backwards. Soong's
+# vintf_fragments: installs each service's fragment into
+# /vendor/etc/vintf/manifest/, and VINTF merges those into the device manifest at
+# build time, so a HAL declared in both places is declared twice.
+echo "[4] VINTF: shim fragments vs device manifest (duplicates are the error)"
+manifest_hals=$(python3 - "$DEV/vintf/manifest.xml" <<'PYX'
 import sys, xml.etree.ElementTree as ET
-for hal in ET.parse(sys.argv[1]).getroot().findall('hal'):
-    print(hal.findtext('name'))
-PY
+for hal in ET.parse(sys.argv[1]).getroot().findall("hal"):
+    print(hal.findtext("name"))
+PYX
 )
+frag_total=0
 while IFS= read -r frag; do
     while IFS= read -r name; do
+        frag_total=$((frag_total+1))
         if grep -qxF "$name" <<<"$manifest_hals"; then
-            ok "$name (${frag##*/})"
+            err "$name is declared in BOTH ${frag#$ROOT/} and vintf/manifest.xml"
         else
-            err "$name is in ${frag#$ROOT/} but not in vintf/manifest.xml"
+            ok "$name (from ${frag##*/}, not duplicated)"
         fi
-    done < <(python3 - "$frag" <<'PY'
+    done < <(python3 - "$frag" <<'PYX'
 import sys, xml.etree.ElementTree as ET
-for hal in ET.parse(sys.argv[1]).getroot().findall('hal'):
-    print(hal.findtext('name'))
-PY
+for hal in ET.parse(sys.argv[1]).getroot().findall("hal"):
+    print(hal.findtext("name"))
+PYX
 )
 done < <(find "$DEV/shims" -name '*.xml' 2>/dev/null | sort)
+(( frag_total == 0 )) && ok "no shim fragments found"
+echo "  device manifest declares $(grep -c '<hal ' "$DEV/vintf/manifest.xml") HAL(s) directly"
 echo
 
 # --- 5. Android 10 constructs Android 14 removed ------------------------------
