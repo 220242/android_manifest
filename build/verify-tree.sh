@@ -153,6 +153,14 @@ if [[ -f "$FRAG" ]]; then
                 CONFIG_FS_ENCRYPTION CONFIG_DM_VERITY CONFIG_USERFAULTFD; do
         grep -qE "^${must}=y" "$FRAG" && ok "$must=y" || err "$FRAG is missing ${must}=y"
     done
+    # "CONFIG_X=n" is not how Kconfig disables a symbol. merge_config.sh reports
+    # the line as redefining the value and then keeps the base setting, so the
+    # fragment silently has no effect. The correct form is
+    # "# CONFIG_X is not set". Three of these were shipped before this check.
+    while read -r bad; do
+        err "$FRAG uses '$bad'; Kconfig needs '# ${bad%=n} is not set'"
+    done < <(grep -oE '^CONFIG_[A-Z0-9_]+=n$' "$FRAG" || true)
+
     # Contradictions: a symbol both set and unset.
     while read -r sym; do
         if grep -qE "^CONFIG_${sym}=" "$FRAG" && grep -qE "^# CONFIG_${sym} is not set" "$FRAG"; then

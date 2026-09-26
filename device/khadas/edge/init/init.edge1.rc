@@ -59,7 +59,10 @@ on boot
 # /vendor/etc/firmware for Treble - vendor code may not read /system/etc.
 # ---------------------------------------------------------------------------
 on post-fs-data
-    insmod /vendor/lib/modules/bcmdhd.ko
+    # No insmod: kedge_defconfig builds bcmdhd into the kernel (CONFIG_BCMDHD=y,
+    # and it is a bool in this tree, not a tristate), so there is no .ko. The
+    # firmware path is still set, because the built-in driver reads the same
+    # module parameter.
     write /sys/module/bcmdhd/parameters/firmware_path /vendor/etc/firmware
 
 service brcm_patchram :/vendor/bin/brcm_patchram_plus \

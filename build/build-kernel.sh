@@ -79,6 +79,20 @@ else
     echo "==> toolchain: $("${CROSS}gcc" --version | head -1)"
 fi
 
+# HOSTCFLAGS=-fcommon is not optional on any modern distro compiler.
+#
+# GCC 10 changed the default from -fcommon to -fno-common, so tentative
+# definitions of the same symbol in two translation units no longer merge.
+# scripts/dtc has exactly that shape: yylloc is defined in both dtc-lexer.lex.c
+# and dtc-parser.tab.c, and the host link fails with
+#   multiple definition of `yylloc'
+# Upstream fixed it by adding extern, but not in 4.19. -fcommon restores the old
+# behaviour for host tools only; it does not affect the kernel itself.
+#
+# 4.19's Makefile appends $(HOSTCFLAGS) to KBUILD_HOSTCFLAGS, so setting it on
+# the command line adds to the flags rather than replacing them.
+MAKE_ARGS+=( "HOSTCFLAGS=-fcommon" )
+
 # GCC 11 and clang 17+ both raise warnings on 2019 kernel code that 4.19 never
 # saw. None are set -Werror by 4.19 itself, but subsystem makefiles that do add
 # -Werror would stop the build on code that is not ours to fix.
