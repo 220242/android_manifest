@@ -16,7 +16,7 @@ lists the measured blockers and exactly what remains before the image boots.
 | [`manifests/khadas_edge_tv14.xml`](manifests/khadas_edge_tv14.xml) | repo local-manifest overlay: upstream AOSP 14 + the ~15 Khadas/Rockchip projects that hold board support |
 | [`device/khadas/edge/`](device/khadas/edge) | the device tree — TV product, board config, VINTF, fstab, init, SELinux, audio/media/input config, kernel delta, HAL shims |
 | [`build/`](build) | preflight, sync, kernel build, platform build + `update.img`, and two verifiers |
-| [`docs/`](docs) | status, HAL migration matrix, kernel notes, how to run it |
+| [`docs/`](docs) | status, HAL migration matrix, kernel notes, how to run it (incl. [Windows/WSL2](docs/WINDOWS.md)) |
 | `default.xml` | the original Android 10 manifest, untouched for reference |
 
 ## Quick start
