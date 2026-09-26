@@ -8,6 +8,7 @@
 #
 #   usage: provision-wsl.sh <stage>
 #   stages: deps | clone | preflight | sync | aidl | kernel | build | all
+#           report  - consolidated diagnostics on stdout, for the Windows report
 #
 set -euo pipefail
 
@@ -146,6 +147,56 @@ stage_aidl() {
     echo "From Windows: \\\\wsl.localhost\\Edge1Build\\home\\builder\\android_khadas\\aidl-surface.txt"
 }
 
+stage_report() {
+    # Emits a consolidated diagnostic to stdout. Start-EdgeBuild.ps1 captures it
+    # into the Windows-side report, so this must stay quiet on stderr and never
+    # exit non-zero: a diagnostic that fails to run is worse than useless.
+    echo "##### LINUX ENVIRONMENT #####"
+    echo "uname:      $(uname -a 2>&1)"
+    echo "distro:     $(. /etc/os-release 2>/dev/null; echo "${PRETTY_NAME:-unknown}")"
+    echo "nproc:      $(nproc 2>&1)"
+    echo "user:       $(id 2>&1)"
+    echo
+    echo "--- memory (what build.sh derives -j from) ---"
+    free -h 2>&1 || true
+    echo
+    echo "--- disk ---"
+    df -h "$HOME" /tmp 2>&1 || true
+    echo
+    echo "--- toolchain ---"
+    for t in git repo python3 java make ninja ccache; do
+        printf '%-8s %s\n' "$t" "$(command -v $t 2>/dev/null || echo MISSING)"
+    done
+    echo "repo ver:   $(repo --version 2>&1 | head -2 | tr '\n' ' ')"
+    echo "ccache:     $(ccache -s 2>/dev/null | head -4 | tr '\n' ' ')"
+    echo
+    echo "--- tree ---"
+    echo "manifest:   $MANIFEST $([[ -d $MANIFEST/.git ]] && git -C "$MANIFEST" log --oneline -1 2>&1 || echo MISSING)"
+    echo "tree:       $TREE $([[ -d $TREE/.repo ]] && echo '(.repo present)' || echo '(not synced)')"
+    if [[ -d "$TREE/.repo" ]]; then
+        echo "aosp ref:   $(cat "$TREE/.repo/manifests.git/HEAD" 2>/dev/null || echo unknown)"
+        echo "projects:   $(ls "$TREE" 2>/dev/null | wc -l) top-level entries"
+        echo "local_manifests: $(ls "$TREE/.repo/local_manifests" 2>/dev/null || echo NONE)"
+    fi
+    echo
+    echo "##### LOGS #####"
+    # Full build logs run to gigabytes of ninja output, which is unpastable. Pull
+    # the error lines with context, then the tail, and say how much was skipped.
+    for f in "$LOGS"/*.log; do
+        [[ -f "$f" ]] || continue
+        local total; total=$(wc -l < "$f")
+        echo
+        echo "===== $(basename "$f")  (${total} lines) ====="
+        echo "--- matches for error patterns (max 200 lines) ---"
+        grep -nE 'error:|ERROR|FAILED:|fatal error|ninja: build stopped|No such file|Killed|out of memory|cannot find|undefined reference|Permission denied' \
+            "$f" 2>/dev/null | head -200 || echo "(none)"
+        echo "--- last 120 lines ---"
+        tail -120 "$f" 2>/dev/null
+    done
+    echo
+    echo "##### END LINUX REPORT #####"
+}
+
 case "$STAGE" in
     deps)      stage_deps ;;
     clone)     stage_clone ;;
@@ -154,6 +205,7 @@ case "$STAGE" in
     kernel)    stage_kernel ;;
     build)     stage_build ;;
     aidl)      stage_aidl ;;
+    report)    stage_report ;;
     all)       stage_deps; stage_clone; stage_preflight; stage_sync
                stage_kernel; stage_build ;;
     *)         echo "unknown stage: $STAGE" >&2; exit 2 ;;

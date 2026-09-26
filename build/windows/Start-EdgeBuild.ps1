@@ -53,8 +53,23 @@
 param(
     [string] $Root = 'D:\android_khadas',
 
-    [ValidateSet('All','Check','Wsl','Distro','Tune','Provision','Sync','Kernel','Build')]
+    [ValidateSet('All','Check','Wsl','Distro','Tune','Provision','Sync','Aidl','Kernel','Build','Report')]
     [string] $Stage = 'All',
+
+    # Swap size for WSL. 0 = automatic (2x RAM, floored at 32, capped at 128).
+    #
+    # Swap is OOM insurance, not a way to buy parallelism: build.sh derives -j
+    # from real RAM, and deliberately does not count swap. Oversubscribing -j so
+    # that ninja runs out of physical memory collapses throughput even on a fast
+    # NVMe, because the access pattern becomes random 4K page faults. A large
+    # swap file stops a single R8 or linker spike from killing a six-hour build;
+    # it does not make the build wider.
+    [ValidateRange(0,512)]
+    [int] $SwapGB = 0,
+
+    # GiB of RAM held back for Windows itself.
+    [ValidateRange(2,32)]
+    [int] $ReserveGB = 6,
 
     [switch] $Force
 )
@@ -76,6 +91,12 @@ $script:StatePath  = Join-Path $Root '.build-state.json'
 # Disk: ~120GiB checkout + ~150GiB output, plus the rootfs and logs.
 $script:RequiredGiB = 320
 
+$script:TranscriptOn = $false
+$script:RunStamp   = Get-Date -Format 'yyyyMMdd-HHmmss'
+$script:LogDir     = Join-Path $Root 'logs'
+$script:Transcript = Join-Path $script:LogDir "session-$($script:RunStamp).log"
+$script:ReportPath = Join-Path $Root "edge1-report-$($script:RunStamp).txt"
+
 #region helpers ---------------------------------------------------------------
 
 function Write-Stage { param([string] $Text)
@@ -94,11 +115,14 @@ function Get-State {
         try { return Get-Content -LiteralPath $script:StatePath -Raw | ConvertFrom-Json }
         catch { Write-Warn2 'state file is unreadable, starting fresh'; }
     }
-    return [pscustomobject]@{ completed = @() }
+    return [pscustomobject]@{ completed = @() }  # always an array, never $null
 }
 function Test-Done { param([string] $Name)
     if ($Force) { return $false }
-    return ((Get-State).completed -contains $Name)
+    # @(): a one-element JSON array deserialises to a bare string, and a missing
+    # property to $null. Both need coercing before -contains.
+    $done = @((Get-State).completed)
+    return ($done -contains $Name)
 }
 function Set-Done { param([string] $Name)
     $s = Get-State
@@ -141,12 +165,166 @@ function Invoke-InDistro {
     return (Invoke-Wsl -Arguments $wslArgs -AllowFailure:$AllowFailure)
 }
 
+# Captures wsl output as a string instead of sending it to the host. Needed by
+# the report, which has to put the text in a file rather than on screen.
+function Invoke-WslCapture {
+    param([Parameter(Mandatory)][string] $Command, [switch] $AsRoot)
+    $wslArgs = @('-d', $script:DistroName)
+    if ($AsRoot) { $wslArgs += @('-u','root') }
+    $wslArgs += @('--','bash','-lc', $Command)
+    $out = & wsl.exe @wslArgs 2>&1
+    return ($out | Out-String)
+}
+
+function Start-BuildLog {
+    New-Item -ItemType Directory -Path $script:LogDir -Force | Out-Null
+    try {
+        Start-Transcript -LiteralPath $script:Transcript -Force | Out-Null
+        $script:TranscriptOn = $true
+    } catch {
+        # A transcript already running, or a locked file. Not worth aborting over.
+        $script:TranscriptOn = $false
+        Write-Warn2 "could not start a transcript: $($_.Exception.Message)"
+    }
+}
+
+function Stop-BuildLog {
+    if ($script:TranscriptOn) {
+        try { Stop-Transcript | Out-Null } catch { }
+        $script:TranscriptOn = $false
+    }
+}
+
+function Get-WindowsEnvironmentText {
+    $sb = [System.Text.StringBuilder]::new()
+    function Add { param($t) [void]$sb.AppendLine($t) }
+
+    Add '##### WINDOWS ENVIRONMENT #####'
+    try {
+        $os = Get-CimInstance Win32_OperatingSystem
+        $cs = Get-CimInstance Win32_ComputerSystem
+        $cpu = Get-CimInstance Win32_Processor | Select-Object -First 1
+        $build = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion')
+        Add "OS:          $($os.Caption) $($os.Version) build $($build.CurrentBuildNumber).$($build.UBR)"
+        Add "Edition:     $($build.EditionID)  DisplayVersion: $($build.DisplayVersion)"
+        Add "CPU:         $($cpu.Name)"
+        Add "Cores:       $($cpu.NumberOfCores) physical / $($cpu.NumberOfLogicalProcessors) logical"
+        Add "RAM:         $([math]::Round($cs.TotalPhysicalMemory/1GB,1)) GiB"
+        Add "Hypervisor:  $($cs.HypervisorPresent)"
+        Add "PowerShell:  $($PSVersionTable.PSVersion) ($($PSVersionTable.PSEdition))"
+    } catch { Add "environment query failed: $($_.Exception.Message)" }
+
+    Add ''
+    Add '--- volumes ---'
+    try {
+        Get-Volume | Where-Object DriveLetter |
+            Select-Object DriveLetter, FileSystemType,
+                @{n='SizeGB';e={[math]::Round($_.Size/1GB,1)}},
+                @{n='FreeGB';e={[math]::Round($_.SizeRemaining/1GB,1)}} |
+            Format-Table -AutoSize | Out-String -Width 200 | ForEach-Object { Add $_ }
+    } catch { Add "volume query failed: $($_.Exception.Message)" }
+
+    Add '--- WSL ---'
+    try {
+        Add (( & wsl.exe --version 2>&1 ) | Out-String)
+        Add (( & wsl.exe --list --verbose 2>&1 ) | Out-String)
+    } catch { Add "wsl query failed: $($_.Exception.Message)" }
+
+    $wslconfig = Join-Path $env:USERPROFILE '.wslconfig'
+    Add "--- $wslconfig ---"
+    if (Test-Path -LiteralPath $wslconfig) {
+        Get-Content -LiteralPath $wslconfig | ForEach-Object { Add $_ }
+    } else { Add '(absent)' }
+
+    Add ''
+    Add '--- script invocation ---'
+    Add "Root=$Root  Stage=$Stage  SwapGB=$SwapGB  ReserveGB=$ReserveGB  Force=$Force"
+    Add "state: $($script:StatePath)"
+    if (Test-Path -LiteralPath $script:StatePath) {
+        Add ((Get-Content -LiteralPath $script:StatePath -Raw))
+    } else { Add '(no state file yet)' }
+
+    return $sb.ToString()
+}
+
+# Builds one pasteable text file: Windows environment, the Linux-side report, and
+# the PowerShell transcript. Called automatically on failure so the user does not
+# have to remember a command at the moment things go wrong.
+function Collect-Report {
+    param([System.Management.Automation.ErrorRecord] $ErrorRecord)
+
+    Write-Stage 'Collecting a diagnostic report'
+    New-Item -ItemType Directory -Path $script:LogDir -Force | Out-Null
+    $sb = [System.Text.StringBuilder]::new()
+
+    [void]$sb.AppendLine("Khadas Edge1 / Android TV 14 - diagnostic report")
+    [void]$sb.AppendLine("generated: $(Get-Date -Format 'u')")
+    [void]$sb.AppendLine('')
+
+    if ($ErrorRecord) {
+        [void]$sb.AppendLine('##### FAILURE #####')
+        [void]$sb.AppendLine("message:   $($ErrorRecord.Exception.Message)")
+        [void]$sb.AppendLine("type:      $($ErrorRecord.Exception.GetType().FullName)")
+        [void]$sb.AppendLine("category:  $($ErrorRecord.CategoryInfo.Category)")
+        [void]$sb.AppendLine('position:')
+        [void]$sb.AppendLine($ErrorRecord.InvocationInfo.PositionMessage)
+        [void]$sb.AppendLine('script stack trace:')
+        [void]$sb.AppendLine($ErrorRecord.ScriptStackTrace)
+        [void]$sb.AppendLine('')
+    }
+
+    [void]$sb.AppendLine((Get-WindowsEnvironmentText))
+    [void]$sb.AppendLine('')
+
+    # Linux side, only if the distro is actually registered.
+    $distros = @()
+    try { $distros = (& wsl.exe --list --quiet) -split "`r?`n" | ForEach-Object { $_.Trim() } } catch { }
+    if ($distros -contains $script:DistroName) {
+        Write-Info 'querying the distro'
+        try {
+            $linux = Invoke-WslCapture -Command '~/android_khadas/android_manifest/build/windows/provision-wsl.sh report 2>&1 || echo "(report stage failed or the repo is not cloned yet)"'
+            [void]$sb.AppendLine($linux)
+        } catch {
+            [void]$sb.AppendLine("##### LINUX REPORT FAILED #####")
+            [void]$sb.AppendLine($_.Exception.Message)
+        }
+    } else {
+        [void]$sb.AppendLine("##### LINUX #####")
+        [void]$sb.AppendLine("distro '$($script:DistroName)' is not registered yet; nothing to report.")
+    }
+
+    # The transcript has to be closed before it can be read.
+    Stop-BuildLog
+    if (Test-Path -LiteralPath $script:Transcript) {
+        [void]$sb.AppendLine('')
+        [void]$sb.AppendLine('##### POWERSHELL TRANSCRIPT #####')
+        # Tail only: a full sync transcript is large and the interesting part is
+        # always at the end.
+        $lines = Get-Content -LiteralPath $script:Transcript
+        if ($lines.Count -gt 600) {
+            [void]$sb.AppendLine("(showing the last 600 of $($lines.Count) lines; full file: $($script:Transcript))")
+            $lines = $lines[-600..-1]
+        }
+        $lines | ForEach-Object { [void]$sb.AppendLine($_) }
+    }
+
+    Set-Content -LiteralPath $script:ReportPath -Value $sb.ToString() -Encoding UTF8
+    $sizeKB = [math]::Round((Get-Item -LiteralPath $script:ReportPath).Length / 1KB, 1)
+
+    Write-Host ''
+    Write-Good "report written: $($script:ReportPath)  (${sizeKB} KB)"
+    Write-Host '  Send this one file. It contains the Windows environment, the' -ForegroundColor DarkGray
+    Write-Host '  Linux environment, error lines from every build log, and the' -ForegroundColor DarkGray
+    Write-Host '  transcript tail.' -ForegroundColor DarkGray
+    return $script:ReportPath
+}
+
 #endregion
 
 #region stages ----------------------------------------------------------------
 
 function Stage-Check {
-    Write-Stage 'Stage 1/8  Host checks'
+    Write-Stage 'Stage 1/9  Host checks'
 
     $os = Get-CimInstance Win32_OperatingSystem
     $build = [int] (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion').CurrentBuildNumber
@@ -201,7 +379,7 @@ function Stage-Check {
 }
 
 function Stage-Wsl {
-    Write-Stage 'Stage 2/8  WSL2 platform'
+    Write-Stage 'Stage 2/9  WSL2 platform'
 
     $installed = $false
     try {
@@ -229,7 +407,7 @@ function Stage-Wsl {
 }
 
 function Stage-Distro {
-    Write-Stage 'Stage 3/8  Ubuntu 22.04 on the target drive'
+    Write-Stage 'Stage 3/9  Ubuntu 22.04 on the target drive'
 
     $existing = (& wsl.exe --list --quiet) -split "`r?`n" | ForEach-Object { $_.Trim() }
     if ($existing -contains $script:DistroName) {
@@ -294,18 +472,39 @@ function Stage-Distro {
 }
 
 function Stage-Tune {
-    Write-Stage 'Stage 4/8  WSL resource limits'
+    Write-Stage 'Stage 4/9  WSL resource limits'
 
     $cs = Get-CimInstance Win32_ComputerSystem
     $ramGiB = [math]::Floor($cs.TotalPhysicalMemory / 1GB)
 
-    # Leave 4 GiB for Windows; never hand WSL less than 8 GiB or the build cannot
-    # link. build.sh derives its -j from the RAM it actually sees, so this value
-    # directly controls build parallelism.
-    $wslRam = [math]::Max(8, $ramGiB - 4)
-    # Swap is what keeps R8 and soong alive on a 16-32 GiB host. It is a file on
-    # the target drive, not on C:.
-    $swapGiB = 32
+    # build.sh derives its -j from the RAM it actually sees, so this value is what
+    # controls build parallelism. Never hand WSL less than 8 GiB or the build
+    # cannot link.
+    $wslRam = [math]::Max(8, $ramGiB - $ReserveGB)
+
+    # Swap: 2x RAM by default, floored at 32 and capped at 128.
+    #
+    # This is insurance against a single R8 or linker spike killing a multi-hour
+    # build, not extra capacity. -j stays derived from physical RAM on purpose:
+    # if ninja's working set spills to swap the build slows down by an order of
+    # magnitude even on NVMe, because the pattern becomes random 4K page faults.
+    # More swap buys survival, not speed.
+    if ($SwapGB -gt 0) {
+        $swapGiB = $SwapGB
+    } else {
+        $swapGiB = [math]::Min(128, [math]::Max(32, $ramGiB * 2))
+    }
+
+    # The swap file is sparse but can reach its full size, so make sure it fits
+    # alongside the ~270 GiB the tree needs.
+    $drive = (Split-Path -Qualifier $Root).TrimEnd(':')
+    $freeGiB = [math]::Floor((Get-Volume -DriveLetter $drive).SizeRemaining / 1GB)
+    if (($swapGiB + $script:RequiredGiB) -gt $freeGiB) {
+        Write-Warn2 "swap ${swapGiB} GiB + tree $($script:RequiredGiB) GiB exceeds ${freeGiB} GiB free."
+        $swapGiB = [math]::Max(16, $freeGiB - $script:RequiredGiB)
+        Write-Warn2 "reducing swap to ${swapGiB} GiB"
+    }
+    Write-Info "RAM ${ramGiB} GiB -> WSL ${wslRam} GiB (${ReserveGB} GiB held for Windows), swap ${swapGiB} GiB"
     $swapPath = (Join-Path $Root 'wsl-swap.vhdx') -replace '\\','\\'
 
     $wslconfig = Join-Path $env:USERPROFILE '.wslconfig'
@@ -320,7 +519,8 @@ function Stage-Tune {
         }
         $content = @"
 # Written by Start-EdgeBuild.ps1 for the Khadas Edge1 Android 14 build.
-# Host has ${ramGiB} GiB RAM; ${wslRam} GiB is given to WSL and 4 GiB kept for Windows.
+# Host has ${ramGiB} GiB RAM; ${wslRam} GiB goes to WSL, ${ReserveGB} GiB stays with Windows.
+# Swap is ${swapGiB} GiB on the target drive - OOM insurance, not added capacity.
 [wsl2]
 memory=${wslRam}GB
 processors=$($env:NUMBER_OF_PROCESSORS)
@@ -356,7 +556,7 @@ sparseVhd=true
 }
 
 function Stage-Provision {
-    Write-Stage 'Stage 5/8  Dependencies and device tree'
+    Write-Stage 'Stage 5/9  Dependencies and device tree'
 
     # Bootstrap: git first, then the repo, then hand off to provision-wsl.sh
     # which lives in that repo and does everything else.
@@ -377,7 +577,7 @@ function Stage-Provision {
 }
 
 function Stage-Sync {
-    Write-Stage 'Stage 6/8  Sync AOSP 14 (100+ GiB, hours)'
+    Write-Stage 'Stage 6/9  Sync AOSP 14 (100+ GiB, hours)'
     Write-Warn2 'Do not let the machine sleep during this. To be safe:'
     Write-Warn2 '  powercfg /change standby-timeout-ac 0'
     Invoke-InDistro -Command '~/android_khadas/android_manifest/build/windows/provision-wsl.sh sync'
@@ -386,14 +586,14 @@ function Stage-Sync {
 }
 
 function Stage-Kernel {
-    Write-Stage 'Stage 7/8  Kernel 4.19.111'
+    Write-Stage 'Stage 8/9  Kernel 4.19.111'
     Invoke-InDistro -Command '~/android_khadas/android_manifest/build/windows/provision-wsl.sh kernel'
     Write-Good 'kernel built'
     Set-Done 'Kernel'
 }
 
 function Stage-Build {
-    Write-Stage 'Stage 8/8  Platform build and update.img'
+    Write-Stage 'Stage 9/9  Platform build and update.img'
     Write-Warn2 'This tree is NOT finished: the composer3 and audio.core AIDL'
     Write-Warn2 'HALs are incomplete, so the build uses AOSP fallbacks and the'
     Write-Warn2 'resulting image will have no display or audio output. See'
@@ -409,6 +609,15 @@ function Stage-Build {
 
 #region main ------------------------------------------------------------------
 
+function Stage-Aidl {
+    Write-Stage 'Stage 7/9  AIDL interface surface'
+    Write-Info 'dumping the real method list for every declared AIDL HAL'
+    Invoke-InDistro -Command '~/android_khadas/android_manifest/build/windows/provision-wsl.sh aidl'
+    Write-Good 'written to the distro home as aidl-surface.txt'
+    Write-Info "reachable at \\wsl.localhost\$($script:DistroName)\home\builder\android_khadas\aidl-surface.txt"
+    Set-Done 'Aidl'
+}
+
 $order = @(
     @{ Name='Check';     Fn={ Stage-Check } }
     @{ Name='Wsl';       Fn={ Stage-Wsl } }
@@ -416,13 +625,26 @@ $order = @(
     @{ Name='Tune';      Fn={ Stage-Tune } }
     @{ Name='Provision'; Fn={ Stage-Provision } }
     @{ Name='Sync';      Fn={ Stage-Sync } }
+    @{ Name='Aidl';      Fn={ Stage-Aidl } }
     @{ Name='Kernel';    Fn={ Stage-Kernel } }
     @{ Name='Build';     Fn={ Stage-Build } }
 )
 
+New-Item -ItemType Directory -Path $Root -Force | Out-Null
+Start-BuildLog
+
 Write-Host ''
 Write-Host 'Khadas Edge1 - Android TV 14 build driver (Windows/WSL2)' -ForegroundColor White
 Write-Host "root: $Root   stage: $Stage" -ForegroundColor DarkGray
+Write-Host "log:  $($script:Transcript)" -ForegroundColor DarkGray
+
+# -Stage Report is diagnostics only: collect and exit without touching anything.
+if ($Stage -eq 'Report') {
+    $path = Collect-Report
+    Write-Host ''
+    Write-Host "Send this file: $path" -ForegroundColor Cyan
+    exit 0
+}
 
 $started = Get-Date
 try {
@@ -443,9 +665,23 @@ catch {
     Write-Host ''
     Write-Bad $_.Exception.Message
     Write-Host ''
+    # Collect unconditionally: the moment something breaks is exactly when the
+    # user should not have to remember a second command.
+    $path = $null
+    try { $path = Collect-Report -ErrorRecord $_ } catch {
+        Write-Warn2 "could not write the report: $($_.Exception.Message)"
+    }
+    Write-Host ''
     Write-Host '  The state file records completed stages, so re-running this' -ForegroundColor DarkGray
     Write-Host '  script resumes rather than starting over.' -ForegroundColor DarkGray
+    if ($path) {
+        Write-Host ''
+        Write-Host "  Send this file to get it fixed: $path" -ForegroundColor Cyan
+    }
     exit 1
+}
+finally {
+    Stop-BuildLog
 }
 
 #endregion

@@ -63,17 +63,60 @@ Reach it from Explorer at `\\wsl.localhost\Edge1Build\home\builder\android_khada
 | `Tune` | Writes `%USERPROFILE%\.wslconfig` sized to your RAM, plus a 32 GB swap file on the target drive |
 | `Provision` | Installs AOSP dependencies, clones the device tree, runs `preflight.sh` and `verify-tree.sh` |
 | `Sync` | Resolves the newest `android-14.0.0_r*` tag and syncs (100+ GiB) |
+| `Aidl` | Dumps the real AIDL method surface of all 22 declared HALs to `aidl-surface.txt` |
 | `Kernel` | Builds 4.19.111 with the Android 14 config delta |
 | `Build` | `lunch edge1_tv-userdebug`, `m`, then Rockchip `update.img` packaging |
 
 Run one on its own with `-Stage Build`. Re-run a completed stage with `-Force`.
 
+## When something fails: one file to send
+
+Every run is transcribed to `D:\android_khadas\logs\session-<timestamp>.log`,
+and **on any failure the script writes a consolidated report automatically** and
+prints its path:
+
+```
+D:\android_khadas\edge1-report-<timestamp>.txt
+```
+
+That single file contains the Windows environment (OS build, CPU, RAM, volumes,
+WSL version, `.wslconfig`), the failure with its script stack trace, the Linux
+environment from inside the distro (toolchain versions, disk, tree state), error
+lines with context pulled out of every build log, and the tail of the
+transcript. Send that one file.
+
+Build logs run to gigabytes of ninja output, so the report greps them for error
+patterns and takes the tail rather than including them whole — it stays
+pasteable. The full logs remain at
+`\\wsl.localhost\Edge1Build\home\builder\android_khadas\logs\`.
+
+Generate one on demand without running anything:
+
+```powershell
+.\Start-EdgeBuild.ps1 -Stage Report
+```
+
 ## Memory
 
-`Tune` gives WSL `(total RAM - 4) GB` and a 32 GB swap file, because
-`build/build.sh` derives its `-j` from the RAM it actually sees. WSL2's default is
-half your RAM, which on a 16 GiB machine leaves 8 GiB and gets R8 OOM-killed
-several hours into the build.
+`Tune` gives WSL `(total RAM - ReserveGB)` and a swap file of `2x RAM`, floored
+at 32 GB and capped at 128 GB. Override either:
+
+```powershell
+.\Start-EdgeBuild.ps1 -Stage Tune -SwapGB 96 -ReserveGB 8 -Force
+```
+
+WSL2's default is half your RAM, which on a 16 GiB machine leaves 8 GiB and gets
+R8 OOM-killed several hours into a build — hence setting it explicitly.
+
+**Swap is insurance, not capacity.** `build/build.sh` derives `-j` from physical
+RAM and deliberately ignores swap. A large swap file stops one R8 or linker spike
+from killing a six-hour build. It does not let you run a wider build: if ninja's
+working set spills to swap, throughput drops by an order of magnitude even on a
+fast NVMe, because the access pattern becomes random 4 KiB page faults. Raising
+`-j` to "use" the swap makes the build slower, not faster.
+
+On a 30 GiB host the defaults give WSL 24 GiB, 60 GiB of swap, and `-j12` from
+`build.sh` — comfortably above Android 14's 16 GiB minimum.
 
 `.wslconfig` changes need `wsl --shutdown` to take effect; the script does that.
 
