@@ -7,7 +7,7 @@
 # makes quoting unreadable and is a common source of silent breakage.
 #
 #   usage: provision-wsl.sh <stage>
-#   stages: deps | clone | preflight | sync | kernel | build | all
+#   stages: deps | clone | preflight | sync | aidl | kernel | build | all
 #
 set -euo pipefail
 
@@ -135,6 +135,17 @@ stage_build() {
     fi
 }
 
+stage_aidl() {
+    log "dumping the real AIDL method surface for every declared HAL"
+    # This is what unblocks the unwritten composer3 / tv.input / hdmi.cec shims:
+    # their signatures could not be verified when the tree was authored, because
+    # hardware/interfaces is not in any reachable mirror. Now that a real tree is
+    # synced, read them from it.
+    "$MANIFEST/build/verify-aidl-surface.sh" "$TREE" > "$WORK/aidl-surface.txt" 2>&1 || true
+    log "written to $WORK/aidl-surface.txt ($(wc -l < "$WORK/aidl-surface.txt") lines)"
+    echo "From Windows: \\\\wsl.localhost\\Edge1Build\\home\\builder\\android_khadas\\aidl-surface.txt"
+}
+
 case "$STAGE" in
     deps)      stage_deps ;;
     clone)     stage_clone ;;
@@ -142,6 +153,7 @@ case "$STAGE" in
     sync)      stage_sync ;;
     kernel)    stage_kernel ;;
     build)     stage_build ;;
+    aidl)      stage_aidl ;;
     all)       stage_deps; stage_clone; stage_preflight; stage_sync
                stage_kernel; stage_build ;;
     *)         echo "unknown stage: $STAGE" >&2; exit 2 ;;

@@ -12,7 +12,7 @@
 #
 set -euo pipefail
 
-readonly TREE="${1:-$HOME/aosp-14-edge1}"
+readonly TREE="${1:-$HOME/android_khadas/aosp-14-edge1}"
 readonly MANIFEST="$TREE/device/khadas/edge/vintf/manifest.xml"
 readonly IFACES="$TREE/hardware/interfaces"
 
