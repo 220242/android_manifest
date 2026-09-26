@@ -48,7 +48,8 @@ stage_deps() {
         libc6-dev-i386 x11proto-dev libx11-dev lib32z1-dev libgl1-mesa-dev \
         libxml2-utils xsltproc unzip fontconfig python3 python3-pip \
         python-is-python3 rsync ccache bc lz4 libssl-dev \
-        device-tree-compiler openjdk-17-jdk-headless
+        device-tree-compiler openjdk-17-jdk-headless \
+        gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu libelf-dev
     # repo init is run with --git-lfs, and several AOSP projects (notably the
     # Pixel *-kernel prebuilts) store their binaries in LFS. Without the git-lfs
     # binary those projects fetch fine and then fail at checkout, deterministically
@@ -182,7 +183,7 @@ stage_report() {
     # git-lfs is listed because its absence, combined with repo init --git-lfs,
     # is what broke checkout of the LFS-backed projects - and nothing in the
     # failure said so.
-    for t in git git-lfs repo python3 java make ninja ccache; do
+    for t in git git-lfs repo python3 java make ninja ccache aarch64-linux-gnu-gcc; do
         printf '%-8s %s\n' "$t" "$(command -v $t 2>/dev/null || echo MISSING)"
     done
     echo "git-lfs:    $(git lfs version 2>&1 | head -1)"

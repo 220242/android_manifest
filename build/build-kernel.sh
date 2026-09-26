@@ -18,40 +18,87 @@ readonly FRAGMENT="$DEVICE_DIR/kernel/edge1_android14.config"
 
 cd "$KERNEL"
 
-export ARCH=arm64
-export CROSS_COMPILE=aarch64-linux-android-
-# AOSP's own clang, so the kernel and platform agree on toolchain. The Android 10
-# BSP built this kernel with GCC 6.3; 4.19 builds clean with AOSP clang and the
-# platform no longer ships a GCC prebuilt.
+# ---------------------------------------------------------------------------
+# Toolchain.
 #
-# The version directory is discovered rather than hardcoded: it changes with
-# every AOSP release, and a stale pinned path fails with "clang: not found"
-# after the build has already spent minutes on defconfig.
-CLANG_DIR=$(find "$TREE/prebuilts/clang/host/linux-x86" -maxdepth 1 -type d \
-                 -name 'clang-r*' 2>/dev/null | sort -V | tail -1)
-if [[ -z "$CLANG_DIR" ]]; then
-    echo "no clang prebuilt under $TREE/prebuilts/clang/host/linux-x86" >&2
-    echo "is the tree synced? ('repo sync prebuilts/clang/host/linux-x86')" >&2
+# Two bugs were fixed here.
+#
+# 1. CROSS_COMPILE pointed at aarch64-linux-android-, which does not exist:
+#    AOSP 14 ships no aarch64 GCC prebuilt (only host x86_64 and mingw). With no
+#    compiler, scripts/gcc-version.sh printed "Is your PATH set correctly?" where
+#    a version number was expected, GCC_VERSION's $(shell,...) default got that
+#    text, and Kconfig died with "init/Kconfig:17: syntax error".
+#
+# 2. The toolchain was exported as environment variables. The kernel Makefile
+#    assigns CC = $(CROSS_COMPILE)gcc with '=', and an environment variable does
+#    not override a variable assigned inside a makefile - only a command-line
+#    assignment does. So CC=clang was silently ignored.
+#
+# Default is the Ubuntu aarch64 cross GCC, a complete and self-consistent
+# toolchain (compiler plus binutils) installed by provision-wsl.sh. Rockchip's
+# 4.19 tree is GCC-oriented, and mixing a very new clang with a 2019 kernel
+# invites unrelated failures.
+#
+# Set KERNEL_USE_CLANG=1 to build with AOSP's clang instead, keeping GNU binutils
+# for as/ld via CROSS_COMPILE.
+# ---------------------------------------------------------------------------
+readonly CROSS=aarch64-linux-gnu-
+
+if ! command -v "${CROSS}gcc" >/dev/null 2>&1; then
+    echo "${CROSS}gcc not found." >&2
+    echo "Install it: sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu" >&2
+    echo "Or re-run the Provision stage, which now installs it." >&2
     exit 1
 fi
-echo "==> toolchain: $(basename "$CLANG_DIR")"
-export PATH="$CLANG_DIR/bin:$PATH"
-export CC=clang
-export CLANG_TRIPLE=aarch64-linux-gnu-
+
+MAKE_ARGS=(
+    O=out
+    ARCH=arm64
+    "CROSS_COMPILE=$CROSS"
+)
+
+if [[ "${KERNEL_USE_CLANG:-0}" == "1" ]]; then
+    # The version directory is discovered rather than hardcoded: it changes with
+    # every AOSP release, and a stale pinned path fails only after defconfig has
+    # already run.
+    CLANG_DIR=$(find "$TREE/prebuilts/clang/host/linux-x86" -maxdepth 1 -type d \
+                     -name 'clang-r*' 2>/dev/null | sort -V | tail -1)
+    if [[ -z "$CLANG_DIR" ]]; then
+        echo "no clang prebuilt under $TREE/prebuilts/clang/host/linux-x86" >&2
+        exit 1
+    fi
+    export PATH="$CLANG_DIR/bin:$PATH"
+    echo "==> toolchain: $(basename "$CLANG_DIR") (clang) + $CROSS binutils"
+    MAKE_ARGS+=(
+        CC=clang
+        HOSTCC=clang
+        HOSTCXX=clang++
+        "CLANG_TRIPLE=$CROSS"
+    )
+else
+    echo "==> toolchain: $("${CROSS}gcc" --version | head -1)"
+fi
+
+# GCC 11 and clang 17+ both raise warnings on 2019 kernel code that 4.19 never
+# saw. None are set -Werror by 4.19 itself, but subsystem makefiles that do add
+# -Werror would stop the build on code that is not ours to fix.
+MAKE_ARGS+=(
+    "KCFLAGS=-Wno-error -Wno-attribute-alias -Wno-stringop-truncation -Wno-stringop-overflow -Wno-array-bounds -Wno-maybe-uninitialized -Wno-misleading-indentation -Wno-zero-length-bounds -Wno-dangling-pointer"
+)
 
 readonly JOBS="$(nproc)"
 
 echo "==> base defconfig: $DEFCONFIG"
-make O=out "$DEFCONFIG"
+make "${MAKE_ARGS[@]}" "$DEFCONFIG"
 
 # merge_config.sh applies the Android 14 delta on top and, importantly, warns on
 # any symbol it could not set - which is how a missing backport (for example
 # CONFIG_ANDROID_BINDERFS on a kernel too old for it) is caught here rather than
 # as a boot hang.
 echo "==> merging Android 14 config delta"
-ARCH=arm64 ./scripts/kconfig/merge_config.sh -m -O out \
+ARCH=arm64 CROSS_COMPILE=$CROSS ./scripts/kconfig/merge_config.sh -m -O out \
     out/.config "$FRAGMENT"
-make O=out olddefconfig
+make "${MAKE_ARGS[@]}" olddefconfig
 
 echo "==> verifying the delta actually took"
 missing=0
@@ -71,8 +118,8 @@ if (( missing )); then
 fi
 
 echo "==> building Image + dtbs ($JOBS jobs)"
-make O=out -j"$JOBS" Image "rockchip/${DTS}.dtb"
-make O=out -j"$JOBS" modules
+make "${MAKE_ARGS[@]}" -j"$JOBS" Image "rockchip/${DTS}.dtb"
+make "${MAKE_ARGS[@]}" -j"$JOBS" modules
 
 # resource.img packs the DTB plus the boot logo; the Rockchip bootloader expects
 # it rather than a bare dtbo.
