@@ -336,5 +336,15 @@ case "$STAGE" in
     report)    stage_report ;;
     all)       stage_deps; stage_clone; stage_preflight; stage_sync
                stage_kernel; stage_build ;;
-    *)         echo "unknown stage: $STAGE" >&2; exit 2 ;;
+    *)
+        # A stage this copy does not know about almost always means the in-distro
+        # clone is behind the one the instructions were written for, so say which
+        # commit this is rather than only refusing.
+        echo "unknown stage: $STAGE" >&2
+        echo "this copy is at: $(git -C "$(dirname "${BASH_SOURCE[0]}")/../.." log --oneline -1 2>&1)" >&2
+        echo "if the stage should exist, update it:" >&2
+        echo "  git -C ~/android_khadas/android_manifest fetch origin $BRANCH" >&2
+        echo "  git -C ~/android_khadas/android_manifest reset --hard origin/$BRANCH" >&2
+        echo "or just run Start-EdgeBuild.ps1, which updates it automatically." >&2
+        exit 2 ;;
 esac

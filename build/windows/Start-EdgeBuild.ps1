@@ -53,7 +53,7 @@
 param(
     [string] $Root = 'D:\android_khadas',
 
-    [ValidateSet('All','Check','Wsl','Distro','Tune','Provision','Sync','Aidl','Kernel','Build','Report')]
+    [ValidateSet('All','Check','Wsl','Distro','Tune','Provision','Sync','Aidl','Probe','Kernel','Build','Report')]
     [string] $Stage = 'All',
 
     # Swap size for WSL. 0 = automatic (2x RAM, floored at 32, capped at 128).
@@ -470,7 +470,7 @@ function Collect-Report {
 #region stages ----------------------------------------------------------------
 
 function Stage-Check {
-    Write-Stage 'Stage 1/9  Host checks'
+    Write-Stage 'Stage 1/10  Host checks'
 
     $os = Get-CimInstance Win32_OperatingSystem
     $build = [int] (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion').CurrentBuildNumber
@@ -525,7 +525,7 @@ function Stage-Check {
 }
 
 function Stage-Wsl {
-    Write-Stage 'Stage 2/9  WSL2 platform'
+    Write-Stage 'Stage 2/10  WSL2 platform'
 
     $installed = $false
     try {
@@ -553,7 +553,7 @@ function Stage-Wsl {
 }
 
 function Stage-Distro {
-    Write-Stage 'Stage 3/9  Ubuntu 22.04 on the target drive'
+    Write-Stage 'Stage 3/10  Ubuntu 22.04 on the target drive'
 
     $existing = (& wsl.exe --list --quiet) -split "`r?`n" | ForEach-Object { $_.Trim() }
     if ($existing -contains $script:DistroName) {
@@ -635,7 +635,7 @@ function Stage-Distro {
 }
 
 function Stage-Tune {
-    Write-Stage 'Stage 4/9  WSL resource limits'
+    Write-Stage 'Stage 4/10  WSL resource limits'
 
     $cs = Get-CimInstance Win32_ComputerSystem
     $ramGiB = [math]::Floor($cs.TotalPhysicalMemory / 1GB)
@@ -719,7 +719,7 @@ sparseVhd=true
 }
 
 function Stage-Provision {
-    Write-Stage 'Stage 5/9  Dependencies and device tree'
+    Write-Stage 'Stage 5/10  Dependencies and device tree'
 
     # Bootstrap: git first, then the repo, then hand off to provision-wsl.sh
     # which lives in that repo and does everything else.
@@ -737,7 +737,7 @@ function Stage-Provision {
 }
 
 function Stage-Sync {
-    Write-Stage 'Stage 6/9  Sync AOSP 14 (100+ GiB, hours)'
+    Write-Stage 'Stage 6/10  Sync AOSP 14 (100+ GiB, hours)'
     Write-Warn2 'Do not let the machine sleep during this. To be safe:'
     Write-Warn2 '  powercfg /change standby-timeout-ac 0'
     Invoke-InDistro -Command '~/android_khadas/android_manifest/build/windows/provision-wsl.sh sync'
@@ -746,14 +746,14 @@ function Stage-Sync {
 }
 
 function Stage-Kernel {
-    Write-Stage 'Stage 8/9  Kernel 4.19.111'
+    Write-Stage 'Stage 9/10  Kernel 4.19.111'
     Invoke-InDistro -Command '~/android_khadas/android_manifest/build/windows/provision-wsl.sh kernel'
     Write-Good 'kernel built'
     Set-Done 'Kernel'
 }
 
 function Stage-Build {
-    Write-Stage 'Stage 9/9  Platform build and update.img'
+    Write-Stage 'Stage 10/10  Platform build and update.img'
     Write-Warn2 'This tree is NOT finished: the composer3 and audio.core AIDL'
     Write-Warn2 'HALs are incomplete, so the build uses AOSP fallbacks and the'
     Write-Warn2 'resulting image will have no display or audio output. See'
@@ -778,12 +778,21 @@ function Stage-Build {
 #region main ------------------------------------------------------------------
 
 function Stage-Aidl {
-    Write-Stage 'Stage 7/9  AIDL interface surface'
+    Write-Stage 'Stage 7/10  AIDL interface surface'
     Write-Info 'dumping the real method list for every declared AIDL HAL'
     Invoke-InDistro -Command '~/android_khadas/android_manifest/build/windows/provision-wsl.sh aidl'
     Write-Good 'written to the distro home as aidl-surface.txt'
     Write-Info "reachable at \\wsl.localhost\$($script:DistroName)\home\builder\android_khadas\aidl-surface.txt"
     Set-Done 'Aidl'
+}
+
+function Stage-Probe {
+    Write-Stage 'Stage 8/10  Module probe'
+    Write-Info 'checking every module device.mk requests against the synced tree'
+    Invoke-InDistro -Command '~/android_khadas/android_manifest/build/windows/provision-wsl.sh probe'
+    Write-Good 'written to the distro home as module-probe.txt'
+    Write-Info "reachable at \\wsl.localhost\$($script:DistroName)\home\builder\android_khadas\module-probe.txt"
+    Set-Done 'Probe'
 }
 
 $order = @(
@@ -794,6 +803,7 @@ $order = @(
     @{ Name='Provision'; Fn={ Stage-Provision } }
     @{ Name='Sync';      Fn={ Stage-Sync } }
     @{ Name='Aidl';      Fn={ Stage-Aidl } }
+    @{ Name='Probe';     Fn={ Stage-Probe } }
     @{ Name='Kernel';    Fn={ Stage-Kernel } }
     @{ Name='Build';     Fn={ Stage-Build } }
 )
