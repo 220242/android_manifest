@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Khadas Edge1 - audio effects. Downmix and dynamics processing only; the
+     legacy 3A/voice-processing effects were for the tablet's mic array, which
+     this SKU does not have (BOARD_USE_AUDIO_3A was already false). -->
+<audio_effects_conf version="2.0" xmlns="http://schemas.android.com/audio/audio_effects_conf/v2_0">
+    <libraries>
+        <library name="downmix" path="libdownmix.so"/>
+        <library name="dynamics_processing" path="libdynproc.so"/>
+    </libraries>
+    <effects>
+        <effect name="downmix" library="downmix" uuid="93f04452-e4fe-41cc-91f9-e475b6d1d69f"/>
+        <effect name="dynamics_processing" library="dynamics_processing"
+                uuid="e0e6539b-1781-7261-676f-6d7573696340"/>
+    </effects>
+</audio_effects_conf>

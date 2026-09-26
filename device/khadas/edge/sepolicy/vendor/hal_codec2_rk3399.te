@@ -1,0 +1,13 @@
+# Rockchip Codec2 store (MPP-backed H.264/H.265/VP9 decode, H.264 encode).
+
+type hal_codec2_rk3399, domain;
+type hal_codec2_rk3399_exec, exec_type, vendor_file_type, file_type;
+
+hal_server_domain(hal_codec2_rk3399, hal_codec2)
+init_daemon_domain(hal_codec2_rk3399)
+
+allow hal_codec2_rk3399 mpp_device:chr_file rw_file_perms;
+allow hal_codec2_rk3399 rga_device:chr_file rw_file_perms;
+allow hal_codec2_rk3399 iep_device:chr_file rw_file_perms;
+allow hal_codec2_rk3399 gpu_device:chr_file rw_file_perms;
+allow hal_codec2_rk3399 dmabuf_system_heap_device:chr_file r_file_perms;

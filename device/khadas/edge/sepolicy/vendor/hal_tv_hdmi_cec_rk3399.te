@@ -1,0 +1,16 @@
+# AIDL android.hardware.tv.hdmi.cec-V1 and .hdmi.connection-V1.
+# Replaces the single tv.cec@1.0 HAL, which Android 14 split in three.
+# One binary serves both interfaces, so both share this domain.
+
+type hal_tv_hdmi_cec_rk3399, domain;
+type hal_tv_hdmi_cec_rk3399_exec, exec_type, vendor_file_type, file_type;
+
+hal_server_domain(hal_tv_hdmi_cec_rk3399, hal_tv_hdmi_cec)
+hal_server_domain(hal_tv_hdmi_cec_rk3399, hal_tv_hdmi_connection)
+init_daemon_domain(hal_tv_hdmi_cec_rk3399)
+
+# Linux CEC adapter exposed by dw-hdmi-cec.
+allow hal_tv_hdmi_cec_rk3399 hdmi_cec_device:chr_file rw_file_perms;
+# Hotplug detect and the physical address, which comes from the EDID.
+allow hal_tv_hdmi_cec_rk3399 sysfs_hdmi:file r_file_perms;
+allow hal_tv_hdmi_cec_rk3399 sysfs_hdmi:dir r_dir_perms;

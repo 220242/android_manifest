@@ -1,0 +1,6 @@
+# vendor_init writes the cpufreq/devfreq governors set by init.edge1.rc.
+allow vendor_init sysfs_devices_system_cpu:file w_file_perms;
+allow vendor_init sysfs_devfreq:file w_file_perms;
+allow vendor_init sysfs_gpu:file w_file_perms;
+allow vendor_init sysfs_wlan_fwpath:file w_file_perms;
+set_prop(vendor_init, vendor_hwc_prop)

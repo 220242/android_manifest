@@ -1,0 +1,9 @@
+service vendor.audio-hal-rk3399 /vendor/bin/hw/android.hardware.audio.service.rk3399
+    class hal
+    user audioserver
+    # media group is needed for the HDMI i2s card, drmrpc for the EDID read.
+    group audio media drmrpc
+    capabilities BLOCK_SUSPEND SYS_NICE
+    ioprio rt 4
+    task_profiles ProcessCapacityHigh HighPerformance
+    onrestart restart audioserver

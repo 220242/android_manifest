@@ -1,0 +1,3 @@
+# Khadas Edge1 - PWM-driven IR receiver (rockchip-pwm at ff420030).
+# Carried over from the Rockchip tree; the address is the RK3399 PWM3 block.
+key 116   POWER             WAKE

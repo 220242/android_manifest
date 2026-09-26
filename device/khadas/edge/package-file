@@ -1,0 +1,27 @@
+# Khadas Edge1 - afptool package list for update.img.
+#
+# Format: <partition name in parameter.txt>   <path to image, relative to the
+# rockdev/ directory build.sh assembles>. A leading '#' comments a line out; the
+# special "package-file" and "parameter" entries are required by afptool itself.
+#
+# Non-A/B: one set of images, no _a/_b suffixes.
+
+package-file    package-file
+bootloader      Image/MiniLoaderAll.bin
+parameter       Image/parameter.txt
+uboot           Image/uboot.img
+misc            Image/misc.img
+boot            Image/boot.img
+recovery        Image/recovery.img
+vendor_boot     Image/vendor_boot.img
+dtbo            Image/dtbo.img
+vbmeta          Image/vbmeta.img
+# super carries system, system_ext, product, vendor and odm as logical
+# partitions. The individual images are NOT listed here - flashing them
+# separately would bypass the dynamic-partition metadata and leave the device
+# unbootable.
+super           Image/super.img
+# baseparameter is optional: the bootloader falls back to EDID-driven display
+# defaults when it is absent, which is the right behaviour for an HDMI-only
+# device. Uncomment if a board-specific display base parameter is needed.
+#baseparameter  Image/baseparameter.img

@@ -1,0 +1,20 @@
+# AIDL android.hardware.audio.core-V2 + audio.effect-V2, wrapping the legacy
+# Rockchip audio_hw_device. Replaces HIDL audio@5.0 / audio.effect@5.0.
+
+type hal_audio_rk3399, domain;
+type hal_audio_rk3399_exec, exec_type, vendor_file_type, file_type;
+
+hal_server_domain(hal_audio_rk3399, hal_audio)
+init_daemon_domain(hal_audio_rk3399)
+
+# tinyalsa: HDMI i2s card and the S/PDIF card.
+allow hal_audio_rk3399 audio_device:dir r_dir_perms;
+allow hal_audio_rk3399 audio_device:chr_file rw_file_perms;
+# Reading the HDMI EDID to discover which compressed formats the sink accepts.
+# This is what decides whether passthrough is offered, so it is not optional.
+allow hal_audio_rk3399 sysfs_hdmi:file r_file_perms;
+allow hal_audio_rk3399 sysfs_hdmi:dir r_dir_perms;
+
+allow hal_audio_rk3399 self:global_capability_class_set sys_nice;
+r_dir_file(hal_audio_rk3399, vendor_configs_file)
+get_prop(hal_audio_rk3399, vendor_audio_prop)

@@ -1,0 +1,6 @@
+# Vendor property types. Android 14 requires every vendor-owned property to
+# have a vendor_*_prop type; the Android 10 tree relied on the catch-all
+# vendor_default_prop, which is no longer permitted for new properties.
+vendor_internal_prop(vendor_graphics_prop)
+vendor_internal_prop(vendor_hwc_prop)
+vendor_internal_prop(vendor_audio_prop)

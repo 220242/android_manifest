@@ -1,0 +1,43 @@
+# Khadas Edge1 (RK3399) - Android TV 14 fstab.
+#
+# Non-A/B layout: a full Rockchip update.img is flashed over the whole
+# partition set and a discrete recovery partition is kept, so no slotselect.
+#
+# system/system_ext/product/vendor/odm are logical partitions inside super
+# (PRODUCT_USE_DYNAMIC_PARTITIONS := true). The Android 10 fstab this replaces
+# mounted them as fixed /dev/block/by-name/ devices.
+#
+# <src>  <mnt_point>  <type>  <mnt_flags,options>  <fs_mgr_flags>
+
+# ---- logical partitions in super ----
+system       /system       ext4  ro,barrier=1  wait,logical,first_stage_mount,avb
+system_ext   /system_ext   ext4  ro,barrier=1  wait,logical,first_stage_mount,avb
+product      /product      ext4  ro,barrier=1  wait,logical,first_stage_mount,avb
+vendor       /vendor       ext4  ro,barrier=1  wait,logical,first_stage_mount,avb
+odm          /odm          ext4  ro,barrier=1  wait,logical,first_stage_mount,avb
+
+# ---- metadata: required by dynamic partitions, holds the FBE keys ----
+/dev/block/by-name/metadata  /metadata  ext4  noatime,nosuid,nodev,discard  wait,formattable,first_stage_mount
+
+# ---- userdata ----
+#
+# File-based encryption is pinned to policy v1, not v2.
+#
+# fscrypt v2 policies landed in mainline 5.4. This board runs 4.19.111, where
+# v2 is only available if the ACK android-4.19-stable fscrypt backports are
+# present - they are not in the Khadas khadas-edge-Qt kernel. Because
+# PRODUCT_SHIPPING_API_LEVEL is 29 this device is an *upgrade* device, for
+# which v1 remains permitted. Moving to v2 requires the kernel work described
+# in docs/KERNEL.md.
+#
+# Metadata encryption (keydirectory=, dm-default-key) is likewise omitted: the
+# 4.19 Rockchip kernel has no dm-default-key target.
+/dev/block/by-name/userdata  /data  f2fs  noatime,nosuid,nodev,discard,reserve_root=32768,resgid=1065,fsync_mode=nobarrier  latemount,wait,check,fileencryption=aes-256-xts:aes-256-cts:v1,quota,formattable,resize
+
+# ---- misc / vendor-specific Rockchip partitions ----
+/dev/block/by-name/misc      /misc      emmc  defaults  defaults
+/dev/block/by-name/baseparameter /baseparameter emmc defaults defaults
+
+# ---- removable ----
+/devices/platform/fe320000.dwmmc/mmc_host*      /storage/sdcard1  vfat  nosuid,nodev  wait,voldmanaged=sdcard1:auto
+/devices/platform/usb*                          /storage/usbotg   vfat  nosuid,nodev  wait,voldmanaged=usbotg:auto

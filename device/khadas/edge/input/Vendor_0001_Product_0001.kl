@@ -1,0 +1,25 @@
+# Khadas Edge1 - bundled IR remote, mapped for leanback navigation.
+#
+# This is the file that makes the remote usable in an Android TV UI: without
+# D-pad, BACK and HOME the leanback launcher cannot be navigated at all.
+key 103   DPAD_UP
+key 108   DPAD_DOWN
+key 105   DPAD_LEFT
+key 106   DPAD_RIGHT
+key 28    DPAD_CENTER
+key 158   BACK
+key 172   HOME
+key 139   MENU
+key 116   POWER             WAKE
+key 115   VOLUME_UP
+key 114   VOLUME_DOWN
+key 113   VOLUME_MUTE
+# Media transport keys, used by the Cast receiver and by LiveTv.
+key 164   MEDIA_PLAY_PAUSE
+key 166   MEDIA_STOP
+key 163   MEDIA_NEXT
+key 165   MEDIA_PREVIOUS
+key 168   MEDIA_REWIND
+key 208   MEDIA_FAST_FORWARD
+# Assistant/search: leanback's global search entry point.
+key 217   SEARCH

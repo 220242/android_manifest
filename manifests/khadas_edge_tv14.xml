@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Khadas Edge1 (Rockchip RK3399) - Android TV 14 local manifest.
+
+  This is a repo *local manifest* overlay. It is applied on top of the upstream
+  AOSP 14 platform manifest, NOT used standalone:
+
+    repo init -u https://android.googlesource.com/platform/manifest \
+              -b ${AOSP_TAG}
+    mkdir -p .repo/local_manifests
+    cp manifests/khadas_edge_tv14.xml .repo/local_manifests/
+    repo sync -c -j$(nproc)
+
+  Rationale for the overlay approach: the legacy khadas-edge-Qt manifest forked
+  all 737 AOSP 10 projects into github.com/khadas. Carrying a full fork forward
+  to 14 would mean re-forking the entire platform and re-applying every AOSP
+  security patch by hand. Instead we track upstream AOSP 14 and fork only the
+  Rockchip/Khadas projects that actually contain board support.
+
+  Revisions below are the exact SHAs the khadas-edge-Qt (Android 10) manifest
+  pinned. They are the *starting point* of the forward-port, not Android 14
+  ready. See docs/PORTING.md for the per-project migration state.
+-->
+<manifest>
+
+  <remote name="khadas" fetch="https://github.com/khadas/" />
+
+  <!-- ==================================================================
+       Removals.
+       The kernel is checked out at path "kernel", which would nest the
+       upstream kernel/configs and kernel/tests projects inside it.
+       Neither is required to build a device target.
+       ================================================================== -->
+  <remove-project name="kernel/configs" />
+  <remove-project name="kernel/tests" />
+
+  <!-- ==================================================================
+       Kernel: 4.19.111 (khadas-edge-Qt).
+       4.19 is the minimum kernel an Android 14 *upgrade* device may ship
+       (launch devices require 5.15). Board DTS:
+         arch/arm64/boot/dts/rockchip/rk3399-khadas-edge-android.dts
+       Defconfig: arch/arm64/configs/kedge_defconfig
+       ================================================================== -->
+  <project name="linux" path="kernel" remote="khadas"
+           revision="a82a1a93e7def23c8c30db102aacffaf2f6b674c" />
+
+  <!-- ==================================================================
+       Bootloader and flashing tools (architecture-independent of the
+       Android version; carried forward as-is).
+       ================================================================== -->
+  <project name="u-boot" path="u-boot" remote="khadas"
+           revision="21f5a0019a7b809a03f5d7a401b96f19f3bfb5c4" />
+  <project name="android_rkbin" path="rkbin" remote="khadas"
+           revision="664ccee1d4ada924848b80b2912d48c7fb30049c" />
+  <project name="android_RKTools" path="RKTools" remote="khadas"
+           revision="439fa5e23e4f2bffd6b53440d77a6b7c6eedb458" />
+
+  <!-- ==================================================================
+       Graphics. Mali-T860/T864 is Midgard, so libgralloc/midgard is the
+       correct gralloc backend (bifrost is for T[78]xx/G-series and is
+       deliberately NOT synced).
+       Migration: HIDL allocator@2.0 + mapper@{2,3}.0 -> AIDL
+       android.hardware.graphics.allocator-V2 + IMapper 5.0 (stable-c);
+       composer@2.x -> composer3-V3. See docs/HAL_MIGRATION.md.
+       ================================================================== -->
+  <project name="android_hardware_rockchip_libgralloc_midgard"
+           path="hardware/rockchip/libgralloc/midgard" remote="khadas"
+           revision="34b75b3b1e8854cc5f7936368d4be7b478cf3ac2" />
+  <project name="android_hardware_rockchip_hwcomposer"
+           path="hardware/rockchip/hwcomposer" remote="khadas"
+           revision="c7cb0905e0452fe652f3ddd788783af5c76d6d67" />
+  <project name="android_hardware_rockchip_librga"
+           path="hardware/rockchip/librga" remote="khadas"
+           revision="2453235e0e87c93a5457cf9847f895260e8ea54f" />
+
+  <!-- ==================================================================
+       Audio: legacy audio_hw_device (tinyalsa) behind HIDL@5.0.
+       Migration: wrap in android.hardware.audio.core-V2 AIDL.
+       ================================================================== -->
+  <project name="android_hardware_rockchip_audio"
+           path="hardware/rockchip/audio" remote="khadas"
+           revision="543f98848cbc326c7612fbb42b5db2abd10a4723" />
+
+  <!-- ==================================================================
+       Media / codec.
+       ================================================================== -->
+  <project name="android_hardware_rockchip_libhwjpeg"
+           path="hardware/rockchip/libhwjpeg" remote="khadas"
+           revision="e582616e9993f86e555c98194f8ba6a4d16bdfd7" />
+  <project name="android_hardware_rockchip_omx_il"
+           path="hardware/rockchip/omx_il" remote="khadas"
+           revision="f0c783f9e5738f3d081b7809be111ec3e3de4913" />
+  <project name="android_hardware_rockchip_librkvpu"
+           path="hardware/rockchip/librkvpu" remote="khadas"
+           revision="7b64b964ad4701c03a7497f8c908bec0518eef5d" />
+
+  <!-- ==================================================================
+       Small HALs. Every one of these is HIDL on the pinned revision and
+       has a mandatory AIDL replacement in 14 (see docs/HAL_MIGRATION.md).
+       ================================================================== -->
+  <project name="android_hardware_rockchip_liblights"
+           path="hardware/rockchip/liblights" remote="khadas"
+           revision="b29a973a3a6562c6733f67dbbd64c43c18079fb4" />
+  <project name="android_hardware_rockchip_power"
+           path="hardware/rockchip/power" remote="khadas"
+           revision="d7d29b5be57caddb365acd8af3277a02750d5098" />
+  <project name="android_hardware_rockchip_sensor"
+           path="hardware/rockchip/sensor" remote="khadas"
+           revision="1ce41c27f5e3c0ca5f099a43a59746493234a3cb" />
+  <project name="android_hardware_rockchip_libmemtrack"
+           path="hardware/rockchip/libmemtrack" remote="khadas"
+           revision="c591424c9c90a115d5498a19551fa40fb79bab81" />
+
+  <!-- HDMI-CEC. In 14 tv.cec@1.0 is split into
+       android.hardware.tv.hdmi.cec / .hdmi.connection / .hdmi.earc. -->
+  <project name="android_hardware_rockchip_hdmicec"
+           path="hardware/rockchip/hdmicec" remote="khadas"
+           revision="ebd4212cc5c7c708b0c4a93469630423dd07c33b" />
+
+  <!-- Camera is optional on an Android TV SKU; synced because the Edge1
+       carries a MIPI-CSI header. Not in PRODUCT_PACKAGES by default. -->
+  <project name="android_hardware_rockchip_camera"
+           path="hardware/rockchip/camera" remote="khadas"
+           revision="8fc9380799bae30fb1365b1a933af96e6871745e" />
+
+  <!-- ==================================================================
+       Proprietary vendor blobs (Mali userspace driver, firmware, Widevine).
+       ================================================================== -->
+  <project name="android_vendor_rockchip_common" path="vendor/rockchip/common"
+           remote="khadas" revision="9a1f4d21552bea59bbb9b1ebabc080ef997cfd94" />
+  <project name="android_vendor_rockchip_hardware" path="vendor/rockchip/hardware"
+           remote="khadas" revision="084f181ec529b9998a72af673b9706fda287845e" />
+
+</manifest>

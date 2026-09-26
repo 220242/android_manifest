@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Khadas Edge1 - ALSA mixer paths.
+
+  The RK3399 routes HDMI audio through the i2s0 -> hdmi-sound card and S/PDIF
+  through spdif-sound. There is no codec on the Edge1 (no speaker, no analogue
+  jack on the TV SKU), so no codec gain paths are declared.
+-->
+<mixer>
+    <path name="hdmi-stereo">
+        <ctl name="I2S Digital Loopback Mode" value="Disabled"/>
+    </path>
+    <path name="hdmi-multichannel">
+        <ctl name="I2S Digital Loopback Mode" value="Disabled"/>
+    </path>
+    <path name="hdmi-passthrough">
+        <!-- Non-audio IEC61937 framing: the HDMI TX must stop inserting the
+             audio InfoFrame channel mapping when bitstreaming. -->
+        <ctl name="PCM Playback Non Audio" value="1"/>
+    </path>
+    <path name="spdif-stereo"/>
+</mixer>

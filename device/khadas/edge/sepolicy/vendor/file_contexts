@@ -1,0 +1,40 @@
+# Khadas Edge1 (RK3399) - vendor file contexts.
+
+###############################
+# Device nodes
+#
+/dev/mali0                          u:object_r:gpu_device:s0
+/dev/dri/card0                      u:object_r:graphics_device:s0
+/dev/dri/renderD128                 u:object_r:gpu_device:s0
+/dev/mpp_service                    u:object_r:mpp_device:s0
+/dev/vpu_service                    u:object_r:mpp_device:s0
+/dev/rga                            u:object_r:rga_device:s0
+/dev/iep                            u:object_r:iep_device:s0
+/dev/cec0                           u:object_r:hdmi_cec_device:s0
+/dev/lirc0                          u:object_r:lirc_device:s0
+
+###############################
+# HAL services
+#
+/vendor/bin/hw/android\.hardware\.graphics\.allocator-service\.rk3399   u:object_r:hal_graphics_allocator_rk3399_exec:s0
+/vendor/bin/hw/android\.hardware\.graphics\.composer3-service\.rk3399   u:object_r:hal_graphics_composer_rk3399_exec:s0
+/vendor/bin/hw/android\.hardware\.audio\.service\.rk3399                u:object_r:hal_audio_rk3399_exec:s0
+/vendor/bin/hw/android\.hardware\.audio\.effect-service\.rk3399         u:object_r:hal_audio_rk3399_exec:s0
+/vendor/bin/hw/android\.hardware\.tv\.input-service\.rk3399             u:object_r:hal_tv_input_rk3399_exec:s0
+/vendor/bin/hw/android\.hardware\.tv\.hdmi\.cec-service\.rk3399         u:object_r:hal_tv_hdmi_cec_rk3399_exec:s0
+/vendor/bin/hw/android\.hardware\.tv\.hdmi\.connection-service\.rk3399  u:object_r:hal_tv_hdmi_cec_rk3399_exec:s0
+/vendor/bin/hw/android\.hardware\.light-service\.rk3399                 u:object_r:hal_light_rk3399_exec:s0
+/vendor/bin/hw/android\.hardware\.power-service\.rk3399                 u:object_r:hal_power_rk3399_exec:s0
+/vendor/bin/hw/android\.hardware\.memtrack-service\.rk3399              u:object_r:hal_memtrack_rk3399_exec:s0
+/vendor/bin/hw/android\.hardware\.media\.c2@1\.2-service\.rk3399        u:object_r:hal_codec2_rk3399_exec:s0
+
+###############################
+# Vendor binaries
+#
+/vendor/bin/brcm_patchram_plus      u:object_r:hal_bluetooth_default_exec:s0
+
+###############################
+# Firmware / modules
+#
+/vendor/etc/firmware(/.*)?          u:object_r:vendor_firmware_file:s0
+/vendor/lib/modules(/.*)?           u:object_r:vendor_kernel_modules:s0

@@ -1,0 +1,6 @@
+ro.hardware.gralloc            u:object_r:vendor_graphics_prop:s0 exact string
+ro.hardware.hwcomposer         u:object_r:vendor_graphics_prop:s0 exact string
+ro.hardware.egl                u:object_r:vendor_graphics_prop:s0 exact string
+ro.hardware.vulkan             u:object_r:vendor_graphics_prop:s0 exact string
+sys.hwc.                       u:object_r:vendor_hwc_prop:s0 prefix
+ro.hardware.audio.primary      u:object_r:vendor_audio_prop:s0 exact string

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Khadas Edge1 - TV Input Framework hardware description.
+
+  The Edge1 has no tuner and no HDMI input: its HDMI port is an output only.
+  So this declares no physical inputs, and live TV on this device comes from
+  network TIF sessions (IPTV apps) rather than from hardware.
+
+  The file still has to exist and the tv.input HAL still has to run, because
+  the product declares android.software.live_tv (via atv_base.mk) and
+  TvInputManagerService binds the HAL unconditionally when it is declared.
+-->
+<tv-input-hardware>
+    <!-- No <hardware> entries: no tuner, no HDMI-in, no composite. -->
+</tv-input-hardware>

@@ -1,0 +1,5 @@
+# Khadas Edge1 - on-board key row (ADC keys on SARADC channel 1).
+# The Edge1 exposes power, function and reset; reset is handled in hardware and
+# never reaches the kernel as a key event.
+key 116   POWER             WAKE
+key 143   FUNCTION

@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE MediaSettings [
+<!ELEMENT MediaSettings (CamcorderProfiles*, EncoderOutputFileFormat+, VideoEncoderCap+,
+                         AudioEncoderCap+, VideoDecoderCap, AudioDecoderCap)>
+<!ELEMENT CamcorderProfiles (EncoderProfile+, ImageEncoding+, ImageDecoding, Camera)>
+<!ELEMENT EncoderProfile (Video, Audio)>
+<!ATTLIST EncoderProfile quality CDATA #REQUIRED>
+<!ATTLIST EncoderProfile fileFormat CDATA #REQUIRED>
+<!ATTLIST EncoderProfile duration CDATA #REQUIRED>
+<!ELEMENT Video EMPTY>
+<!ATTLIST Video codec CDATA #REQUIRED>
+<!ATTLIST Video bitRate CDATA #REQUIRED>
+<!ATTLIST Video width CDATA #REQUIRED>
+<!ATTLIST Video height CDATA #REQUIRED>
+<!ATTLIST Video frameRate CDATA #REQUIRED>
+<!ELEMENT Audio EMPTY>
+<!ATTLIST Audio codec CDATA #REQUIRED>
+<!ATTLIST Audio bitRate CDATA #REQUIRED>
+<!ATTLIST Audio sampleRate CDATA #REQUIRED>
+<!ATTLIST Audio channels (1|2) #REQUIRED>
+<!ELEMENT ImageEncoding EMPTY>
+<!ATTLIST ImageEncoding quality (90|80|70|60|50|40) #REQUIRED>
+<!ELEMENT ImageDecoding EMPTY>
+<!ATTLIST ImageDecoding memCap CDATA #REQUIRED>
+<!ELEMENT Camera EMPTY>
+<!ATTLIST Camera previewFrameWidth CDATA #REQUIRED>
+<!ATTLIST Camera previewFrameHeight CDATA #REQUIRED>
+<!ELEMENT EncoderOutputFileFormat EMPTY>
+<!ATTLIST EncoderOutputFileFormat name (3gp|mp4) #REQUIRED>
+<!ELEMENT VideoEncoderCap EMPTY>
+<!ATTLIST VideoEncoderCap name (h264|h263|m4v) #REQUIRED>
+<!ATTLIST VideoEncoderCap enabled (true|false) #REQUIRED>
+<!ATTLIST VideoEncoderCap minBitRate CDATA #REQUIRED>
+<!ATTLIST VideoEncoderCap maxBitRate CDATA #REQUIRED>
+<!ATTLIST VideoEncoderCap minFrameWidth CDATA #REQUIRED>
+<!ATTLIST VideoEncoderCap maxFrameWidth CDATA #REQUIRED>
+<!ATTLIST VideoEncoderCap minFrameHeight CDATA #REQUIRED>
+<!ATTLIST VideoEncoderCap maxFrameHeight CDATA #REQUIRED>
+<!ATTLIST VideoEncoderCap minFrameRate CDATA #REQUIRED>
+<!ATTLIST VideoEncoderCap maxFrameRate CDATA #REQUIRED>
+<!ELEMENT AudioEncoderCap EMPTY>
+<!ATTLIST AudioEncoderCap name (aac|heaac|aaceld|amrwb|amrnb) #REQUIRED>
+<!ATTLIST AudioEncoderCap enabled (true|false) #REQUIRED>
+<!ATTLIST AudioEncoderCap minBitRate CDATA #REQUIRED>
+<!ATTLIST AudioEncoderCap maxBitRate CDATA #REQUIRED>
+<!ATTLIST AudioEncoderCap minSampleRate CDATA #REQUIRED>
+<!ATTLIST AudioEncoderCap maxSampleRate CDATA #REQUIRED>
+<!ATTLIST AudioEncoderCap minChannels (1|2) #REQUIRED>
+<!ATTLIST AudioEncoderCap maxChannels (1|2) #REQUIRED>
+<!ELEMENT VideoDecoderCap EMPTY>
+<!ATTLIST VideoDecoderCap name (wmv) #REQUIRED>
+<!ATTLIST VideoDecoderCap enabled (true|false) #REQUIRED>
+<!ELEMENT AudioDecoderCap EMPTY>
+<!ATTLIST AudioDecoderCap name (wma) #REQUIRED>
+<!ATTLIST AudioDecoderCap enabled (true|false) #REQUIRED>
+]>
+<!--
+  Khadas Edge1 - media profiles.
+
+  No CamcorderProfiles: PRODUCT_HAS_CAMERA is false on the TV SKU and the
+  excluded-hardware permissions declare android.hardware.camera unavailable.
+  Declaring camcorder profiles for a device with no camera makes CameraService
+  log errors at every boot.
+
+  The encoder caps are still declared because screen recording and Cast mirroring
+  use the H.264 encoder without any camera involved.
+-->
+<MediaSettings>
+    <EncoderOutputFileFormat name="mp4" />
+    <EncoderOutputFileFormat name="3gp" />
+
+    <VideoEncoderCap name="h264" enabled="true"
+        minBitRate="64000" maxBitRate="30000000"
+        minFrameWidth="176" maxFrameWidth="1920"
+        minFrameHeight="144" maxFrameHeight="1088"
+        minFrameRate="15" maxFrameRate="30" />
+
+    <AudioEncoderCap name="aac" enabled="true"
+        minBitRate="8000" maxBitRate="320000"
+        minSampleRate="8000" maxSampleRate="48000"
+        minChannels="1" maxChannels="2" />
+
+    <VideoDecoderCap name="wmv" enabled="false" />
+    <AudioDecoderCap name="wma" enabled="false" />
+</MediaSettings>

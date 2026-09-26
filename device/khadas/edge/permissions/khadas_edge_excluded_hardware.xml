@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Features the Edge1 TV SKU does not have.
+
+  Declaring these as unavailable matters: the legacy tablet product enabled
+  gravity/compass/gyro/light sensors and a camera. On an Android TV build those
+  declarations make the framework block during boot waiting for sensor and
+  camera HALs that are never published, and they make the device advertise
+  capabilities to the Play Store that it cannot satisfy.
+-->
+<permissions>
+    <unavailable-feature name="android.hardware.camera" />
+    <unavailable-feature name="android.hardware.camera.any" />
+    <unavailable-feature name="android.hardware.camera.autofocus" />
+    <unavailable-feature name="android.hardware.camera.front" />
+    <unavailable-feature name="android.hardware.location.gps" />
+    <unavailable-feature name="android.hardware.nfc" />
+    <unavailable-feature name="android.hardware.sensor.accelerometer" />
+    <unavailable-feature name="android.hardware.sensor.compass" />
+    <unavailable-feature name="android.hardware.sensor.gyroscope" />
+    <unavailable-feature name="android.hardware.sensor.light" />
+    <unavailable-feature name="android.hardware.sensor.proximity" />
+    <unavailable-feature name="android.hardware.telephony" />
+    <unavailable-feature name="android.hardware.touchscreen" />
+    <unavailable-feature name="android.hardware.faketouch" />
+    <unavailable-feature name="android.hardware.microphone" />
+    <unavailable-feature name="android.hardware.screen.portrait" />
+    <unavailable-feature name="android.software.home_screen" />
+</permissions>

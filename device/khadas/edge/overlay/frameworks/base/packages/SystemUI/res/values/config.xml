@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Khadas Edge1 - SystemUI overlay for a TV (no status bar, no QS panel). -->
+<resources>
+    <bool name="config_enableFullscreenUserSwitcher">false</bool>
+    <bool name="config_showRotationLock">false</bool>
+    <bool name="config_enableAutoRotation">false</bool>
+    <!-- TV SystemUI is notification-toast only; the phone/tablet status bar
+         and quick settings are not instantiated. -->
+    <string name="config_statusBarComponent" translatable="false">com.android.systemui.statusbar.tv.TvStatusBar</string>
+</resources>

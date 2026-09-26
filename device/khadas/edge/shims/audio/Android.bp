@@ -1,0 +1,55 @@
+//
+// AIDL android.hardware.audio.core-V2 service for the Khadas Edge1.
+//
+// Builds on AOSP's reference implementation in
+// hardware/interfaces/audio/aidl/default rather than reimplementing IModule.
+//
+// NOTE: this module does NOT build yet. createOutputStream in
+// RkAudioModule.cpp is unimplemented, and the AOSP library names below
+// ("libaudioserviceexampleimpl", the -V2-ndk variants) must be confirmed
+// against the synced tree.
+//
+// It is therefore not in PRODUCT_PACKAGES by default: device.mk gates it behind
+// EDGE1_ENABLE_INCOMPLETE_HALS so a tree-wide build reaches the end instead of
+// stopping on a gap that is already documented.
+//
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+cc_binary {
+    name: "android.hardware.audio.service.rk3399",
+    relative_install_path: "hw",
+    vendor: true,
+    init_rc: ["android.hardware.audio.service.rk3399.rc"],
+    vintf_fragments: ["android.hardware.audio.service.rk3399.xml"],
+
+    srcs: [
+        "RkAudioModule.cpp",
+        "service.cpp",
+    ],
+
+    shared_libs: [
+        "android.hardware.audio.core-V2-ndk",
+        "android.hardware.audio.common-V2-ndk",
+        "android.media.audio.common.types-V2-ndk",
+        "libbase",
+        "libbinder_ndk",
+        "libfmq",
+        "libhardware",
+        "liblog",
+        "libutils",
+    ],
+
+    static_libs: [
+        // AOSP's subclassable core: Module, StreamIn/StreamOut, Configuration.
+        "libaudioserviceexampleimpl",
+    ],
+
+    cflags: [
+        "-Wall",
+        "-Werror",
+        "-Wextra",
+        "-Wno-unused-parameter",
+    ],
+}

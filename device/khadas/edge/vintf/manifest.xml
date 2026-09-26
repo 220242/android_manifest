@@ -1,0 +1,211 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Khadas Edge1 (RK3399) - Android TV 14 device VINTF manifest.
+
+  target-level="8" is the Framework Compatibility Matrix level for Android 14
+  (8.0 = 14, 7 = 13, 4 = 10). Declaring 8 asserts this vendor image satisfies
+  the Android 14 FCM, which is why every HAL below is AIDL: the 14 FCM removes
+  or deprecates the HIDL interfaces the Android 10 image declared.
+
+  The Android 10 tree had no device manifest in device/rockchip at all - it was
+  supplied out of vendor/rockchip/common, which is why this file is new rather
+  than migrated.
+
+  Verify with:  check_vintf  (or 'm check-vintf-all') against a synced AOSP 14
+  framework compatibility matrix. That check could not be run in the authoring
+  environment; see docs/STATUS.md.
+-->
+<manifest version="7.0" type="device" target-level="8">
+
+    <!-- =================== Graphics =================== -->
+    <!-- was: android.hardware.graphics.allocator@2.0::IAllocator/default -->
+    <hal format="aidl">
+        <name>android.hardware.graphics.allocator</name>
+        <version>2</version>
+        <fqname>IAllocator/default</fqname>
+    </hal>
+
+    <!-- was: android.hardware.graphics.mapper@{2.0,3.0}
+         Gralloc4 (IMapper 4.0) is a passthrough HIDL HAL, declared with
+         transport="passthrough" and no service instance. IMapper 5.0
+         (stable-c) is the follow-up; see docs/HAL_MIGRATION.md. -->
+    <hal format="hidl">
+        <name>android.hardware.graphics.mapper</name>
+        <transport arch="32+64">passthrough</transport>
+        <version>4.0</version>
+        <interface>
+            <name>IMapper</name>
+            <instance>default</instance>
+        </interface>
+    </hal>
+
+    <!-- was: android.hardware.graphics.composer@2.{1,2,3}::IComposer/default -->
+    <hal format="aidl">
+        <name>android.hardware.graphics.composer3</name>
+        <version>3</version>
+        <fqname>IComposer/default</fqname>
+    </hal>
+
+    <!-- =================== Audio =================== -->
+    <!-- was: android.hardware.audio@5.0::IDevicesFactory/default -->
+    <hal format="aidl">
+        <name>android.hardware.audio.core</name>
+        <version>2</version>
+        <fqname>IModule/default</fqname>
+        <fqname>IModule/r_submix</fqname>
+        <fqname>IModule/usb</fqname>
+        <fqname>IConfig/default</fqname>
+    </hal>
+
+    <!-- was: android.hardware.audio.effect@5.0::IEffectsFactory/default -->
+    <hal format="aidl">
+        <name>android.hardware.audio.effect</name>
+        <version>2</version>
+        <fqname>IFactory/default</fqname>
+    </hal>
+
+    <!-- =================== TV =================== -->
+    <!-- was: android.hardware.tv.input@1.0::ITvInput/default -->
+    <hal format="aidl">
+        <name>android.hardware.tv.input</name>
+        <version>1</version>
+        <fqname>ITvInput/default</fqname>
+    </hal>
+
+    <!-- was: android.hardware.tv.cec@1.0::IHdmiCec/default
+         Android 14 split tv.cec into hdmi.cec + hdmi.connection (+ hdmi.earc,
+         which this board does not implement: the RK3399 HDMI 2.0 TX has no
+         eARC block). -->
+    <hal format="aidl">
+        <name>android.hardware.tv.hdmi.cec</name>
+        <version>1</version>
+        <fqname>IHdmiCec/default</fqname>
+    </hal>
+    <hal format="aidl">
+        <name>android.hardware.tv.hdmi.connection</name>
+        <version>1</version>
+        <fqname>IHdmiConnection/default</fqname>
+    </hal>
+
+    <!-- =================== Connectivity =================== -->
+    <!-- was: android.hardware.wifi@1.3::IWifi/default -->
+    <hal format="aidl">
+        <name>android.hardware.wifi</name>
+        <version>1</version>
+        <fqname>IWifi/default</fqname>
+    </hal>
+    <!-- was: android.hardware.wifi.supplicant@1.2::ISupplicant/default -->
+    <hal format="aidl">
+        <name>android.hardware.wifi.supplicant</name>
+        <version>3</version>
+        <fqname>ISupplicant/default</fqname>
+    </hal>
+    <!-- was: android.hardware.wifi.hostapd@1.1::IHostapd/default -->
+    <hal format="aidl">
+        <name>android.hardware.wifi.hostapd</name>
+        <version>1</version>
+        <fqname>IHostapd/default</fqname>
+    </hal>
+    <!-- was: android.hardware.bluetooth@1.0::IBluetoothHci/default -->
+    <hal format="aidl">
+        <name>android.hardware.bluetooth</name>
+        <version>1</version>
+        <fqname>IBluetoothHci/default</fqname>
+    </hal>
+
+    <!-- =================== Media =================== -->
+    <hal format="hidl">
+        <name>android.hardware.media.c2</name>
+        <transport>hwbinder</transport>
+        <version>1.2</version>
+        <interface>
+            <name>IComponentStore</name>
+            <instance>default</instance>
+        </interface>
+    </hal>
+    <!-- Widevine L3. L1 would need an OP-TEE trusted app; PRODUCT_HAVE_OPTEE
+         is false on this target. -->
+    <hal format="hidl">
+        <name>android.hardware.drm</name>
+        <transport>hwbinder</transport>
+        <version>4.0</version>
+        <interface>
+            <name>ICryptoFactory</name>
+            <instance>default</instance>
+            <instance>widevine</instance>
+            <instance>clearkey</instance>
+        </interface>
+        <interface>
+            <name>IDrmFactory</name>
+            <instance>default</instance>
+            <instance>widevine</instance>
+            <instance>clearkey</instance>
+        </interface>
+    </hal>
+
+    <!-- =================== Platform =================== -->
+    <!-- was: android.hardware.health@2.0 -->
+    <hal format="aidl">
+        <name>android.hardware.health</name>
+        <version>2</version>
+        <fqname>IHealth/default</fqname>
+    </hal>
+    <!-- was: android.hardware.light@2.0 -->
+    <hal format="aidl">
+        <name>android.hardware.light</name>
+        <version>2</version>
+        <fqname>ILights/default</fqname>
+    </hal>
+    <!-- was: android.hardware.power@1.0 -->
+    <hal format="aidl">
+        <name>android.hardware.power</name>
+        <version>4</version>
+        <fqname>IPower/default</fqname>
+    </hal>
+    <!-- was: android.hardware.thermal@1.0 -->
+    <hal format="aidl">
+        <name>android.hardware.thermal</name>
+        <version>1</version>
+        <fqname>IThermal/default</fqname>
+    </hal>
+    <!-- was: android.hardware.memtrack@1.0 -->
+    <hal format="aidl">
+        <name>android.hardware.memtrack</name>
+        <version>1</version>
+        <fqname>IMemtrack/default</fqname>
+    </hal>
+    <!-- was: android.hardware.usb@1.1 -->
+    <hal format="aidl">
+        <name>android.hardware.usb</name>
+        <version>1</version>
+        <fqname>IUsb/default</fqname>
+    </hal>
+    <!-- was: android.hardware.keymaster@4.0 -->
+    <hal format="aidl">
+        <name>android.hardware.security.keymint</name>
+        <version>3</version>
+        <fqname>IKeyMintDevice/default</fqname>
+    </hal>
+    <hal format="aidl">
+        <name>android.hardware.security.sharedsecret</name>
+        <version>1</version>
+        <fqname>ISharedSecret/default</fqname>
+    </hal>
+    <!-- was: android.hardware.gatekeeper@1.0 -->
+    <hal format="aidl">
+        <name>android.hardware.gatekeeper</name>
+        <version>1</version>
+        <fqname>IGatekeeper/default</fqname>
+    </hal>
+    <hal format="aidl">
+        <name>android.hardware.dumpstate</name>
+        <version>1</version>
+        <fqname>IDumpstateDevice/default</fqname>
+    </hal>
+
+    <!-- SELinux policy version vendor code is built against; matches
+         BOARD_SEPOLICY_VERS and PRODUCT_SHIPPING_API_LEVEL=29. -->
+    <sepolicy>
+        <version>29.0</version>
+    </sepolicy>
+</manifest>

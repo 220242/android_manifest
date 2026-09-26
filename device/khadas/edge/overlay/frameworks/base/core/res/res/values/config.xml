@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Khadas Edge1 - Android TV framework config overlay.
+
+  The legacy tree overlaid device/rockchip/common/tv/overlay, whose values
+  targeted Android 5/6 resource names. This overlay only sets keys that still
+  exist in Android 14 frameworks/base.
+-->
+<resources>
+    <!-- A TV is driven by a remote, not by touch or a nav bar. -->
+    <bool name="config_showNavigationBar">false</bool>
+    <bool name="config_supportAutoRotation">false</bool>
+    <bool name="config_enableTranslucentDecor">false</bool>
+    <bool name="config_windowShowCircularMask">false</bool>
+
+    <!-- Leanback draws its own focus treatment; the platform default focus
+         highlight double-draws on top of it. -->
+    <bool name="config_useDefaultFocusHighlight">false</bool>
+
+    <!-- No telephony, no SMS on this SKU. -->
+    <bool name="config_voice_capable">false</bool>
+    <bool name="config_sms_capable">false</bool>
+
+    <!-- HDMI output is always landscape and never rotates. -->
+    <integer name="config_lidOpenRotation">-1</integer>
+    <integer name="config_ntpPollingIntervalShorter">60000</integer>
+
+    <!-- Gigabit Ethernet is the primary transport on a TV box. -->
+    <string translatable="false" name="config_ethernet_iface_regex">eth\\d</string>
+    <string-array translatable="false" name="config_ethernet_interfaces">
+        <item>eth0;12,13,14,15,16;;</item>
+    </string-array>
+    <string name="config_ethernet_tcp_buffers" translatable="false">524288,1048576,3145728,524288,1048576,3145728</string>
+
+    <!-- Wake on the remote's power key and on HDMI-CEC one-touch-play. -->
+    <bool name="config_unplugTurnsOnScreen">true</bool>
+    <bool name="config_deviceSupportsHdmiCec">true</bool>
+
+    <!-- No battery: never let the framework enter battery-saver heuristics. -->
+    <bool name="config_enableAutoPowerModes">false</bool>
+
+    <!-- The RK3399 HDMI TX supports HDR10 but not wide colour gamut
+         composition, which matches ro.surface_flinger.* in device.mk. -->
+    <bool name="config_setColorTransformAccelerated">true</bool>
+
+    <!-- Default to 1080p UI on a 4K panel: the Mali-T860 cannot composite a
+         2160p leanback UI at 60fps, so the UI is rendered at 1080p and scaled
+         by the display controller. -->
+    <integer name="config_defaultUiModeType">4</integer>
+</resources>

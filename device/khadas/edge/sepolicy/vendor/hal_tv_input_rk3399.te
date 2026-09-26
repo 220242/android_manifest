@@ -1,0 +1,13 @@
+# AIDL android.hardware.tv.input-V1. Replaces tv.input@1.0.
+#
+# The Edge1 has no tuner or HDMI-in, so this implementation publishes zero
+# stream configurations. It still has to exist: the framework's TvInputManager
+# blocks on the HAL when android.software.live_tv is declared.
+
+type hal_tv_input_rk3399, domain;
+type hal_tv_input_rk3399_exec, exec_type, vendor_file_type, file_type;
+
+hal_server_domain(hal_tv_input_rk3399, hal_tv_input)
+init_daemon_domain(hal_tv_input_rk3399)
+
+r_dir_file(hal_tv_input_rk3399, vendor_configs_file)

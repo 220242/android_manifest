@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Khadas Edge1 - measured codec throughput.
+
+  These ranges are NOT measured: they are the RK3399 datasheet ceilings, halved
+  for the lower bound. CTS MediaPerformanceTest compares against them, so they
+  must be replaced with real numbers from a device before any compliance run.
+  They are present because MediaCodecInfo warns loudly when a declared codec has
+  no performance point at all.
+-->
+<MediaCodecs>
+    <Decoders>
+        <MediaCodec name="c2.rk.avc.decoder" type="video/avc" update="true">
+            <Limit name="measured-frame-rate-1920x1080" range="60-120" />
+            <Limit name="measured-frame-rate-3840x2160" range="15-30" />
+        </MediaCodec>
+        <MediaCodec name="c2.rk.hevc.decoder" type="video/hevc" update="true">
+            <Limit name="measured-frame-rate-1920x1080" range="60-120" />
+            <Limit name="measured-frame-rate-3840x2160" range="30-60" />
+        </MediaCodec>
+        <MediaCodec name="c2.rk.vp9.decoder" type="video/x-vnd.on2.vp9" update="true">
+            <Limit name="measured-frame-rate-1920x1080" range="60-120" />
+            <Limit name="measured-frame-rate-3840x2160" range="30-60" />
+        </MediaCodec>
+    </Decoders>
+    <Encoders>
+        <MediaCodec name="c2.rk.avc.encoder" type="video/avc" update="true">
+            <Limit name="measured-frame-rate-1920x1080" range="15-30" />
+        </MediaCodec>
+    </Encoders>
+</MediaCodecs>

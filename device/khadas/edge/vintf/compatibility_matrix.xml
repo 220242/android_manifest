@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Khadas Edge1 - device compatibility matrix.
+
+  This is the mirror of vintf/manifest.xml: the manifest says what this vendor
+  image *provides*, this matrix says what it *requires of the framework*. It is
+  referenced by DEVICE_MATRIX_FILE in BoardConfig.mk and checked against the
+  framework manifest by check_vintf.
+
+  type="device" (not "framework" - that is the FCM, which lives in AOSP and
+  states what the framework requires of vendors).
+
+  Deliberately minimal. The Rockchip vendor code on this board does not call into
+  any framework HAL: the HALs it talks to are its own, plus the kernel. The one
+  real requirement is the VNDK version, because BOARD_VNDK_VERSION := current
+  means vendor libraries are linked against the Android 14 VNDK snapshot and will
+  not load against an older one.
+-->
+<compatibility-matrix version="1.0" type="device">
+    <vendor-ndk>
+        <version>34</version>
+    </vendor-ndk>
+</compatibility-matrix>

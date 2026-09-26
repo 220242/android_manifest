@@ -1,0 +1,5 @@
+# Sysfs types referenced by genfs_contexts that AOSP does not already define.
+type sysfs_gpu, fs_type, sysfs_type;
+type sysfs_hdmi, fs_type, sysfs_type;
+type sysfs_wlan_fwpath, fs_type, sysfs_type;
+type sysfs_mmc_host, fs_type, sysfs_type;

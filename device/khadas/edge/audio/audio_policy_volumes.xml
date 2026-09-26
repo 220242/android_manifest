@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Khadas Edge1 - volume curves.
+
+  A TV box drives an external amplifier or TV speakers, so the platform's
+  phone-oriented attenuation curves are replaced by the flatter TV curves and
+  the device does not apply its own limiter.
+-->
+<volumes>
+    <!-- default_volume_tables.xml is included by
+         audio_policy_configuration.xml, not here: including it in both places
+         defines every stream's curve twice and audiopolicy rejects the
+         duplicate. -->
+    <volume stream="AUDIO_STREAM_MUSIC" deviceCategory="DEVICE_CATEGORY_EXT_MEDIA">
+        <point>0,-4200</point>
+        <point>33,-2400</point>
+        <point>66,-1200</point>
+        <point>100,0</point>
+    </volume>
+</volumes>

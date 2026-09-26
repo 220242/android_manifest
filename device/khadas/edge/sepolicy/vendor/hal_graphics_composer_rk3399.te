@@ -1,0 +1,24 @@
+# AIDL android.hardware.graphics.composer3-V3, Rockchip drm_hwcomposer fork.
+# Replaces HIDL composer@2.{1,2,3}.
+
+type hal_graphics_composer_rk3399, domain;
+type hal_graphics_composer_rk3399_exec, exec_type, vendor_file_type, file_type;
+
+hal_server_domain(hal_graphics_composer_rk3399, hal_graphics_composer)
+init_daemon_domain(hal_graphics_composer_rk3399)
+
+allow hal_graphics_composer_rk3399 graphics_device:chr_file rw_file_perms;
+allow hal_graphics_composer_rk3399 gpu_device:chr_file rw_file_perms;
+# RGA 2D engine, used for the scaling and format-conversion fallback path when
+# a layer cannot be handled by a DRM plane.
+allow hal_graphics_composer_rk3399 rga_device:chr_file rw_file_perms;
+# HDMI mode/HDR metadata.
+allow hal_graphics_composer_rk3399 sysfs_hdmi:file rw_file_perms;
+allow hal_graphics_composer_rk3399 sysfs_hdmi:dir r_dir_perms;
+
+# The composer is the process that drives vsync, so it needs to raise its own
+# scheduling priority.
+allow hal_graphics_composer_rk3399 self:global_capability_class_set sys_nice;
+
+get_prop(hal_graphics_composer_rk3399, vendor_graphics_prop)
+set_prop(hal_graphics_composer_rk3399, vendor_hwc_prop)

@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Khadas Edge1 (RK3399) - hardware codec declarations.
+
+  Only meaningful when EDGE1_ENABLE_INCOMPLETE_HALS=true, which is what builds
+  the Rockchip Codec2 store (libcodec2_rk over librockchip_mpp). With the flag
+  off the build uses AOSP's software store and this file is not installed -
+  device.mk gates the copy, because advertising a hardware decoder that has no
+  Codec2 component behind it makes MediaCodec fail to configure rather than fall
+  back to software.
+
+  RK3399 VPU capability: H.264 to 4K@30, H.265/VP9 to 4K@60 decode; H.264 encode
+  to 1080p@30.
+-->
+<MediaCodecs>
+    <Include href="media_codecs_google_audio.xml" />
+    <Include href="media_codecs_google_telephony.xml" />
+
+    <Decoders>
+        <MediaCodec name="c2.rk.avc.decoder" type="video/avc">
+            <Limit name="size" min="64x64" max="3840x2160" />
+            <Limit name="alignment" value="2x2" />
+            <Limit name="block-size" value="16x16" />
+            <Limit name="blocks-per-second" min="1" max="489600" />
+            <Limit name="bitrate" range="1-100000000" />
+            <Feature name="adaptive-playback" />
+        </MediaCodec>
+        <MediaCodec name="c2.rk.hevc.decoder" type="video/hevc">
+            <Limit name="size" min="64x64" max="3840x2160" />
+            <Limit name="alignment" value="2x2" />
+            <Limit name="block-size" value="16x16" />
+            <Limit name="blocks-per-second" min="1" max="979200" />
+            <Limit name="bitrate" range="1-100000000" />
+            <Feature name="adaptive-playback" />
+        </MediaCodec>
+        <MediaCodec name="c2.rk.vp9.decoder" type="video/x-vnd.on2.vp9">
+            <Limit name="size" min="64x64" max="3840x2160" />
+            <Limit name="alignment" value="2x2" />
+            <Limit name="block-size" value="16x16" />
+            <Limit name="blocks-per-second" min="1" max="979200" />
+            <Limit name="bitrate" range="1-100000000" />
+            <Feature name="adaptive-playback" />
+        </MediaCodec>
+        <MediaCodec name="c2.rk.mpeg2.decoder" type="video/mpeg2">
+            <Limit name="size" min="64x64" max="1920x1088" />
+            <Limit name="alignment" value="2x2" />
+            <Limit name="block-size" value="16x16" />
+            <Limit name="bitrate" range="1-40000000" />
+        </MediaCodec>
+    </Decoders>
+
+    <Encoders>
+        <MediaCodec name="c2.rk.avc.encoder" type="video/avc">
+            <Limit name="size" min="96x96" max="1920x1088" />
+            <Limit name="alignment" value="2x2" />
+            <Limit name="block-size" value="16x16" />
+            <Limit name="bitrate" range="1-30000000" />
+        </MediaCodec>
+    </Encoders>
+</MediaCodecs>

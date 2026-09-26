@@ -1,0 +1,34 @@
+FIRMWARE_VER: 14.0.0
+MACHINE_MODEL: RK3399
+MACHINE_ID: 007
+MANUFACTURER: KHADAS
+MAGIC: 0x5041524B
+ATAG: 0x00200800
+MACHINE: 0xffffffff
+CHECK_MASK: 0x80
+PWR_HLD: 0,0,A,0,1
+TYPE: GPT
+# Khadas Edge1 - Android TV 14 partition layout.
+#
+# Offsets and sizes are in 512-byte sectors. Rewritten from the Android 10
+# layout: the fixed system/vendor/odm partitions are replaced by one 4608MiB
+# super partition holding them as logical partitions, and vendor_boot and
+# metadata are added (both are Android 12+ requirements that the Android 10
+# parameter.txt predates).
+#
+#   uboot          4MiB   @ 0x00004000
+#   misc           4MiB   @ 0x00006000
+#   boot          64MiB   @ 0x00008000
+#   recovery      64MiB   @ 0x00028000
+#   vendor_boot   64MiB   @ 0x00048000
+#   baseparameter  4MiB   @ 0x00068000
+#   dtbo           8MiB   @ 0x0006a000
+#   vbmeta         1MiB   @ 0x0006e000
+#   metadata      16MiB   @ 0x0006e800
+#   super       4608MiB   @ 0x00076800
+#   userdata      rest    @ 0x00976800  (grows to fill the eMMC)
+#
+# On a 16GB eMMC this leaves roughly 10GiB for userdata; on 32/64GB models
+# userdata absorbs the remainder because of the :grow flag.
+CMDLINE: mtdparts=rk29xxnand:0x00002000@0x00004000(uboot),0x00002000@0x00006000(misc),0x00020000@0x00008000(boot),0x00020000@0x00028000(recovery),0x00020000@0x00048000(vendor_boot),0x00002000@0x00068000(baseparameter),0x00004000@0x0006a000(dtbo),0x00000800@0x0006e000(vbmeta),0x00008000@0x0006e800(metadata),0x00900000@0x00076800(super),-@0x00976800(userdata:grow)
+uuid:super=00000000-0000-0000-0000-000000000006

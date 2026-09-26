@@ -1,0 +1,84 @@
+# Khadas Edge1 (RK3399) - vendor init.
+#
+# Only board bring-up lives here. HAL services are declared by their own
+# init_rc: entries in shims/*/Android.bp, which is the Android 14 convention -
+# the Android 10 tree declared every HIDL service by hand in
+# device/rockchip/common/init.rockchip.rc.
+
+import /vendor/etc/init/hw/init.edge1.usb.rc
+
+on early-init
+    # Mali-T860 (Midgard) devfreq governor. simple_ondemand is what the
+    # Rockchip 4.19 BSP validates the T860 OPP table against.
+    write /sys/class/devfreq/ff9a0000.gpu/governor simple_ondemand
+
+on init
+    # big.LITTLE: 2x A72 (cpu4-5) + 4x A53 (cpu0-3).
+    write /sys/devices/system/cpu/cpufreq/policy0/scaling_governor schedutil
+    write /sys/devices/system/cpu/cpufreq/policy4/scaling_governor schedutil
+
+    # DDR devfreq. The legacy tree drove this from a userspace daemon; on 14
+    # the dmc governor handles it.
+    write /sys/class/devfreq/dmc/governor dmc_ondemand
+
+    chown system system /sys/class/devfreq/dmc/governor
+    chown system system /sys/class/devfreq/ff9a0000.gpu/governor
+
+on post-fs-data
+    mkdir /data/vendor 0771 root root
+    mkdir /data/vendor/wifi 0771 wifi wifi
+    mkdir /data/vendor/wifi/wpa 0770 wifi wifi
+    mkdir /data/vendor/wifi/wpa/sockets 0770 wifi wifi
+    mkdir /data/vendor/hostapd 0770 wifi wifi
+    mkdir /data/vendor/bluetooth 0770 bluetooth bluetooth
+    mkdir /data/vendor/media 0770 mediacodec media
+    mkdir /data/vendor/tv 0770 system system
+
+on boot
+    # HDMI-CEC device node for the AIDL hdmi.cec service.
+    chown system system /dev/cec0
+    chmod 0660 /dev/cec0
+
+    # Mali render node, used by both gralloc and the composer3 service.
+    chown system graphics /dev/mali0
+    chmod 0666 /dev/mali0
+
+    # Rockchip VPU service nodes for the Codec2 store.
+    chown media media /dev/mpp_service
+    chmod 0660 /dev/mpp_service
+    chown media media /dev/rga
+    chmod 0660 /dev/rga
+
+    # IR receiver on the Edge1 front edge.
+    chown system system /dev/lirc0
+
+# ---------------------------------------------------------------------------
+# Wi-Fi / Bluetooth: AP6398S (Broadcom BCM4359).
+#
+# bcmdhd is an out-of-tree module built with the 4.19 kernel. Firmware moved to
+# /vendor/etc/firmware for Treble - vendor code may not read /system/etc.
+# ---------------------------------------------------------------------------
+on post-fs-data
+    insmod /vendor/lib/modules/bcmdhd.ko
+    write /sys/module/bcmdhd/parameters/firmware_path /vendor/etc/firmware
+
+service brcm_patchram :/vendor/bin/brcm_patchram_plus \
+        --patchram /vendor/etc/firmware/BCM4359C0.hcd \
+        --baudrate 1500000 --enable_hci --no2bytes --tosleep 200000 \
+        /dev/ttyS0
+    class late_start
+    user bluetooth
+    group bluetooth net_bt_admin
+    disabled
+    oneshot
+
+on property:bluetooth.hci.enabled=1
+    start brcm_patchram
+
+# ---------------------------------------------------------------------------
+# Android TV specifics.
+# ---------------------------------------------------------------------------
+on property:sys.boot_completed=1
+    # A TV box has no battery and no ambient light sensor; keep the display on
+    # and let HDMI-CEC standby drive power state instead.
+    write /sys/class/backlight/backlight/brightness 255
