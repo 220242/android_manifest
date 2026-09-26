@@ -174,6 +174,7 @@ function Invoke-InDistro {
         [switch] $AsRoot,
         [switch] $AllowFailure
     )
+    Assert-BashSafe $Command
     # Not $args: that is a reserved automatic variable inside a function.
     $wslArgs = @('-d', $script:DistroName)
     if ($AsRoot) { $wslArgs += @('-u','root') }
@@ -185,11 +186,40 @@ function Invoke-InDistro {
 # the report, which has to put the text in a file rather than on screen.
 function Invoke-WslCapture {
     param([Parameter(Mandatory)][string] $Command, [switch] $AsRoot)
+    Assert-BashSafe $Command
     $wslArgs = @('-d', $script:DistroName)
     if ($AsRoot) { $wslArgs += @('-u','root') }
     $wslArgs += @('--','bash','-lc', $Command)
-    $out = & wsl.exe @wslArgs 2>&1
+
+    # 'Continue', not the script-wide 'Stop': with 2>&1 a native command's stderr
+    # becomes an ErrorRecord, and under Stop that terminates. The report collector
+    # is the one thing that must never die from the output it is collecting - that
+    # is precisely when it is needed.
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $out = & wsl.exe @wslArgs 2>&1
+    } finally {
+        $ErrorActionPreference = $prevEap
+    }
     return ($out | Out-String)
+}
+
+# Guards against a PowerShell 5.1 trap that is invisible until bash chokes.
+#
+# When PowerShell passes a string to a native command it strips embedded double
+# quotes. A command like:  ... || echo "(not cloned yet)"  reaches bash as
+# ... || echo (not cloned yet)  and dies with
+#   /bin/bash: -c: line 1: syntax error near unexpected token `('
+# Single quotes are not special to the Windows command line and DO survive, so
+# every bash command here quotes with single quotes.
+function Assert-BashSafe {
+    param([string] $Command)
+    if ($Command.Contains('"')) {
+        throw ("internal error: bash command contains a double quote, which " +
+               "PowerShell strips when calling a native command. Use single " +
+               "quotes instead. Command: $Command")
+    }
 }
 
 # Finds the current amd64 WSL rootfs and its published SHA256.
@@ -357,8 +387,16 @@ function Collect-Report {
     if ($distros -contains $script:DistroName) {
         Write-Info 'querying the distro'
         try {
-            $linux = Invoke-WslCapture -Command '~/android_khadas/android_manifest/build/windows/provision-wsl.sh report 2>&1 || echo "(report stage failed or the repo is not cloned yet)"'
-            [void]$sb.AppendLine($linux)
+            # No '|| echo ...' fallback here: the double quotes it needed were
+            # stripped by PowerShell and broke the whole command. An empty result
+            # is handled on this side instead.
+            $linux = Invoke-WslCapture -Command '~/android_khadas/android_manifest/build/windows/provision-wsl.sh report 2>&1'
+            if ([string]::IsNullOrWhiteSpace($linux)) {
+                [void]$sb.AppendLine('##### LINUX #####')
+                [void]$sb.AppendLine('the report stage produced no output; the repo may not be cloned yet.')
+            } else {
+                [void]$sb.AppendLine($linux)
+            }
         } catch {
             [void]$sb.AppendLine("##### LINUX REPORT FAILED #####")
             [void]$sb.AppendLine($_.Exception.Message)

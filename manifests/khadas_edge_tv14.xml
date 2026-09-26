@@ -26,6 +26,35 @@
   <remote name="khadas" fetch="https://github.com/khadas/" />
 
   <!-- ==================================================================
+       Removals: Pixel kernel prebuilts.
+
+       These are gigabytes of prebuilt kernel binaries for Pixel phones and have
+       nothing to do with an RK3399 TV box. They are dropped for three reasons:
+       the disk they save, the sync time, and because they are LFS-backed -
+       device/google/bluejay-kernel is what deterministically failed checkout
+       here before git-lfs was installed.
+
+       Safe to remove: nothing in an edge1_tv build references another device's
+       kernel prebuilt. Names taken verbatim from the AOSP 14 manifest at
+       android-14.0.0_r75.
+
+       Not removed, though also unused: external/deqp, external/deqp-deps/*,
+       packages/apps/Browser2, prebuilts/qemu-kernel. They are small, and
+       dropping a project some other Android.bp might reference risks a Soong
+       analysis error that is harder to diagnose than the disk is worth.
+       ================================================================== -->
+  <remove-project name="device/google/akita-kernel" />
+  <remove-project name="device/google/bluejay-kernel" />
+  <remove-project name="device/google/coral-kernel" />
+  <remove-project name="device/google/felix-kernel" />
+  <remove-project name="device/google/lynx-kernel" />
+  <remove-project name="device/google/pantah-kernel" />
+  <remove-project name="device/google/raviole-kernel" />
+  <remove-project name="device/google/redbull-kernel" />
+  <remove-project name="device/google/shusky-kernel" />
+  <remove-project name="device/google/sunfish-kernel" />
+  <remove-project name="device/google/tangorpro-kernel" />
+  <!-- ==================================================================
        Kernel: 4.19.111 (khadas-edge-Qt).
        4.19 is the minimum kernel an Android 14 *upgrade* device may ship
        (launch devices require 5.15). Board DTS:

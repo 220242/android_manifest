@@ -44,11 +44,17 @@ stage_deps() {
     # The canonical AOSP list, plus repo's own needs. python-is-python3 matters:
     # several AOSP scripts still invoke bare `python`.
     sudo -E apt-get install -y -qq \
-        git-core gnupg flex bison build-essential zip curl zlib1g-dev \
+        git-core git-lfs gnupg flex bison build-essential zip curl zlib1g-dev \
         libc6-dev-i386 x11proto-dev libx11-dev lib32z1-dev libgl1-mesa-dev \
         libxml2-utils xsltproc unzip fontconfig python3 python3-pip \
         python-is-python3 rsync ccache bc lz4 libssl-dev \
         device-tree-compiler openjdk-17-jdk-headless
+    # repo init is run with --git-lfs, and several AOSP projects (notably the
+    # Pixel *-kernel prebuilts) store their binaries in LFS. Without the git-lfs
+    # binary those projects fetch fine and then fail at checkout, deterministically
+    # and with no mention of LFS in the error - which is exactly how it presented.
+    git lfs install --skip-repo >/dev/null 2>&1 || true
+
     if ! command -v repo >/dev/null 2>&1; then
         log "installing the repo launcher"
         sudo curl -fsSL -o /usr/local/bin/repo \

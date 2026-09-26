@@ -39,17 +39,39 @@ mkdir -p .repo/local_manifests
 cp "$MANIFEST_REPO_DIR/manifests/khadas_edge_tv14.xml" .repo/local_manifests/
 
 # -c: current branch only. --no-clone-bundle: the bundles are often slower than a
-# direct fetch and cost extra disk. -j is deliberately modest; android.googlesource
-# throttles aggressive clients and the retry loop below costs more than it saves.
+# direct fetch and cost extra disk.
+#
+# -j4, not -j$(nproc): android.googlesource.com rate-limits aggressive clients and
+# answers HTTP 429 / RESOURCE_EXHAUSTED. At -j8 that reliably knocked out a
+# handful of projects per pass. Sync is network-bound anyway, so a wider -j buys
+# nothing once the server starts refusing.
+#
+# --force-sync: after a failed pass some projects are left with a checkout that
+# does not match the manifest, and plain sync then refuses to touch them. Without
+# it, one bad project blocks every later attempt.
+readonly SYNC_JOBS=4
+
 for attempt in 1 2 3 4; do
-    if repo sync -c --no-clone-bundle --optimized-fetch --prune -j"$(( $(nproc) > 8 ? 8 : $(nproc) ))"; then
+    jobs=$SYNC_JOBS
+    extra=()
+    if (( attempt == 4 )); then
+        # Last pass: serial and stop at the first error, so the log names one
+        # real cause instead of a list of rate-limit casualties.
+        jobs=1
+        extra+=(--fail-fast)
+        echo "final attempt: -j1 --fail-fast for a single clear error" >&2
+    fi
+    if repo sync -c --no-clone-bundle --optimized-fetch --prune --force-sync \
+                 -j"$jobs" "${extra[@]}"; then
         break
     fi
     if (( attempt == 4 )); then
         echo "repo sync failed after 4 attempts" >&2
         exit 1
     fi
-    delay=$(( 2 ** attempt ))
+    # Longer backoff than the usual 2/4/8: a 429 is a rate limit with a cooldown,
+    # and retrying after two seconds just collects another one.
+    delay=$(( 30 * attempt ))
     echo "repo sync failed, retrying in ${delay}s (attempt $attempt/4)" >&2
     sleep "$delay"
 done
