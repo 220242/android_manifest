@@ -28,6 +28,25 @@ Bluetooth is the same shape: AOSP's
 BCM4359 needs its firmware patchram loaded first, which is a one-shot service in
 `init/init.edge1.rc`, not a HAL responsibility.
 
+## Verified against a real Android 14 tree (android-14.0.0_r75)
+
+`build/verify-aidl-surface.sh` was run against a synced tree. Results:
+
+* **`graphics.allocator` V2 — confirmed.** The four methods this shim implements
+  match the frozen AIDL exactly: `allocate(byte[], int)`,
+  `allocate2(BufferDescriptorInfo, int)`, `isSupported(BufferDescriptorInfo)`,
+  `getIMapperLibrarySuffix()`. No changes needed.
+* **`wifi` V1 — confirmed.** `IWifi` is the generic AOSP interface, which
+  supports the decision to ship AOSP's `wifi-service` with no vendor HAL.
+* **`tv.input` V1, `tv.hdmi.cec` V1, `tv.hdmi.connection` V1 — signatures
+  obtained.** Enough to write these three shims when they are wanted; AOSP's
+  examples cover them for now.
+* **`graphics.composer3`, `audio.core`, `audio.effect` — not yet read.** The first
+  run reported them missing, which was a false negative from this script deriving
+  a directory from the package name: composer3 lives in `graphics/composer/aidl`
+  and audio.core in `audio/aidl`. The script now finds interfaces by searching for
+  `aidl_api/<package>/<version>`, so a re-run returns them.
+
 ## Why the remaining three are strategy-only
 
 `composer3`, `tv.input` and `tv.hdmi.cec` are not written as code because their

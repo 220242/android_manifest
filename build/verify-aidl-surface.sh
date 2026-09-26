@@ -19,36 +19,63 @@ readonly IFACES="$TREE/hardware/interfaces"
 [[ -f "$MANIFEST" ]] || { echo "no manifest at $MANIFEST" >&2; exit 1; }
 [[ -d "$IFACES" ]] || { echo "hardware/interfaces not synced at $IFACES" >&2; exit 1; }
 
-# Pull every AIDL HAL name out of the device manifest.
-python3 - "$MANIFEST" <<'PY' | while read -r name ver; do
+# Every AIDL HAL name and version declared by the device manifest.
+readonly HALS=$(python3 - "$MANIFEST" <<'PY'
 import sys, xml.etree.ElementTree as ET
-root = ET.parse(sys.argv[1]).getroot()
-for hal in root.findall('hal'):
+for hal in ET.parse(sys.argv[1]).getroot().findall('hal'):
     if hal.get('format') != 'aidl':
         continue
-    n = hal.findtext('name')
-    v = hal.findtext('version') or '?'
-    print(n, v)
+    print(hal.findtext('name'), hal.findtext('version') or 'current')
 PY
-    # android.hardware.graphics.allocator -> hardware/interfaces/graphics/allocator/aidl
-    rel="${name#android.hardware.}"
-    path="$IFACES/${rel//.//}/aidl"
+)
+
+# Locate an interface by SEARCHING for its aidl_api directory rather than
+# deriving a path from the package name.
+#
+# Deriving the path produced false negatives that looked like missing
+# interfaces: android.hardware.graphics.composer3 lives in
+# graphics/composer/aidl, not graphics/composer3/aidl, and
+# android.hardware.audio.core lives in audio/aidl, not audio/core/aidl. The
+# package name does not track the directory layout. The aidl_api directory,
+# however, is always named after the package exactly, so that is the key.
+find_iface() {
+    local name="$1" ver="$2" src
+    src=$(find "$IFACES" -type d -path "*/aidl_api/$name/$ver" 2>/dev/null | head -1)
+    if [[ -z "$src" ]]; then
+        # Unfrozen interfaces have no numbered snapshot, only 'current'.
+        src=$(find "$IFACES" -type d -path "*/aidl_api/$name/current" 2>/dev/null | head -1)
+    fi
+    if [[ -z "$src" ]]; then
+        # Last resort: the package's own source tree, before any snapshot.
+        src=$(find "$IFACES" -type d -path "*/${name//.//}" 2>/dev/null | head -1)
+    fi
+    printf '%s' "$src"
+}
+
+while read -r name ver; do
+    [[ -n "$name" ]] || continue
     echo "=============================================================="
     echo "$name  (declared version $ver)"
-    if [[ ! -d "$path" ]]; then
-        echo "  !! no AIDL definition at ${path#$TREE/}"
-        echo "     Either the name is wrong or this interface does not exist in"
-        echo "     this AOSP release. check_vintf will reject the manifest."
+
+    src=$(find_iface "$name" "$ver")
+    if [[ -z "$src" ]]; then
+        echo "  !! not found under ${IFACES#$TREE/}"
+        echo "     Searched aidl_api/$name/{$ver,current} and the package source."
+        echo "     Either the name in vintf/manifest.xml is wrong or the interface"
+        echo "     does not exist in this release; check_vintf would reject it."
         continue
     fi
-    # Frozen versions live under aidl/aidl_api/<pkg>/<ver>/; current is the source.
-    api="$path/aidl_api/$name/$ver"
-    src="$api"
-    [[ -d "$api" ]] || src="$path/android/hardware/${rel//.//}"
+    case "$src" in
+        */aidl_api/*/"$ver") ;;
+        */aidl_api/*/current) echo "  NOTE: version $ver is not frozen; showing 'current'" ;;
+        *)                    echo "  NOTE: no aidl_api snapshot; showing the source tree" ;;
+    esac
     echo "  source: ${src#$TREE/}"
-    find "$src" -name 'I*.aidl' 2>/dev/null | sort | while read -r f; do
+
+    while read -r f; do
+        [[ -n "$f" ]] || continue
         echo "  --- $(basename "$f") ---"
         # Method declarations only: lines ending in ');'
-        grep -nE '^\s+[A-Za-z@].*\);\s*$' "$f" | sed 's/^/    /'
-    done
-done
+        grep -nE '^[[:space:]]+[A-Za-z@].*\);[[:space:]]*$' "$f" | sed 's/^/    /' || true
+    done < <(find "$src" -name 'I*.aidl' 2>/dev/null | sort)
+done <<< "$HALS"
