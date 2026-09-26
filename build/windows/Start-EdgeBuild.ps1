@@ -71,6 +71,13 @@ param(
     [ValidateRange(2,32)]
     [int] $ReserveGB = 6,
 
+    # Name for the WSL distribution this script creates and drives. Override it
+    # only to point at an existing distro you want to reuse; note that a distro
+    # created elsewhere probably has its disk on C:, which defeats the purpose of
+    # putting the tree on the large drive.
+    [ValidatePattern('^[A-Za-z0-9._-]+$')]
+    [string] $DistroName = 'Edge1Build',
+
     [switch] $Force
 )
 
@@ -82,10 +89,19 @@ $ErrorActionPreference = 'Stop'
 # PowerShell/WSL scripts misbehaving.
 $env:WSL_UTF8 = '1'
 
-$script:DistroName = 'Edge1Build'
+$script:DistroName = $DistroName
 $script:RepoUrl    = 'https://github.com/220242/android_manifest'
 $script:RepoBranch = 'claude/determined-johnson-fwwaig'
-$script:RootFsUrl  = 'https://cloud-images.ubuntu.com/wsl/jammy/current/ubuntu-jammy-wsl-amd64-wsl.rootfs.tar.gz'
+# Directory index, not a fixed filename.
+#
+# The previous version hardcoded .../ubuntu-jammy-wsl-amd64-wsl.rootfs.tar.gz and
+# broke with a 404 when Canonical renamed the artefact to
+# ...-amd64-ubuntu22.04lts.rootfs.tar.gz. Resolving the name from the index at
+# run time survives the next rename too.
+#
+# jammy (22.04) rather than noble (24.04): AOSP 14's host prebuilts are built
+# against the older glibc, and 22.04 is what Google's own build images use.
+$script:RootFsIndex = 'https://cloud-images.ubuntu.com/wsl/jammy/current/'
 $script:StatePath  = Join-Path $Root '.build-state.json'
 
 # Disk: ~120GiB checkout + ~150GiB output, plus the rootfs and logs.
@@ -174,6 +190,65 @@ function Invoke-WslCapture {
     $wslArgs += @('--','bash','-lc', $Command)
     $out = & wsl.exe @wslArgs 2>&1
     return ($out | Out-String)
+}
+
+# Finds the current amd64 WSL rootfs and its published SHA256.
+function Resolve-RootFs {
+    Write-Info "resolving the rootfs name from $($script:RootFsIndex)"
+    $prev = $ProgressPreference
+    $ProgressPreference = 'SilentlyContinue'
+    try {
+        $index = (Invoke-WebRequest -Uri $script:RootFsIndex -UseBasicParsing -TimeoutSec 60).Content
+    } catch {
+        throw "could not read the Ubuntu image index at $($script:RootFsIndex): $($_.Exception.Message)"
+    } finally {
+        $ProgressPreference = $prev
+    }
+
+    # amd64 only: the arm64 artefact sits in the same directory and matches a
+    # looser pattern.
+    $names = [regex]::Matches($index, 'ubuntu-jammy-wsl-amd64-[A-Za-z0-9._-]*rootfs\.tar\.gz') |
+             ForEach-Object { $_.Value } | Select-Object -Unique
+    if (-not $names) {
+        throw ("no amd64 rootfs found in $($script:RootFsIndex). Canonical may have " +
+               "restructured the path; open it in a browser and pass the tarball " +
+               "to 'wsl --import' by hand.")
+    }
+    $name = $names | Sort-Object | Select-Object -Last 1
+    Write-Good "rootfs: $name"
+
+    # Published checksums, so a truncated or proxy-mangled download is caught
+    # before it is imported rather than as a broken distro later.
+    $sha = $null
+    try {
+        $sums = (Invoke-WebRequest -Uri ($script:RootFsIndex + 'SHA256SUMS') -UseBasicParsing -TimeoutSec 60).Content
+        foreach ($line in ($sums -split "`r?`n")) {
+            if ($line -match "^([0-9a-fA-F]{64})\s+\*?$([regex]::Escape($name))$") {
+                $sha = $Matches[1].ToLower()
+                break
+            }
+        }
+    } catch {
+        Write-Warn2 "could not fetch SHA256SUMS: $($_.Exception.Message)"
+    }
+    if ($sha) { Write-Info "expected sha256: $sha" }
+    else { Write-Warn2 'no checksum available; the download will not be verified' }
+
+    return [pscustomobject]@{
+        Name   = $name
+        Url    = $script:RootFsIndex + $name
+        Sha256 = $sha
+    }
+}
+
+function Test-FileSha256 {
+    param([string] $Path, [string] $Expected)
+    if (-not $Expected) { return $true }
+    Write-Info 'verifying sha256'
+    $actual = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLower()
+    if ($actual -eq $Expected) { Write-Good 'checksum matches'; return $true }
+    Write-Warn2 "checksum mismatch: got $actual"
+    return $false
 }
 
 function Start-BuildLog {
@@ -424,19 +499,36 @@ function Stage-Distro {
         Invoke-Wsl -Arguments @('--unregister', $script:DistroName)
     }
 
-    $rootfs = Join-Path $Root 'ubuntu-22.04-rootfs.tar.gz'
-    if (Test-Path -LiteralPath $rootfs) {
-        Write-Good "rootfs already downloaded: $rootfs"
+    $image = Resolve-RootFs
+    $rootfs = Join-Path $Root $image.Name
+
+    # An existing file is trusted only if it passes the checksum. Resuming a
+    # partial download whose URL has since changed would otherwise splice two
+    # different tarballs together, and the failure would surface as a corrupt
+    # distro much later.
+    if ((Test-Path -LiteralPath $rootfs) -and (Test-FileSha256 -Path $rootfs -Expected $image.Sha256)) {
+        Write-Good "rootfs already present: $rootfs"
     } else {
-        Write-Info "downloading the Ubuntu 22.04 WSL rootfs (~300 MB)"
-        # curl.exe ships with Windows 10 1803+ and supports resume, which
-        # Invoke-WebRequest does not. -C - resumes a partial file.
+        if (Test-Path -LiteralPath $rootfs) {
+            Write-Warn2 'discarding the existing file and downloading again'
+            Remove-Item -LiteralPath $rootfs -Force
+        }
+        Write-Info "downloading $($image.Url) (~325 MiB)"
         if (Get-Command curl.exe -ErrorAction SilentlyContinue) {
-            & curl.exe -fL --retry 3 --retry-delay 5 -C - -o $rootfs $script:RootFsUrl
-            if ($LASTEXITCODE -ne 0) { throw "rootfs download failed ($LASTEXITCODE)" }
+            # curl.exe ships with Windows 10 1803+. -f makes an HTTP error a
+            # non-zero exit instead of a saved error page.
+            & curl.exe -fL --retry 3 --retry-delay 5 -o $rootfs $image.Url
+            if ($LASTEXITCODE -ne 0) {
+                throw "rootfs download failed (curl $LASTEXITCODE) from $($image.Url)"
+            }
         } else {
+            $prev = $ProgressPreference
             $ProgressPreference = 'SilentlyContinue'
-            Invoke-WebRequest -Uri $script:RootFsUrl -OutFile $rootfs -UseBasicParsing
+            try { Invoke-WebRequest -Uri $image.Url -OutFile $rootfs -UseBasicParsing }
+            finally { $ProgressPreference = $prev }
+        }
+        if (-not (Test-FileSha256 -Path $rootfs -Expected $image.Sha256)) {
+            throw "downloaded rootfs failed checksum verification: $rootfs"
         }
         Write-Good 'rootfs downloaded'
     }

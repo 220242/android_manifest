@@ -59,7 +59,7 @@ Reach it from Explorer at `\\wsl.localhost\Edge1Build\home\builder\android_khada
 |---|---|
 | `Check` | Windows build >= 19041, hypervisor, RAM, >= 320 GiB free on the target drive |
 | `Wsl` | Installs the WSL2 platform with `--no-distribution` (keeps Store Ubuntu off C:) |
-| `Distro` | Downloads the Ubuntu 22.04 WSL rootfs, imports it onto the target drive, creates the `builder` user |
+| `Distro` | Resolves and downloads the Ubuntu 22.04 WSL rootfs (checksum-verified), imports it onto the target drive, creates the `builder` user |
 | `Tune` | Writes `%USERPROFILE%\.wslconfig` sized to your RAM, plus a 32 GB swap file on the target drive |
 | `Provision` | Installs AOSP dependencies, clones the device tree, runs `preflight.sh` and `verify-tree.sh` |
 | `Sync` | Resolves the newest `android-14.0.0_r*` tag and syncs (100+ GiB) |
@@ -95,6 +95,22 @@ Generate one on demand without running anything:
 ```powershell
 .\Start-EdgeBuild.ps1 -Stage Report
 ```
+
+## Notes
+
+The rootfs filename is resolved from Canonical's directory index at run time
+rather than hardcoded — the published artefact has been renamed before
+(`...-amd64-wsl.rootfs.tar.gz` became `...-amd64-ubuntu22.04lts.rootfs.tar.gz`),
+and a hardcoded URL fails with a bare 404. The download is verified against the
+published `SHA256SUMS`, and a pre-existing file is only reused if it passes.
+
+Ubuntu 22.04 (jammy), not 24.04: AOSP 14's host prebuilts are built against the
+older glibc, and 22.04 is what Google's own build images use.
+
+`-DistroName` points the script at a different WSL distribution. Only useful for
+reusing one you already have — a distro created any other way almost certainly
+has its virtual disk on `C:`, which defeats the point of putting the tree on the
+large drive.
 
 ## Memory
 
