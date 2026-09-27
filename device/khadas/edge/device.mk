@@ -64,8 +64,16 @@ PRODUCT_COPY_FILES += \
     frameworks/native/data/etc/android.hardware.wifi.direct.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/android.hardware.wifi.direct.xml \
     frameworks/native/data/etc/android.hardware.bluetooth.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/android.hardware.bluetooth.xml \
     frameworks/native/data/etc/android.hardware.bluetooth_le.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/android.hardware.bluetooth_le.xml \
-    frameworks/native/data/etc/android.hardware.opengles.aep.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/android.hardware.opengles.aep.xml \
     $(LOCAL_PATH)/permissions/khadas_edge_excluded_hardware.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/khadas_edge_excluded_hardware.xml
+
+# android.hardware.opengles.aep.xml was copied here, carried over from the BSP
+# where the Mali blob supported the Android Extension Pack. AEP requires GLES 3.1
+# plus a specific extension set, and panfrost on Midgard delivers 3.0 - declaring
+# it would tell applications to ask for what is not there. Same reasoning as the
+# audio policy declaring only the formats the HAL can actually produce.
+#
+# The deqp level file dragonboard also copies is left out for the same reason: it
+# states which dEQP suite the driver passes, and nothing here has run one.
 
 # TV apps. TvProvider/TvSettings come from atv_base.mk; LiveTv is the TIF
 # reference tuner UI and is what makes android.software.live_tv meaningful.
@@ -133,24 +141,46 @@ PRODUCT_PACKAGES += \
 # a driver here SurfaceFlinger does not start, and "boot on software rendering
 # first, sort out the GPU later" is not an option that exists.
 #
-# What does exist is external/mesa3d with libmesa_pipe_panfrost and
-# libmesa_winsys_panfrost, which is the whole reason this port moved to a
-# mainline kernel: panfrost binds to drivers/gpu/drm/panfrost and gives the
-# Mali-T860 GLES 3.1 with no proprietary blob. Android's EGL loader looks for
+# What does exist is external/mesa3d, which is the whole reason this port moved to
+# a mainline kernel: panfrost binds to drivers/gpu/drm/panfrost and gives the
+# Mali-T860 GLES with no proprietary blob. Android's EGL loader looks for
 # libGLES_$(ro.hardware.egl).so, which Mesa installs as libGLES_mesa.
 #
-# Vulkan is deliberately not declared: panvk on Midgard is not something to
-# depend on, and HWUI uses GLES unless told otherwise.
+# Which driver Mesa builds is BOARD_GPU_DRIVERS in BoardConfig.mk - confirmed as
+# the variable external/mesa3d reads, not guessed: its Android.mk has
+#   MESA_BUILD_GALLIUM := $(strip $(foreach d, $(BOARD_GPU_DRIVERS), ...))
 #
-# Which gallium driver Mesa builds is selected in BoardConfig.mk with
-# BOARD_MESA3D_GALLIUM_DRIVERS. The module probe prints what external/mesa3d
-# actually reads, because a wrong name there fails silently: Mesa builds, ships,
-# loads, and finds no driver at runtime.
+# The rest of this block is copied from device/linaro/dragonboard's Mesa
+# integration, the one working example of this in the tree, rather than assembled
+# from what seemed necessary. Three things came from it that were missing here:
+#
+#   PRODUCT_SOONG_NAMESPACES. external/mesa3d refuses to build without it -
+#     "external/mesa3d must be in PRODUCT_SOONG_NAMESPACES" (its Android.mk:41) -
+#     and that was the whole of the last build failure.
+#   The other five packages. libGLES_mesa alone is not the driver: the EGL loader
+#     also resolves libEGL_mesa and the two libGLESv*_mesa entry points, and the
+#     gallium driver itself lives in libgallium_dri with libglapi under it.
+#   ro.opengles.version. The framework reports what this says, not what the driver
+#     can do. 196608 is 3.0 (0x30000), which is what panfrost delivers on Midgard;
+#     claiming 3.1 here would only make applications ask for what is not there.
+#
+# Vulkan is deliberately absent, which is where this diverges from dragonboard:
+# panvk on Midgard is not something to depend on, and HWUI uses GLES unless told
+# otherwise. So no vulkan.* package and no android.hardware.vulkan permission.
+PRODUCT_SOONG_NAMESPACES += \
+    external/mesa3d
+
 PRODUCT_PACKAGES += \
-    libGLES_mesa
+    libGLES_mesa \
+    libEGL_mesa \
+    libGLESv1_CM_mesa \
+    libGLESv2_mesa \
+    libgallium_dri \
+    libglapi
 
 PRODUCT_PROPERTY_OVERRIDES += \
     ro.hardware.egl=mesa \
+    ro.opengles.version=196608 \
     ro.hardware.gralloc=minigbm \
     ro.hardware.hwcomposer=drm_minigbm
 

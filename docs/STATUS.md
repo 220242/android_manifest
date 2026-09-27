@@ -305,6 +305,39 @@ those files.
 every stage that reads it, and clears the finder cache when the content changed.
 The manifest repo stays the single source of truth; the copy is a build artefact.
 
+## The Mesa integration, and where it came from
+
+Not designed - copied, from `device/linaro/dragonboard/shared/graphics/mesa`, the
+one working Mesa integration in the AOSP tree. Three rounds went into finding it,
+and the detour is worth recording because each wrong turn had the same shape: a
+plausible name that nothing reads.
+
+`BOARD_MESA3D_GALLIUM_DRIVERS` came from Mesa's upstream Android documentation and
+was set here first. The probe then found that the only mention of `BOARD_MESA3D_*`
+anywhere in the tree is dragonboard's own makefiles, which set it alongside
+`BOARD_MESA3D_USES_MESON_BUILD` and drive meson themselves. `external/mesa3d` never
+reads those names. The variable it does read is `BOARD_GPU_DRIVERS`, and the proof
+is in its `Android.mk`:
+
+    MESA_BUILD_GALLIUM := $(strip $(foreach d, $(BOARD_GPU_DRIVERS), ...))
+
+What dragonboard's `device.mk` then supplied, none of which was obvious:
+
+* `PRODUCT_SOONG_NAMESPACES += external/mesa3d`. Mesa refuses to build without it -
+  "external/mesa3d must be in PRODUCT_SOONG_NAMESPACES", `Android.mk:41`.
+* Six packages, not one. `libGLES_mesa` is the loader's entry point; `libEGL_mesa`,
+  `libGLESv1_CM_mesa` and `libGLESv2_mesa` are the rest of it, and the driver
+  itself is `libgallium_dri` over `libglapi`.
+* `ro.opengles.version`. The framework reports what this property says, not what
+  the driver can do.
+
+Two things were deliberately *not* copied. Vulkan: dragonboard ships
+`vulkan.freedreno` and the Vulkan permissions, while panvk on Midgard is not
+something to depend on. And `android.hardware.opengles.aep.xml`, which this tree
+had been copying since the BSP days - AEP needs GLES 3.1 and a specific extension
+set, and panfrost on Midgard delivers 3.0, so declaring it tells applications to
+ask for what is not there.
+
 ## Decisions taken against the real build system
 
 These came out of reading `android-14.0.0_r75` rather than from memory, after

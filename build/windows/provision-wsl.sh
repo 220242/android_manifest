@@ -354,6 +354,11 @@ PY_INNER
             echo "  the lines that read them:"
             grep -rhnE '^[^#]*\$\((BOARD|MESA)_[A-Z0-9_]*(GPU_DRIVERS|DRIVERS)' "$md" \
                 --include='*.mk' --include='*.bp' 2>/dev/null | head -8 | sed 's/^/    /'
+            echo "  the driver names it accepts (BOARD_GPU_DRIVERS is matched against these):"
+            grep -hA 30 '^gallium_drivers *:=' "$md/Android.mk" 2>/dev/null \
+                | head -32 | sed 's/^/    /'
+            grep -hA 12 '^classic_drivers *:=' "$md/Android.mk" 2>/dev/null \
+                | head -14 | sed 's/^/    /'
             echo "  is panfrost one of the drivers it can build:"
             grep -rlE 'panfrost' "$md"/Android*.mk "$md"/Android*.bp "$md"/src/gallium/Android*.mk \
                 2>/dev/null | sed 's/^/    /' | head -5
