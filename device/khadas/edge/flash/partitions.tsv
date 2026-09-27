@@ -1,0 +1,32 @@
+# Khadas Edge1 - eMMC partition table for Android 14 on mainline U-Boot.
+#
+# This replaces the Rockchip pair parameter.txt + package-file, which described
+# the same layout in the format afptool and Rockchip's maskrom loader read. Path B
+# boots with mainline U-Boot, which uses an ordinary GPT, so the layout is
+# expressed as one and build/build.sh turns it into an sgdisk script.
+#
+# The bootloader is NOT a partition here. Mainline U-Boot on RK3399 lives in raw
+# sectors ahead of the first partition: idbloader.img at sector 64 and u-boot.itb
+# at sector 16384, which is the layout this board already boots from for OpenWrt.
+# The first partition therefore starts at 16MiB, leaving that area alone.
+#
+# Columns: name <TAB> size in MiB ("rest" = fill the device) <TAB> image file, or
+# "-" for a partition that is created empty and formatted by Android.
+#
+# misc         the bootloader control block: recovery and the boot reason live
+#              here, and Android will write to it whether or not we flash it.
+# vbmeta       AVB metadata. Present and flashed even though verification is not
+#              enforced on a userdebug build, because init reads it.
+# metadata     required by dynamic partitions: libsnapshot keeps the logical
+#              partition metadata in it, and keys for metadata encryption.
+# super        system, system_ext, product, vendor and odm as logical partitions.
+#              Never flash those images individually - that bypasses the
+#              dynamic-partition metadata and the device does not boot.
+misc	4	-
+boot	64	boot.img
+recovery	64	recovery.img
+vendor_boot	64	vendor_boot.img
+vbmeta	1	vbmeta.img
+metadata	16	-
+super	4608	super.img
+userdata	rest	-

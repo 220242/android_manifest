@@ -146,11 +146,18 @@ echo
 
 # --- 7. Kernel config sanity --------------------------------------------------
 echo "[7] kernel config fragment"
-readonly FRAG="$DEV/kernel/edge1_android14.config"
+readonly FRAG="$DEV/kernel/edge1_mainline.config"
 if [[ -f "$FRAG" ]]; then
     # Symbols that are mandatory for Android 14 to boot at all.
+    # The first six are Android's; the rest are what Path B rests on - panfrost
+    # for GLES, Rockchip DRM for KMS, brcmfmac for Wi-Fi, rkvdec for decode. A
+    # module rather than a built-in would be just as fatal here: this layout has
+    # no vendor_dlkm and loads nothing in first-stage init.
     for must in CONFIG_ANDROID_BINDERFS CONFIG_BPF_SYSCALL CONFIG_PSI \
-                CONFIG_FS_ENCRYPTION CONFIG_DM_VERITY CONFIG_USERFAULTFD; do
+                CONFIG_FS_ENCRYPTION CONFIG_DM_VERITY CONFIG_USERFAULTFD \
+                CONFIG_DRM_PANFROST CONFIG_DRM_ROCKCHIP CONFIG_ROCKCHIP_DW_HDMI \
+                CONFIG_BRCMFMAC CONFIG_BRCMFMAC_SDIO CONFIG_VIDEO_ROCKCHIP_VDEC \
+                CONFIG_SND_SIMPLE_CARD CONFIG_DRM_DW_HDMI_I2S_AUDIO; do
         grep -qE "^${must}=y" "$FRAG" && ok "$must=y" || err "$FRAG is missing ${must}=y"
     done
     # "CONFIG_X=n" is not how Kconfig disables a symbol. merge_config.sh reports
@@ -228,7 +235,7 @@ if [[ -d "$SEDIR" ]]; then
     aosp_types="gpu_device graphics_device hal_bluetooth_default_exec
                 vendor_firmware_file vendor_kernel_modules vendor_file
                 vendor_configs_file sysfs_type sysfs_devfreq sysfs_leds
-                sysfs_thermal sysfs_devices_system_cpu"
+                sysfs_thermal sysfs_devices_system_cpu video_device"
     missing_types=0
     while read -r t; do
         [[ -n "$t" ]] || continue
@@ -253,6 +260,22 @@ if [[ -d "$SEDIR" ]]; then
 else
     warn "no sepolicy directory at $SEDIR"
 fi
+echo
+
+# --- 9b. dangling line continuations ------------------------------------------
+# A make line ending in a backslash swallows the next line. When editing removed
+# the items from a list but left the "VAR += \" behind, the following comment
+# became the value - which make accepts silently and which no other check here
+# would notice.
+echo "[9b] dangling line continuations"
+dangling=0
+for mk in "$DEV"/*.mk; do
+    while IFS= read -r n; do
+        err "$(basename "$mk"):$n ends in a backslash and the next line is a comment or blank"
+        dangling=$((dangling+1))
+    done < <(awk '/\\$/ { c=NR; if ((getline nxt) > 0 && nxt ~ /^[[:space:]]*(#|$)/) print c }' "$mk")
+done
+(( dangling )) || ok "no list continues into a comment or a blank line"
 echo
 
 # --- 10. variable ownership --------------------------------------------------

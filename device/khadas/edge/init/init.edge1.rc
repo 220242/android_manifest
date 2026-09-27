@@ -39,15 +39,24 @@ on boot
     chown system system /dev/cec0
     chmod 0660 /dev/cec0
 
-    # Mali render node, used by both gralloc and the composer3 service.
-    chown system graphics /dev/mali0
-    chmod 0666 /dev/mali0
+    # The GPU is reached through the DRM render node, not /dev/mali0: that node
+    # belonged to the BSP's midgard kmod and does not exist with panfrost. Mesa
+    # opens the render node from every process that draws, so it has to be
+    # world-accessible - the same reason /dev/mali0 was 0666 on the old path.
+    chown system graphics /dev/dri/renderD128
+    chmod 0666 /dev/dri/renderD128
+    chown system graphics /dev/dri/card0
+    chmod 0660 /dev/dri/card0
 
-    # Rockchip VPU service nodes for the Codec2 store.
-    chown media media /dev/mpp_service
-    chmod 0660 /dev/mpp_service
-    chown media media /dev/rga
-    chmod 0660 /dev/rga
+    # Video: mainline exposes rkvdec and RGA as V4L2 M2M devices, replacing
+    # /dev/mpp_service and /dev/rga. Which index each lands on depends on probe
+    # order, so the whole range is set rather than one node.
+    chown media media /dev/video0
+    chmod 0660 /dev/video0
+    chown media media /dev/video1
+    chmod 0660 /dev/video1
+    chown media media /dev/media0
+    chmod 0660 /dev/media0
 
     # IR receiver on the Edge1 front edge.
     chown system system /dev/lirc0
@@ -55,24 +64,21 @@ on boot
 # ---------------------------------------------------------------------------
 # Wi-Fi / Bluetooth: AP6398S (Broadcom BCM4359).
 #
-# bcmdhd is an out-of-tree module built with the 4.19 kernel. Firmware moved to
-# /vendor/etc/firmware for Treble - vendor code may not read /system/etc.
+# Nothing to do for Wi-Fi. brcmfmac is built into the kernel and asks the kernel
+# firmware loader for brcm/brcmfmac4359-sdio.{bin,txt}, which device.mk installs
+# into /vendor/firmware. The BSP path needed a write to
+# /sys/module/bcmdhd/parameters/firmware_path here; brcmfmac has no such
+# parameter, and pointing at a module that is not loaded was the kind of line
+# that looks like configuration and does nothing.
+#
+# Bluetooth is not started. It needs the BCM4359's firmware patch loaded over
+# uart0 before an HCI device exists, and the two ways to do that pull in opposite
+# directions: the kernel's hci_bcm driver does it itself but then owns the port,
+# while Android's Bluetooth HAL wants to open the tty and patch it from
+# userspace with brcm_patchram_plus - a vendor tool this tree no longer carries.
+# The kernel driver is left out of the config so the port stays free for whichever
+# is chosen. docs/STATUS.md tracks it.
 # ---------------------------------------------------------------------------
-on post-fs-data
-    # No insmod: kedge_defconfig builds bcmdhd into the kernel (CONFIG_BCMDHD=y,
-    # and it is a bool in this tree, not a tristate), so there is no .ko. The
-    # firmware path is still set, because the built-in driver reads the same
-    # module parameter.
-    write /sys/module/bcmdhd/parameters/firmware_path /vendor/etc/firmware
-
-service brcm_patchram :/vendor/bin/brcm_patchram_plus \
-        --patchram /vendor/etc/firmware/BCM4359C0.hcd \
-        --baudrate 1500000 --enable_hci --no2bytes --tosleep 200000 \
-        /dev/ttyS0
-    class late_start
-    user bluetooth
-    group bluetooth net_bt_admin
-    disabled
     oneshot
 
 on property:bluetooth.hci.enabled=1

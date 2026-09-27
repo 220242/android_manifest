@@ -1,14 +1,21 @@
 # Khadas Edge1 - sysfs labels.
 #
-# Needed because init.edge1.rc and the power/memtrack HALs read these paths,
-# and unlabelled sysfs defaults to sysfs:s0 which vendor domains cannot write.
+# Needed because unlabelled sysfs defaults to sysfs:s0, which vendor domains
+# cannot write. The Rockchip HALs that read most of these are gone; what remains
+# is read by init, by the thermal and power HALs from AOSP, and by anything that
+# looks at the GPU's devfreq state.
+#
+# Paths are mainline's. ff9a0000.gpu is still the GPU node - the address comes from
+# the SoC, not the driver - but it is panfrost that binds to it now.
 
 genfscon sysfs /devices/platform/ff9a0000.gpu                    u:object_r:sysfs_gpu:s0
 genfscon sysfs /devices/platform/dmc                             u:object_r:sysfs_devfreq:s0
 genfscon sysfs /class/devfreq                                    u:object_r:sysfs_devfreq:s0
 genfscon sysfs /devices/system/cpu/cpufreq                       u:object_r:sysfs_devices_system_cpu:s0
 genfscon sysfs /devices/platform/fe380000.dwmmc/mmc_host         u:object_r:sysfs_mmc_host:s0
-genfscon sysfs /module/bcmdhd/parameters/firmware_path           u:object_r:sysfs_wlan_fwpath:s0
+# /module/bcmdhd/parameters/firmware_path was labelled here so init could write
+# it. brcmfmac has no such parameter: the kernel firmware loader finds the
+# firmware by name under /vendor/firmware, so nothing writes a path at run time.
 genfscon sysfs /devices/platform/ff940000.hdmi                   u:object_r:sysfs_hdmi:s0
 genfscon sysfs /class/backlight                                  u:object_r:sysfs_leds:s0
 genfscon sysfs /class/thermal                                    u:object_r:sysfs_thermal:s0

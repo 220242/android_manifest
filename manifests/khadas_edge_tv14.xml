@@ -55,117 +55,75 @@
   <remove-project name="device/google/sunfish-kernel" />
   <remove-project name="device/google/tangorpro-kernel" />
   <!-- ==================================================================
-       Kernel: 4.19.111 (khadas-edge-Qt).
-       4.19 is the minimum kernel an Android 14 *upgrade* device may ship
-       (launch devices require 5.15). Board DTS:
-         arch/arm64/boot/dts/rockchip/rk3399-khadas-edge-android.dts
-       Defconfig: arch/arm64/configs/kedge_defconfig
+       Kernel: mainline 6.12 LTS, not the Khadas 4.19 BSP.
 
-       Checked out at kernel/khadas/edge, NOT at "kernel".
+       This is the pivot the rest of the tree follows. The BSP kernel had the
+       Rockchip drivers but every userspace piece that talked to them was
+       Android-10 vintage and had to be forward-ported: gralloc, the Mali blob's
+       gralloc integration, MPP, the display HAL. Mainline inverts that trade:
+       the drivers are upstream and AOSP already ships userspace for them.
 
-       Verified against the real AOSP 14 manifest (aosp-mirror/platform_manifest
-       at android-14.0.0_r75): a project at path "kernel" would nest 28 upstream
-       projects inside itself - kernel/configs, kernel/tests and 26
-       kernel/prebuilts/* GKI trees - and repo rejects overlapping paths. The
-       Android 10 manifest got away with path="kernel" because the AOSP 10
-       manifest had far fewer kernel/* projects.
+         GPU      drivers/gpu/drm/panfrost  <- external/mesa3d, libmesa_pipe_panfrost
+         Display  drivers/gpu/drm/rockchip  <- external/drm_hwcomposer + minigbm
+         Decode   staging/media/rkvdec      <- external/v4l2_codec2  (H.264 only)
+         Wi-Fi    brcmfmac over SDIO        <- AOSP wpa_supplicant
+         Audio    simple-audio-card + HDMI  <- AOSP AIDL audio HAL over ALSA
 
-       Removing all 28 with <remove-project> would work but is fragile: the set
-       changes between releases. Using a non-colliding path needs no removals at
-       all. kernel/khadas is confirmed clear in the upstream manifest.
+       No proprietary blob is required on this path, and nothing in
+       hardware/rockchip or vendor/rockchip is used - which is why they are gone
+       from this manifest.
 
-       The kernel/prebuilts/* GKI trees remain synced and unused; this is a
-       non-GKI vendor kernel. Add <remove-project> entries for them if the extra
-       disk matters.
+       6.12.111 is the newest 6.12 LTS point release. The series matters: the
+       Khadas Edge already runs 6.12 in this owner's OpenWrt build
+       (github.com/220242/khadas_edge-openwrt, Linux 6.12.94, mainline U-Boot +
+       TF-A), so the board is proven on this kernel with HDMI, eMMC, Ethernet and
+       Wi-Fi before Android is added on top.
+
+       Board DTS: arch/arm64/boot/dts/rockchip/rk3399-khadas-edge.dts
+                  (rk3399-khadas-edge-v.dts and -captain.dts are the other two
+                  carriers; build/build-kernel.sh takes the name as a variable.)
+       Defconfig: arch/arm64/configs/defconfig plus
+                  device/khadas/edge/kernel/edge1_mainline.config
+
+       Path is kernel/mainline, not "kernel": a project at path "kernel" would
+       nest the 28 upstream kernel/* projects inside itself and repo rejects
+       overlapping paths.
+
+       clone-depth="1": the full linux history is about 5 GiB and nothing here
+       needs it. A tag plus depth 1 is roughly 250 MiB.
        ================================================================== -->
-  <project name="linux" path="kernel/khadas/edge" remote="khadas"
-           revision="a82a1a93e7def23c8c30db102aacffaf2f6b674c" />
+  <remote name="linux-stable" fetch="https://github.com/gregkh/" />
+  <project name="linux" path="kernel/mainline" remote="linux-stable"
+           revision="refs/tags/v6.12.111" clone-depth="1" />
 
   <!-- ==================================================================
-       Bootloader and flashing tools (architecture-independent of the
-       Android version; carried forward as-is).
+       Rockchip blobs that remain.
+
+       rkbin carries the two things no RK3399 bootloader can be built without,
+       whoever builds it: the DDR init blob and rk3399_bl31.elf (TF-A). Mainline
+       U-Boot consumes both, which is exactly what the OpenWrt build does.
+
+       Gone from this manifest, with the reason:
+
+         u-boot          the BSP fork, for Rockchip's update.img/maskrom flow.
+                         Path B boots with mainline U-Boot, which this board
+                         already runs.
+         RKTools         afptool/rkImageMaker, the update.img packer. Same reason.
+         hardware/rockchip/{libgralloc,hwcomposer,librga,audio,libhwjpeg,
+                            omx_il,librkvpu,liblights,power,sensor,
+                            libmemtrack,hdmicec,camera}
+                         every one of these is the Android-10 HIDL implementation
+                         that Path B replaces with AOSP code. Syncing them would
+                         be syncing a fork of a fork that nothing builds.
+         vendor/rockchip/{common,hardware}
+                         the proprietary blobs, chiefly libGLES_mali. panfrost
+                         plus Mesa is the whole point of this path; keeping the
+                         blob around invites someone to wire it back in against
+                         a gralloc it cannot talk to.
+
+       They are all in this file's git history if the BSP path is ever revisited.
        ================================================================== -->
-  <project name="u-boot" path="u-boot" remote="khadas"
-           revision="21f5a0019a7b809a03f5d7a401b96f19f3bfb5c4" />
   <project name="android_rkbin" path="rkbin" remote="khadas"
-           revision="664ccee1d4ada924848b80b2912d48c7fb30049c" />
-  <project name="android_RKTools" path="RKTools" remote="khadas"
-           revision="439fa5e23e4f2bffd6b53440d77a6b7c6eedb458" />
-
-  <!-- ==================================================================
-       Graphics. Mali-T860/T864 is Midgard, so libgralloc/midgard is the
-       correct gralloc backend (bifrost is for T[78]xx/G-series and is
-       deliberately NOT synced).
-       Migration: HIDL allocator@2.0 + mapper@{2,3}.0 -> AIDL
-       android.hardware.graphics.allocator-V2 + IMapper 5.0 (stable-c);
-       composer@2.x -> composer3-V3. See docs/HAL_MIGRATION.md.
-       ================================================================== -->
-  <project name="android_hardware_rockchip_libgralloc_midgard"
-           path="hardware/rockchip/libgralloc/midgard" remote="khadas"
-           revision="34b75b3b1e8854cc5f7936368d4be7b478cf3ac2" />
-  <project name="android_hardware_rockchip_hwcomposer"
-           path="hardware/rockchip/hwcomposer" remote="khadas"
-           revision="c7cb0905e0452fe652f3ddd788783af5c76d6d67" />
-  <project name="android_hardware_rockchip_librga"
-           path="hardware/rockchip/librga" remote="khadas"
-           revision="2453235e0e87c93a5457cf9847f895260e8ea54f" />
-
-  <!-- ==================================================================
-       Audio: legacy audio_hw_device (tinyalsa) behind HIDL@5.0.
-       Migration: wrap in android.hardware.audio.core-V2 AIDL.
-       ================================================================== -->
-  <project name="android_hardware_rockchip_audio"
-           path="hardware/rockchip/audio" remote="khadas"
-           revision="543f98848cbc326c7612fbb42b5db2abd10a4723" />
-
-  <!-- ==================================================================
-       Media / codec.
-       ================================================================== -->
-  <project name="android_hardware_rockchip_libhwjpeg"
-           path="hardware/rockchip/libhwjpeg" remote="khadas"
-           revision="e582616e9993f86e555c98194f8ba6a4d16bdfd7" />
-  <project name="android_hardware_rockchip_omx_il"
-           path="hardware/rockchip/omx_il" remote="khadas"
-           revision="f0c783f9e5738f3d081b7809be111ec3e3de4913" />
-  <project name="android_hardware_rockchip_librkvpu"
-           path="hardware/rockchip/librkvpu" remote="khadas"
-           revision="7b64b964ad4701c03a7497f8c908bec0518eef5d" />
-
-  <!-- ==================================================================
-       Small HALs. Every one of these is HIDL on the pinned revision and
-       has a mandatory AIDL replacement in 14 (see docs/HAL_MIGRATION.md).
-       ================================================================== -->
-  <project name="android_hardware_rockchip_liblights"
-           path="hardware/rockchip/liblights" remote="khadas"
-           revision="b29a973a3a6562c6733f67dbbd64c43c18079fb4" />
-  <project name="android_hardware_rockchip_power"
-           path="hardware/rockchip/power" remote="khadas"
-           revision="d7d29b5be57caddb365acd8af3277a02750d5098" />
-  <project name="android_hardware_rockchip_sensor"
-           path="hardware/rockchip/sensor" remote="khadas"
-           revision="1ce41c27f5e3c0ca5f099a43a59746493234a3cb" />
-  <project name="android_hardware_rockchip_libmemtrack"
-           path="hardware/rockchip/libmemtrack" remote="khadas"
-           revision="c591424c9c90a115d5498a19551fa40fb79bab81" />
-
-  <!-- HDMI-CEC. In 14 tv.cec@1.0 is split into
-       android.hardware.tv.hdmi.cec / .hdmi.connection / .hdmi.earc. -->
-  <project name="android_hardware_rockchip_hdmicec"
-           path="hardware/rockchip/hdmicec" remote="khadas"
-           revision="ebd4212cc5c7c708b0c4a93469630423dd07c33b" />
-
-  <!-- Camera is optional on an Android TV SKU; synced because the Edge1
-       carries a MIPI-CSI header. Not in PRODUCT_PACKAGES by default. -->
-  <project name="android_hardware_rockchip_camera"
-           path="hardware/rockchip/camera" remote="khadas"
-           revision="8fc9380799bae30fb1365b1a933af96e6871745e" />
-
-  <!-- ==================================================================
-       Proprietary vendor blobs (Mali userspace driver, firmware, Widevine).
-       ================================================================== -->
-  <project name="android_vendor_rockchip_common" path="vendor/rockchip/common"
-           remote="khadas" revision="9a1f4d21552bea59bbb9b1ebabc080ef997cfd94" />
-  <project name="android_vendor_rockchip_hardware" path="vendor/rockchip/hardware"
-           remote="khadas" revision="084f181ec529b9998a72af673b9706fda287845e" />
+           revision="664ccee1d4ada924848b80b2912d48c7fb30049c" clone-depth="1" />
 
 </manifest>

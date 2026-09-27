@@ -1,18 +1,24 @@
 # Khadas Edge1 (RK3399) - device node permissions.
+#
+# Mainline node names. The BSP's /dev/mali0, /dev/mpp_service, /dev/rga,
+# /dev/iep and /dev/vpu_service do not exist on this kernel: the GPU is a DRM
+# render node and the video accelerators are V4L2 devices.
 
-# Mali-T860
-/dev/mali0                0666   system     graphics
-# DRM/KMS - the composer3 service is the only vendor user
+# GPU. panfrost's render node, opened by Mesa in every process that draws - which
+# is why it is 0666, the same reason /dev/mali0 was.
+/dev/dri/renderD128       0666   system     graphics
+# KMS. SurfaceFlinger's composer (drm_hwcomposer) is the only user.
 /dev/dri/card0            0660   system     graphics
-/dev/dri/renderD128       0660   system     graphics
-# Rockchip media accelerators
-/dev/mpp_service          0660   media      media
-/dev/rga                  0660   media      media
-/dev/iep                  0660   media      media
-/dev/vpu_service          0660   media      media
-# HDMI-CEC
+
+# Video: rkvdec and RGA as V4L2 M2M devices, plus the media controller.
+/dev/video0               0660   media      media
+/dev/video1               0660   media      media
+/dev/media0               0660   media      media
+
+# HDMI-CEC, from the Synopsys HDMI bridge's CEC block.
 /dev/cec0                 0660   system     system
 # IR receiver
 /dev/lirc0                0660   system     system
-# Bluetooth UART
+# uart0, the BCM4359's Bluetooth transport. Left in place for whichever HAL ends
+# up owning it; see init.edge1.rc.
 /dev/ttyS0                0660   bluetooth  bluetooth

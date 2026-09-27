@@ -1,12 +1,13 @@
 # Khadas Edge1 - vendor device node types.
 #
-# /dev/mali0 and /dev/dri/renderD128 are deliberately labelled with AOSP's
-# existing gpu_device rather than a board-specific type: gpu_device already
-# carries the app-domain access rules every GL client needs, and inventing a
-# new type would mean re-granting all of them.
+# /dev/dri/renderD128 is deliberately labelled with AOSP's existing gpu_device
+# rather than a board-specific type: gpu_device already carries the app-domain
+# access rules every GL client needs - and with Mesa every process that draws
+# opens the render node itself - so inventing a new type would mean re-granting
+# all of them.
 
-type mpp_device, dev_type;
-type rga_device, dev_type;
-type iep_device, dev_type;
+# mpp_device, rga_device and iep_device were declared here for Rockchip's own
+# char devices. On mainline the video accelerators are V4L2 devices and carry
+# AOSP's video_device type, so those three had nothing left to label.
 type hdmi_cec_device, dev_type;
 type lirc_device, dev_type;

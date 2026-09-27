@@ -145,7 +145,7 @@ stage_sync() {
 
 stage_kernel() {
     place_device
-    log "building the 4.19.111 kernel"
+    log "building the mainline 6.12 kernel"
     "$MANIFEST/build/build-kernel.sh" "$TREE" 2>&1 | tee "$LOGS/kernel.log"
 }
 
@@ -153,13 +153,17 @@ stage_build() {
     place_device
     log "building the platform (expect many hours)"
     "$MANIFEST/build/build.sh" "$TREE" userdebug 2>&1 | tee "$LOGS/platform.log"
-    local img="$TREE/out/target/product/edge/rockdev/update.img"
-    if [[ -f "$img" ]]; then
+    # The flash pack, not update.img: that was Rockchip's format and needed the BSP
+    # bootloader and RKTools, neither of which this path uses. build.sh stages the
+    # images plus a generated flash-emmc.sh that runs on the board itself.
+    local pack="$TREE/out/target/product/edge/edge1-flash"
+    if [[ -d "$pack" ]]; then
+        rm -rf "$WORK/output"
         mkdir -p "$WORK/output"
-        cp "$img" "$WORK/output/"
-        log "update.img copied to $WORK/output/"
+        cp -a "$pack/." "$WORK/output/"
+        log "flash pack copied to $WORK/output/ ($(du -sh "$WORK/output" | cut -f1))"
     else
-        echo "no update.img produced; see $LOGS/platform.log" >&2
+        echo "no flash pack produced; see $LOGS/platform.log" >&2
         return 1
     fi
 }
@@ -319,6 +323,102 @@ PY_INNER
             echo "ABSENT at $ad"
         fi
         echo
+        echo "##### MESA / PANFROST (the GLES driver) #####"
+        # There is no software GLES driver a real device can load in AOSP 14, so
+        # this is not a nice-to-have: without libGLES_mesa SurfaceFlinger does not
+        # start. What must be right is the board variable that selects the gallium
+        # driver - if it is wrong Mesa still builds and ships and then finds no
+        # driver at run time, which is the one failure mode that does not announce
+        # itself.
+        md="$TREE/external/mesa3d"
+        if [[ -d "$md" ]]; then
+            echo "  present at external/mesa3d"
+            echo "  BOARD_MESA3D_* variables it reads:"
+            grep -rhoE 'BOARD_MESA3D_[A-Z_]+' "$md" 2>/dev/null | sort -u | sed 's/^/    /' || true
+            echo "  gallium drivers it knows about:"
+            grep -rhoE 'libmesa_pipe_[a-z0-9_]+' "$md" --include=Android.bp 2>/dev/null \
+                | sort -u | sed 's/^/    /' | head -30 || true
+            echo "  EGL/GLES modules it defines:"
+            grep -rhoE 'name: "lib(EGL|GLES)[a-zA-Z0-9_]*"' "$md" --include=Android.bp 2>/dev/null \
+                | sed -E 's/name: "([^"]+)"/    \1/' | sort -u || true
+            echo "  ours: $(grep -h BOARD_MESA3D "$MANIFEST/device/khadas/edge/BoardConfig.mk" || echo NONE)"
+        else
+            echo "  ABSENT at $md - there is no GLES driver on this path without it"
+        fi
+        echo
+
+        echo "##### V4L2 CODEC2 (hardware decode via rkvdec) #####"
+        vd="$TREE/external/v4l2_codec2"
+        if [[ -d "$vd" ]]; then
+            echo "  present. modules:"
+            grep -rhoE 'name: "[^"]+"' "$vd" --include=Android.bp 2>/dev/null \
+                | sed -E 's/name: "([^"]+)"/    \1/' | sort -u || true
+            echo "  how it is switched on (soong config / board vars):"
+            grep -rhoE '(BOARD|TARGET)_[A-Z0-9_]*V4L2[A-Z0-9_]*|soong_config_set[^)]*' "$vd" 2>/dev/null \
+                | sort -u | head -10 | sed 's/^/    /' || true
+        else
+            echo "  ABSENT at $vd"
+        fi
+        echo
+
+        echo "##### WI-FI HAL options for brcmfmac #####"
+        # android.hardware.wifi-service wants a legacy HAL underneath, and the one
+        # in the tree is written for bcmdhd's private nl80211 commands. This is
+        # what the tree actually offers.
+        for d in hardware/interfaces/wifi/aidl/default hardware/broadcom/wlan; do
+            if [[ -d "$TREE/$d" ]]; then
+                echo "  $d:"
+                ls "$TREE/$d" | sed 's/^/    /' | head -12
+            else
+                echo "  $d: ABSENT"
+            fi
+        done
+        echo "  wifi_hal-ish modules in the tree:"
+        grep -xE 'lib?wifi[-_]hal.*|.*wifi_hal.*' "$found" 2>/dev/null | sed 's/^/    /' | head -10 || true
+        echo
+
+        echo "##### KERNEL CONFIG FRAGMENT vs THE KERNEL #####"
+        # Every symbol in the fragment has to exist in this kernel's Kconfig files.
+        # On the 4.19 BSP three rounds went on symbols that simply were not there -
+        # merge_config.sh mentions them in passing and the build continues.
+        kdir="$TREE/kernel/mainline"
+        frag="$MANIFEST/device/khadas/edge/kernel/edge1_mainline.config"
+        if [[ -d "$kdir" && -f "$frag" ]]; then
+            echo "  kernel: $(cd "$kdir" && git describe --tags 2>/dev/null || echo unknown)"
+            python3 - "$kdir" "$frag" <<'PY_KCONFIG'
+import os, re, sys
+kdir, frag = sys.argv[1], sys.argv[2]
+have = set()
+for base, dirs, files in os.walk(kdir):
+    dirs[:] = [d for d in dirs if d not in ('.git', 'out')]
+    for fn in files:
+        if not fn.startswith('Kconfig'):
+            continue
+        try:
+            body = open(os.path.join(base, fn), errors='replace').read()
+        except OSError:
+            continue
+        have |= set(re.findall(r'^\s*(?:menu)?config\s+([A-Za-z0-9_]+)', body, re.M))
+wanted = []
+for line in open(frag):
+    m = re.match(r'(?:# )?CONFIG_([A-Z0-9_]+)', line.strip())
+    if m:
+        wanted.append(m.group(1))
+missing = sorted({w for w in wanted if w not in have})
+print('  %d Kconfig symbols in the kernel; the fragment names %d distinct'
+      % (len(have), len(set(wanted))))
+if missing:
+    print('  !! %d NOT DEFINED IN THIS KERNEL:' % len(missing))
+    for w in missing:
+        print('       CONFIG_%s' % w)
+else:
+    print('  every symbol in the fragment exists in this kernel')
+PY_KCONFIG
+        else
+            echo "  kernel not synced at $kdir, or fragment missing"
+        fi
+        echo
+
         echo "##### FROZEN AIDL VERSIONS #####"
         # Why this matters more than it looks: Soong turns each frozen
         # aidl_api/<package>/<N> directory into a module named
@@ -459,7 +559,7 @@ for key in ('false', 'absent'):
         print('    ... and %d more' % (len(buckets[key]) - 40))
 PY_VINTF
             done
-            echo "  --- level 8 kernel requirements (4.19.111 is what we have) ---"
+            echo "  --- level 8 kernel requirements (6.12 LTS is what we have) ---"
             python3 - "$cm/compatibility_matrix.8.xml" <<'PY_KERNEL' || true
 import sys, xml.etree.ElementTree as ET
 try:

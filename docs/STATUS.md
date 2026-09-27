@@ -1,5 +1,50 @@
 # Status: what was built, what was not, and why
 
+## The path this tree is on
+
+Two ways to get Android 14 onto this board were on the table. This is the second
+one, chosen deliberately after the first had been built far enough to price it.
+
+**Path A, abandoned: Khadas' 4.19 BSP kernel plus the Rockchip Android 10
+userspace.** The kernel built. Everything above it would have had to be
+forward-ported - the Mali blob's gralloc integration above all, which is the
+largest single unknown in the whole port - and none of that work is reusable
+anywhere else.
+
+**Path B, current: mainline 6.12 LTS plus AOSP's own userspace for it.**
+
+| | driver | userspace, already in AOSP 14 |
+|---|---|---|
+| GPU | `drivers/gpu/drm/panfrost` | `external/mesa3d` → `libGLES_mesa` |
+| Display | `drivers/gpu/drm/rockchip` | `external/drm_hwcomposer` + minigbm |
+| Decode | `staging/media/rkvdec` (H.264 only) | `external/v4l2_codec2` |
+| Wi-Fi | `brcmfmac` over SDIO | AOSP `wpa_supplicant` |
+| Audio | `simple-audio-card` → HDMI | AOSP AIDL audio HAL over ALSA |
+| Boot | mainline U-Boot + TF-A | ordinary GPT, images written from Linux |
+
+No proprietary blob is involved. What made this credible rather than hopeful is
+that the board is already proven on this kernel: its owner runs OpenWrt 25.12 on
+it with Linux 6.12.94 and mainline U-Boot
+(`github.com/220242/khadas_edge-openwrt`), which is also where the Wi-Fi firmware
+and the board NVRAM in this tree come from.
+
+The fact that forced the decision either way: **AOSP 14 ships no software GLES
+driver a real device can load**, so SurfaceFlinger cannot start without a GPU
+driver, and "boot first, GPU later" was never an option. panfrost supplies one
+without a blob; the Mali blob would have had to be bridged to an IMapper it was
+never written for.
+
+What this costs, stated plainly:
+
+- Hardware decode is H.264 only. 6.12's rkvdec has `rkvdec-h264.c` and nothing
+  else, so HEVC and VP9 fall to software - 1080p yes, 4K no.
+- Bluetooth is unresolved. The kernel driver and Android's HAL both want to own
+  uart0; see `KERNEL.md`.
+- Still no certification, on either path: software KeyMint, no attestation,
+  Widevine L3 at best. Licensed HD streaming will not work. If that was the goal,
+  this is the wrong vehicle and mainline Linux with Kodi on the same board is the
+  right one.
+
 ## Summary
 
 The port itself — device tree, AIDL HAL migration, Android TV configuration,

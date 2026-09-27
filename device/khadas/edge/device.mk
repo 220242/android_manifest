@@ -7,23 +7,12 @@
 
 LOCAL_PATH := device/khadas/edge
 
-# ---------------------------------------------------------------------------
-# EDGE1_ENABLE_INCOMPLETE_HALS
-#
-# Several Rockchip HALs are mid-forward-port: the AIDL shim exists in outline
-# but does not build yet (see shims/README.md for the exact state of each).
-# Pulling them into PRODUCT_PACKAGES unconditionally would stop every build at a
-# gap that is already documented, which makes the rest of the tree untestable.
-#
-# Default false: build with AOSP's generic implementations where one exists, and
-# simply omit the HAL where none does. Set to true to build the Rockchip shims
-# once they are finished:
-#
-#   EDGE1_ENABLE_INCOMPLETE_HALS=true m
-#
-# docs/STATUS.md tracks which HALs still flip this.
-# ---------------------------------------------------------------------------
-EDGE1_ENABLE_INCOMPLETE_HALS ?= false
+# EDGE1_ENABLE_INCOMPLETE_HALS is gone, along with every package it gated. It
+# selected the Rockchip Android 10 HALs - libGLES_mali, libgralloc_rk3399,
+# audio.primary.rk3399, libcodec2_rk and the rest - which this port no longer
+# forward-ports and whose source is no longer in the manifest. On a mainline
+# kernel they could not work even if they built: the Mali blob talks to the BSP's
+# midgard kmod, and this kernel has panfrost.
 
 
 # ---------------------------------------------------------------------------
@@ -41,7 +30,7 @@ EDGE1_ENABLE_INCOMPLETE_HALS ?= false
 # the platform build. The dependency is not expressed to ninja, which is the
 # trade-off of building the kernel separately: rebuild the kernel, then rebuild.
 PRODUCT_COPY_FILES += \
-    kernel/khadas/edge/out/arch/arm64/boot/Image:kernel
+    kernel/mainline/out/arch/arm64/boot/Image:kernel
 
 
 # ---------------------------------------------------------------------------
@@ -126,29 +115,8 @@ DEVICE_PACKAGE_OVERLAYS += $(LOCAL_PATH)/overlay
 # composer@2.4.
 #
 # The tradeoff: minigbm's rockchip backend does not implement the RK3399's AFBC
-# layouts, so composition is less efficient than Rockchip's own gralloc. A
-# working display beats an unwritten shim; the Rockchip path is still available
-# behind EDGE1_ENABLE_INCOMPLETE_HALS.
+# layouts, so composition moves more bytes than Rockchip's own gralloc did.
 # ---------------------------------------------------------------------------
-ifeq ($(EDGE1_ENABLE_INCOMPLETE_HALS),true)
-
-# Rockchip stack: Mali-T860 userspace blob, Rockchip gralloc, Rockchip composer.
-# None of these modules exist in the tree yet - they need forward-porting from
-# the Android 10 revisions the overlay pins.
-PRODUCT_PACKAGES += \
-    android.hardware.graphics.allocator-service.rk3399 \
-    android.hardware.graphics.composer3-service.rk3399 \
-    libgralloc_rk3399 \
-    libGLES_mali \
-    vulkan.rk3399
-
-PRODUCT_PROPERTY_OVERRIDES += \
-    ro.hardware.egl=mali \
-    ro.hardware.vulkan=rk3399 \
-    ro.hardware.gralloc=rk3399 \
-    ro.hardware.hwcomposer=rk3399
-
-else
 
 PRODUCT_PACKAGES += \
     android.hardware.graphics.allocator-service.minigbm \
@@ -157,14 +125,35 @@ PRODUCT_PACKAGES += \
     android.hardware.graphics.composer@2.4-service \
     hwcomposer.drm_minigbm
 
-# No ro.hardware.egl: without the Mali blob there is no hardware GLES driver, so
-# the platform falls back to its software renderer. Slow, but it boots and draws,
-# which is what is needed to validate the rest of the port.
+# GLES: Mesa's panfrost driver, and it is not optional.
+#
+# AOSP 14 has no software GLES driver that a real device can load. The old
+# libGLES_android was removed years ago, and swiftshader is packaged for the
+# emulator's host side only - the tree defines no libEGL_swiftshader. So without
+# a driver here SurfaceFlinger does not start, and "boot on software rendering
+# first, sort out the GPU later" is not an option that exists.
+#
+# What does exist is external/mesa3d with libmesa_pipe_panfrost and
+# libmesa_winsys_panfrost, which is the whole reason this port moved to a
+# mainline kernel: panfrost binds to drivers/gpu/drm/panfrost and gives the
+# Mali-T860 GLES 3.1 with no proprietary blob. Android's EGL loader looks for
+# libGLES_$(ro.hardware.egl).so, which Mesa installs as libGLES_mesa.
+#
+# Vulkan is deliberately not declared: panvk on Midgard is not something to
+# depend on, and HWUI uses GLES unless told otherwise.
+#
+# Which gallium driver Mesa builds is selected in BoardConfig.mk with
+# BOARD_MESA3D_GALLIUM_DRIVERS. The module probe prints what external/mesa3d
+# actually reads, because a wrong name there fails silently: Mesa builds, ships,
+# loads, and finds no driver at runtime.
+PRODUCT_PACKAGES += \
+    libGLES_mesa
+
 PRODUCT_PROPERTY_OVERRIDES += \
+    ro.hardware.egl=mesa \
     ro.hardware.gralloc=minigbm \
     ro.hardware.hwcomposer=drm_minigbm
 
-endif
 
 # BOARD_USES_MINIGBM was set here, in a product makefile. It is a board variable
 # and now lives in BoardConfig.mk: product config runs first, so the value did
@@ -210,12 +199,6 @@ PRODUCT_PACKAGES += \
 # against the tree's frozen aidl_api directories, so Soong analyses the module.
 # It is still gated out of PRODUCT_PACKAGES, so nothing compiles it until
 # createOutputStream exists.
-ifeq ($(EDGE1_ENABLE_INCOMPLETE_HALS),true)
-PRODUCT_PACKAGES += \
-    android.hardware.audio.service.rk3399 \
-    android.hardware.audio.effect-service.rk3399 \
-    audio.primary.rk3399
-else
 # AOSP's reference audio HAL. hardware/interfaces/audio/aidl/default is a full
 # AIDL implementation with ALSA support, and this board's audio is tinyalsa over
 # the HDMI i2s and S/PDIF cards, so it is a far better starting point than
@@ -224,7 +207,6 @@ else
 PRODUCT_PACKAGES += \
     android.hardware.audio.service-aidl.example \
     android.hardware.audio.effect.service-aidl.example
-endif
 
 PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/audio/audio_policy_configuration.xml:$(TARGET_COPY_OUT_VENDOR)/etc/audio_policy_configuration.xml \
@@ -240,7 +222,6 @@ PRODUCT_COPY_FILES += \
     frameworks/av/services/audiopolicy/config/bluetooth_audio_policy_configuration_7_0.xml:$(TARGET_COPY_OUT_VENDOR)/etc/bluetooth_audio_policy_configuration.xml
 
 PRODUCT_PROPERTY_OVERRIDES += \
-    ro.hardware.audio.primary=rk3399 \
     persist.sys.media.avsync=true \
     ro.audio.monitorRotation=false
 
@@ -255,12 +236,6 @@ PRODUCT_PROPERTY_OVERRIDES += \
 #      that declares android.hardware.hdmi.cec; earc is not (no eARC on the
 #      RK3399 HDMI 2.0 TX).
 # ---------------------------------------------------------------------------
-ifeq ($(EDGE1_ENABLE_INCOMPLETE_HALS),true)
-PRODUCT_PACKAGES += \
-    android.hardware.tv.input-service.rk3399 \
-    android.hardware.tv.hdmi.cec-service.rk3399 \
-    android.hardware.tv.hdmi.connection-service.rk3399
-else
 # AOSP's examples are functional stand-ins: tv.input publishes no streams (which
 # is correct for the Edge1 - it has no tuner or HDMI-in), and the CEC example
 # drives the standard Linux /dev/cec0 adapter, which is what the RK3399's
@@ -269,7 +244,6 @@ PRODUCT_PACKAGES += \
     android.hardware.tv.input-service.example \
     android.hardware.tv.hdmi.cec-service \
     android.hardware.tv.hdmi.connection-service
-endif
 
 PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/tv_input.xml:$(TARGET_COPY_OUT_VENDOR)/etc/tv_input.xml
@@ -287,9 +261,20 @@ PRODUCT_PROPERTY_OVERRIDES += \
 #      wifi.hostapd-V1 (AIDL).
 #
 # All three AOSP defaults are driver-agnostic nl80211 implementations, so the
-# BCM4359 needs no vendor Wi-Fi HAL - only the firmware paths in
-# BoardConfig.mk and the bcmdhd module. This removes an entire Rockchip HIDL
-# component that existed only to wrap nl80211.
+# BCM4359 needs no vendor Wi-Fi HAL - which is just as well, because the vendor
+# one that exists is written for bcmdhd's private nl80211 commands and this kernel
+# runs brcmfmac.
+#
+# brcmfmac loads one firmware image plus the board NVRAM through the kernel
+# firmware loader, unlike bcmdhd which took separate STA/AP/P2P images through
+# module parameters. Both files come from this owner's OpenWrt build for the same
+# board - see wifi/firmware/brcm/README.md.
+#
+# What is not settled: android.hardware.wifi-service needs a legacy HAL
+# underneath for link statistics, RTT and roaming control, and brcmfmac provides
+# none of those vendor commands. Basic STA association is expected to work;
+# anything that asks the HAL for vendor features will not. The module probe dumps
+# what the tree offers here.
 # ---------------------------------------------------------------------------
 PRODUCT_PACKAGES += \
     android.hardware.wifi-service \
@@ -300,7 +285,9 @@ PRODUCT_PACKAGES += \
 
 PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/wifi/wpa_supplicant_overlay.conf:$(TARGET_COPY_OUT_VENDOR)/etc/wifi/wpa_supplicant_overlay.conf \
-    $(LOCAL_PATH)/wifi/p2p_supplicant_overlay.conf:$(TARGET_COPY_OUT_VENDOR)/etc/wifi/p2p_supplicant_overlay.conf
+    $(LOCAL_PATH)/wifi/p2p_supplicant_overlay.conf:$(TARGET_COPY_OUT_VENDOR)/etc/wifi/p2p_supplicant_overlay.conf \
+    $(LOCAL_PATH)/wifi/firmware/brcm/brcmfmac4359-sdio.bin:$(TARGET_COPY_OUT_VENDOR)/firmware/brcm/brcmfmac4359-sdio.bin \
+    $(LOCAL_PATH)/wifi/firmware/brcm/brcmfmac4359-sdio.txt:$(TARGET_COPY_OUT_VENDOR)/firmware/brcm/brcmfmac4359-sdio.txt
 
 PRODUCT_PROPERTY_OVERRIDES += \
     wifi.interface=wlan0 \
@@ -322,11 +309,6 @@ PRODUCT_PROPERTY_OVERRIDES += \
 PRODUCT_PACKAGES += \
     android.hardware.bluetooth-service.default
 
-ifeq ($(EDGE1_ENABLE_INCOMPLETE_HALS),true)
-PRODUCT_PACKAGES += \
-    brcm_patchram_plus \
-    libbt-vendor
-endif
 
 PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/bluetooth/bt_vendor.conf:$(TARGET_COPY_OUT_VENDOR)/etc/bluetooth/bt_vendor.conf
@@ -347,23 +329,12 @@ PRODUCT_PROPERTY_OVERRIDES += \
 # ---------------------------------------------------------------------------
 # Rockchip MPP userspace: Android 10 revisions, not yet building against the 14
 # VNDK, so gated with the rest.
-ifeq ($(EDGE1_ENABLE_INCOMPLETE_HALS),true)
-PRODUCT_PACKAGES += \
-    libvpu \
-    librockchip_mpp
-endif
 
-ifeq ($(EDGE1_ENABLE_INCOMPLETE_HALS),true)
-PRODUCT_PACKAGES += \
-    android.hardware.media.c2@1.2-service.rk3399 \
-    libcodec2_rk
-else
 # No vendor Codec2 service. The probe shows AOSP 14 has no
 # c2@1.2-service.software - the software codecs live in the framework's own
 # Codec2 store (libcodec2_soft_*), which needs no vendor HAL. 4K HEVC/VP9 will
 # not play at full rate without the MPP hardware decoder, but SD/HD software
 # decode works.
-endif
 
 PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/media/media_profiles_edge1.xml:$(TARGET_COPY_OUT_VENDOR)/etc/media_profiles_V1_0.xml
@@ -376,13 +347,6 @@ PRODUCT_PROPERTY_OVERRIDES += \
 # actually built. Copying it unconditionally would advertise c2.rk.* decoders
 # with no component registered, and MediaCodec.configure() then throws instead of
 # falling back to a software codec.
-ifeq ($(EDGE1_ENABLE_INCOMPLETE_HALS),true)
-PRODUCT_COPY_FILES += \
-    $(LOCAL_PATH)/media/media_codecs.xml:$(TARGET_COPY_OUT_VENDOR)/etc/media_codecs.xml \
-    $(LOCAL_PATH)/media/media_codecs_performance.xml:$(TARGET_COPY_OUT_VENDOR)/etc/media_codecs_performance.xml \
-    $(LOCAL_PATH)/media/media_codecs_c2.xml:$(TARGET_COPY_OUT_VENDOR)/etc/media_codecs_c2.xml
-PRODUCT_PROPERTY_OVERRIDES += ro.media.xml_variant.codecs=_c2
-endif
 
 # DRM: Widevine L3 only. L1 needs an OP-TEE trusted app, and this board has no
 # provisioned TEE.
@@ -420,12 +384,6 @@ PRODUCT_PACKAGES += \
     android.hardware.usb-service.example \
     android.hardware.dumpstate-service.example
 
-ifeq ($(EDGE1_ENABLE_INCOMPLETE_HALS),true)
-PRODUCT_PACKAGES += \
-    android.hardware.light-service.rk3399 \
-    android.hardware.power-service.rk3399 \
-    android.hardware.memtrack-service.rk3399
-else
 # AOSP examples. Consequence of each fallback, so the tradeoff is visible:
 #   light    - absent entirely, see above
 #   power    - no RK3399 big.LITTLE/devfreq boost hints, so UI latency is worse
@@ -436,7 +394,6 @@ else
 PRODUCT_PACKAGES += \
     android.hardware.power-service.example \
     android.hardware.memtrack-service.example
-endif
 
 # KeyMint / Gatekeeper: software ("nonsecure") implementations.
 #
@@ -453,10 +410,12 @@ PRODUCT_PACKAGES += \
 # the framework's own credential checking: PIN and pattern still work, but
 # without hardware-enforced throttling.
 
-PRODUCT_PROPERTY_OVERRIDES += \
-    ro.hardware.power=rk3399 \
-    ro.hardware.lights=rk3399 \
-    ro.hardware.memtrack=rk3399
+# ro.hardware.power / .lights / .memtrack were set here, naming the Rockchip HIDL
+# passthrough libraries. The AIDL services are found on their binder service
+# name, not through a property, and the libraries are gone - so pointing these at
+# rk3399 would only send the framework looking for files that do not exist. The
+# whole assignment went with them.
+
 
 # ---------------------------------------------------------------------------
 # init / fstab.
@@ -488,12 +447,10 @@ PRODUCT_PROPERTY_OVERRIDES += \
 # config_ethernet_interfaces are set by the framework overlay in
 # overlay/frameworks/base/core/res/, which DEVICE_PACKAGE_OVERLAYS applies.
 
-# ---------------------------------------------------------------------------
-# Rockchip update.img packaging inputs.
-# ---------------------------------------------------------------------------
-PRODUCT_COPY_FILES += \
-    $(LOCAL_PATH)/parameter.txt:parameter.txt \
-    $(LOCAL_PATH)/package-file:package-file
+# parameter.txt and package-file were copied into $(PRODUCT_OUT) here, as inputs
+# to Rockchip's update.img packer. Both are gone: the layout is now an ordinary
+# GPT in flash/partitions.tsv, which build/build.sh turns into a flash script, and
+# nothing needs to be staged into the product output for it.
 
 PRODUCT_PROPERTY_OVERRIDES += \
     ro.product.board=rk3399 \

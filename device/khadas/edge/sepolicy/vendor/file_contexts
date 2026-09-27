@@ -3,38 +3,37 @@
 ###############################
 # Device nodes
 #
-/dev/mali0                          u:object_r:gpu_device:s0
+# Mainline names. /dev/mali0 belonged to the BSP's midgard kmod; panfrost is a DRM
+# driver, so the GPU is the render node. /dev/mpp_service, /dev/vpu_service,
+# /dev/rga and /dev/iep were Rockchip's own char devices; rkvdec and RGA are V4L2
+# devices here, which AOSP already has a type for.
 /dev/dri/card0                      u:object_r:graphics_device:s0
 /dev/dri/renderD128                 u:object_r:gpu_device:s0
-/dev/mpp_service                    u:object_r:mpp_device:s0
-/dev/vpu_service                    u:object_r:mpp_device:s0
-/dev/rga                            u:object_r:rga_device:s0
-/dev/iep                            u:object_r:iep_device:s0
+/dev/video[0-9]*                    u:object_r:video_device:s0
 /dev/cec0                           u:object_r:hdmi_cec_device:s0
 /dev/lirc0                          u:object_r:lirc_device:s0
 
 ###############################
 # HAL services
 #
-/vendor/bin/hw/android\.hardware\.graphics\.allocator-service\.rk3399   u:object_r:hal_graphics_allocator_rk3399_exec:s0
-/vendor/bin/hw/android\.hardware\.graphics\.composer3-service\.rk3399   u:object_r:hal_graphics_composer_rk3399_exec:s0
-/vendor/bin/hw/android\.hardware\.audio\.service\.rk3399                u:object_r:hal_audio_rk3399_exec:s0
-/vendor/bin/hw/android\.hardware\.audio\.effect-service\.rk3399         u:object_r:hal_audio_rk3399_exec:s0
-/vendor/bin/hw/android\.hardware\.tv\.input-service\.rk3399             u:object_r:hal_tv_input_rk3399_exec:s0
-/vendor/bin/hw/android\.hardware\.tv\.hdmi\.cec-service\.rk3399         u:object_r:hal_tv_hdmi_cec_rk3399_exec:s0
-/vendor/bin/hw/android\.hardware\.tv\.hdmi\.connection-service\.rk3399  u:object_r:hal_tv_hdmi_cec_rk3399_exec:s0
-/vendor/bin/hw/android\.hardware\.light-service\.rk3399                 u:object_r:hal_light_rk3399_exec:s0
-/vendor/bin/hw/android\.hardware\.power-service\.rk3399                 u:object_r:hal_power_rk3399_exec:s0
-/vendor/bin/hw/android\.hardware\.memtrack-service\.rk3399              u:object_r:hal_memtrack_rk3399_exec:s0
-/vendor/bin/hw/android\.hardware\.media\.c2@1\.2-service\.rk3399        u:object_r:hal_codec2_rk3399_exec:s0
+# There are none to label. The Rockchip HIDL services this section used to point
+# at - the rk3399 allocator, composer3, audio, tv.input, hdmi.cec, light, power,
+# memtrack and Codec2 binaries - are gone with the BSP path, and the AOSP services
+# that replace them carry their own labels in system/sepolicy. A vendor
+# file_contexts entry for a binary that does not exist is not harmless: it names a
+# type, and a type nothing else declares fails the policy build.
 
 ###############################
 # Vendor binaries
 #
-/vendor/bin/brcm_patchram_plus      u:object_r:hal_bluetooth_default_exec:s0
+# brcm_patchram_plus was labelled here. It is a vendor tool this tree no longer
+# carries; see init.edge1.rc for where Bluetooth stands.
 
 ###############################
 # Firmware / modules
 #
-/vendor/etc/firmware(/.*)?          u:object_r:vendor_firmware_file:s0
-/vendor/lib/modules(/.*)?           u:object_r:vendor_kernel_modules:s0
+# brcmfmac's firmware and the board NVRAM live here, and the kernel firmware
+# loader reads them on behalf of the driver.
+/vendor/firmware(/.*)?              u:object_r:vendor_firmware_file:s0
+# No /vendor/lib/modules: this kernel builds every driver it needs in, so there is
+# no vendor_dlkm and nothing to load.

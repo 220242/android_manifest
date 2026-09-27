@@ -41,41 +41,50 @@ TARGET_BOARD_PLATFORM_PRODUCT := atv
 # switch any more. Setting them changed nothing while reading like configuration.
 
 # ---------------------------------------------------------------------------
-# Kernel.
+# Kernel: mainline 6.12 LTS, built out of tree by build/build-kernel.sh and
+# consumed here as a prebuilt, so a platform-only rebuild does not re-run it.
 #
-# 4.19.111 from the khadas-edge-Qt branch. Built out of tree by
-# build/build-kernel.sh, which this tree consumes as a prebuilt so that a
-# platform-only rebuild does not re-run the kernel build.
+# Path is kernel/mainline: a project at path "kernel" would nest the upstream
+# kernel/configs, kernel/tests and 26 kernel/prebuilts/* projects, and repo
+# rejects overlapping paths. See manifests/khadas_edge_tv14.xml.
 # ---------------------------------------------------------------------------
-# kernel/khadas/edge, not "kernel": a project at path "kernel" would nest the
-# upstream kernel/configs, kernel/tests and 26 kernel/prebuilts/* projects, and
-# repo rejects overlapping paths. See manifests/khadas_edge_tv14.xml.
-# These four are documentation, not wiring: AOSP 14 does not build kernels, and
-# build/build-kernel.sh has the same values of its own. They are kept because
-# they are the four facts anyone touching the kernel needs, in the file they
-# would look in first. Change them here and in build-kernel.sh together.
-TARGET_KERNEL_SOURCE := kernel/khadas/edge
-TARGET_KERNEL_CONFIG := kedge_defconfig
-TARGET_KERNEL_DTS := rk3399-khadas-edge-android
+# Documentation, not wiring - AOSP 14 does not build kernels, and
+# build/build-kernel.sh carries the same values. They are here because they are
+# the facts anyone touching the kernel looks for first. Change them together.
+TARGET_KERNEL_SOURCE := kernel/mainline
+TARGET_KERNEL_CONFIG := defconfig + device/khadas/edge/kernel/edge1_mainline.config
+TARGET_KERNEL_DTS := rk3399-khadas-edge
 TARGET_KERNEL_ARCH := arm64
-# TARGET_PREBUILT_KERNEL is not set here. The Android 10 tree used it, but the
-# string "PREBUILT_KERNEL" does not appear anywhere in AOSP 14's build/make:
-# core/Makefile:1018 sets INSTALLED_KERNEL_TARGET to $(PRODUCT_OUT)/kernel and
-# expects the device to install the file itself. device.mk copies it there.
-#
-# resource.img is Rockchip's RSCE container holding the DTB and the boot logos,
-# built by the kernel's own <dts>.img target. The legacy BSP pointed
-# BOARD_PREBUILT_DTBOIMAGE at it, which is how it reaches the dtbo partition.
-BOARD_PREBUILT_DTBOIMAGE := kernel/khadas/edge/resource.img
 
+# TARGET_PREBUILT_KERNEL is not set: the string "PREBUILT_KERNEL" appears nowhere
+# in AOSP 14's build/make. core/Makefile:1018 defines INSTALLED_KERNEL_TARGET as
+# $(PRODUCT_OUT)/kernel and leaves producing it to the device, so device.mk copies
+# the Image there.
+#
+# The device tree blob goes into vendor_boot, which is where boot header v4 keeps
+# it. BOARD_PREBUILT_DTBIMAGE_DIR is globbed for *.dtb at Kati parse time and
+# everything found is concatenated into dtb.img - so it points at a directory
+# build-kernel.sh stages with exactly one dtb, not at the kernel's dts output,
+# which holds about ninety.
+#
+# BOARD_PREBUILT_DTBOIMAGE is gone with the BSP: it pointed at Rockchip's
+# resource.img, an RSCE container holding the dtb and the boot logos that only
+# Rockchip's own bootloader reads. Mainline U-Boot takes the dtb from
+# vendor_boot like any other Android device.
+BOARD_INCLUDE_DTB_IN_BOOTIMG := true
+BOARD_PREBUILT_DTBIMAGE_DIR := kernel/mainline/out/android-dtb
+
+# console=ttyS2,1500000n8 is the mainline name for the RK3399 debug UART; the BSP
+# called it ttyFIQ0, which was Rockchip's FIQ-based serial driver and does not
+# exist upstream. androidboot.hardware names the HAL suffix set this board uses -
+# rk30board was the BSP's value and matched nothing in this tree.
 BOARD_KERNEL_CMDLINE := \
-    console=ttyFIQ0 \
-    androidboot.console=ttyFIQ0 \
-    androidboot.hardware=rk30board \
-    androidboot.baseband=N/A \
-    firmware_class.path=/vendor/etc/firmware \
+    console=ttyS2,1500000n8 \
+    androidboot.console=ttyS2 \
+    androidboot.hardware=edge1 \
+    firmware_class.path=/vendor/firmware \
     init=/init \
-    rootwait ro loop.max_part=7
+    rootwait ro
 
 # veritymode is appended per-variant: enforcing on user, eio on userdebug so a
 # bring-up image with a locally modified vendor partition still boots.
@@ -89,8 +98,8 @@ BOARD_KERNEL_BASE := 0x00200000
 BOARD_KERNEL_PAGESIZE := 2048
 
 # Boot image header v4 + a separate vendor_boot, which is what Android 13+
-# expects and what Rockchip's own post-11 BSPs ship. The vendor ramdisk carries
-# the Rockchip-specific init stages and the bcmdhd/rtk firmware loader.
+# expects. The vendor ramdisk carries the board's init stages; with a mainline
+# kernel there are no vendor modules to load from it.
 BOARD_BOOT_HEADER_VERSION := 4
 BOARD_MKBOOTIMG_ARGS := --header_version $(BOARD_BOOT_HEADER_VERSION)
 
@@ -131,6 +140,22 @@ BOARD_USES_METADATA_PARTITION := true
 # which is a product makefile; BOARD_* belongs here.
 BOARD_USES_MINIGBM := true
 
+# Mesa: which gallium driver to build.
+#
+# external/mesa3d builds nothing by default - the drivers are selected per board,
+# and with none selected libGLES_mesa still builds and ships and then finds no
+# driver at run time. That is the failure mode to avoid, because it looks like a
+# working build.
+#
+# panfrost is the Midgard/Bifrost gallium driver and binds to
+# drivers/gpu/drm/panfrost, which this kernel builds in. kmsro is what lets it
+# render on a display controller that is not the GPU - the Rockchip VOP here -
+# which is exactly the split this SoC has.
+#
+# No BOARD_MESA3D_VULKAN_DRIVERS: panvk on Midgard is not something to depend on,
+# and nothing in this configuration asks for Vulkan.
+BOARD_MESA3D_GALLIUM_DRIVERS := panfrost kmsro
+
 # 4608 MiB super. Leaves room on a 16GB eMMC for userdata.
 BOARD_SUPER_PARTITION_SIZE := 4831838208
 BOARD_SUPER_PARTITION_GROUPS := rockchip_dynamic_partitions
@@ -150,7 +175,8 @@ TARGET_COPY_OUT_ODM := odm
 BOARD_BOOTIMAGE_PARTITION_SIZE := 67108864
 BOARD_VENDOR_BOOTIMAGE_PARTITION_SIZE := 67108864
 BOARD_RECOVERYIMAGE_PARTITION_SIZE := 67108864
-BOARD_DTBOIMG_PARTITION_SIZE := 8388608
+# No BOARD_DTBOIMG_PARTITION_SIZE and no dtbo partition: the dtb travels inside
+# vendor_boot on this path, so there is no dtbo.img to give a partition to.
 BOARD_FLASH_BLOCK_SIZE := 131072
 
 BOARD_SYSTEMIMAGE_FILE_SYSTEM_TYPE := ext4
@@ -217,21 +243,26 @@ DEVICE_MATRIX_FILE := device/khadas/edge/vintf/compatibility_matrix.xml
 BOARD_VNDK_VERSION := current
 
 # ---------------------------------------------------------------------------
-# Connectivity: AP6398S = Broadcom BCM4359. Driver is the out-of-tree bcmdhd
-# module built with the kernel.
-# ---------------------------------------------------------------------------
-BOARD_WLAN_DEVICE := bcmdhd
+# Connectivity: AP6398S = Broadcom BCM4359, on SDIO.
+#
+# On mainline this is brcmfmac, built into the kernel, and the DTS already carries
+# the wifi@1 node with its power sequence and host-wake interrupt. That changes
+# what belongs here:
+#
+#   - No BOARD_WLAN_DEVICE. It selects a vendor wifi_hal under
+#     hardware/broadcom/wlan written for bcmdhd's private nl80211 commands, which
+#     brcmfmac does not implement. Which HAL to use instead is an open question -
+#     the module probe now dumps what the tree offers - so it is left unset rather
+#     than set to something that cannot work.
+#   - No WIFI_DRIVER_FW_PATH_*. Those write firmware paths into bcmdhd's module
+#     parameters. brcmfmac asks the kernel firmware loader for
+#     brcm/brcmfmac4359-sdio.bin and its board nvram, which device.mk installs
+#     into /vendor/firmware/brcm.
+#
+# The firmware and the board's NVRAM come from this owner's OpenWrt build for the
+# same board, where they are known to associate.
 BOARD_WPA_SUPPLICANT_DRIVER := NL80211
-WPA_SUPPLICANT_VERSION := VER_0_8_X
-BOARD_WPA_SUPPLICANT_PRIVATE_LIB := lib_driver_cmd_bcmdhd
 BOARD_HOSTAPD_DRIVER := NL80211
-BOARD_HOSTAPD_PRIVATE_LIB := lib_driver_cmd_bcmdhd
-WIFI_DRIVER_FW_PATH_PARAM := "/sys/module/bcmdhd/parameters/firmware_path"
-# Firmware moved from /system/etc/firmware (Android 10) to /vendor/etc/firmware:
-# Treble forbids vendor code reading firmware out of /system.
-WIFI_DRIVER_FW_PATH_STA := "/vendor/etc/firmware/fw_bcm4359c0_ag.bin"
-WIFI_DRIVER_FW_PATH_AP  := "/vendor/etc/firmware/fw_bcm4359c0_ag_apsta.bin"
-WIFI_DRIVER_FW_PATH_P2P := "/vendor/etc/firmware/fw_bcm4359c0_ag_p2p.bin"
 
 BOARD_HAVE_BLUETOOTH := true
 # BOARD_HAVE_BLUETOOTH_BCM was set here. system/bt read it until Android 11; the

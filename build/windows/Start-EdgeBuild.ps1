@@ -746,21 +746,21 @@ function Stage-Sync {
 }
 
 function Stage-Kernel {
-    Write-Stage 'Stage 9/10  Kernel 4.19.111'
+    Write-Stage 'Stage 9/10  Kernel (mainline 6.12)'
     Invoke-InDistro -Command '~/android_khadas/android_manifest/build/windows/provision-wsl.sh kernel'
     Write-Good 'kernel built'
     Set-Done 'Kernel'
 }
 
 function Stage-Build {
-    Write-Stage 'Stage 10/10  Platform build and update.img'
+    Write-Stage 'Stage 10/10  Platform build and flash pack'
     Write-Warn2 'This tree is NOT finished: the composer3 and audio.core AIDL'
     Write-Warn2 'HALs are incomplete, so the build uses AOSP fallbacks and the'
     Write-Warn2 'resulting image will have no display or audio output. See'
     Write-Warn2 'docs/STATUS.md. Running this verifies the build, not the ROM.'
     $rc = Invoke-InDistro -Command '~/android_khadas/android_manifest/build/windows/provision-wsl.sh build' -AllowFailure
 
-    Write-Info "logs and any update.img are under the distro's home, reachable"
+    Write-Info "logs and the flash pack are under the distro's home, reachable"
     Write-Info "from Explorer at: \\wsl.localhost\$($script:DistroName)\home\builder\android_khadas"
 
     if ($rc -ne 0) {
@@ -864,15 +864,16 @@ try {
 $alwaysRun = @('Aidl', 'Probe')
 
 # A stage is complete only if what it produced is still there. Kernel was marked
-# done by a run in which the resource.img packing step had failed, so every run
+# done by a run in which the dtb staging step had failed, so every run
 # after that skipped it - and the platform build went looking for a file nothing
 # had ever written. Cheap to check, and it is checked in the distro because that
 # is where the artefacts live.
 function Test-StageOutputs {
     param([string] $Name)
     if ($Name -ne 'Kernel') { return $true }
-    $probe = 'k=~/android_khadas/aosp-14-edge1/kernel/khadas/edge; ' +
-             'test -f $k/out/arch/arm64/boot/Image && test -f $k/resource.img ' +
+    $probe = 'k=~/android_khadas/aosp-14-edge1/kernel/mainline; ' +
+             'test -f $k/out/arch/arm64/boot/Image && ' +
+             'ls $k/out/android-dtb/*.dtb >/dev/null 2>&1 ' +
              '&& echo OUTPUTS_OK || echo OUTPUTS_MISSING'
     try {
         return ((Invoke-WslCapture -Command $probe) -match 'OUTPUTS_OK')

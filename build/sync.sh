@@ -76,6 +76,18 @@ for attempt in 1 2 3 4; do
     sleep "$delay"
 done
 
+# Projects this manifest used to carry, from the Android 10 BSP path. repo removes
+# a project that leaves the manifest only if its checkout is clean, and the old
+# kernel is not: it has an out/ directory from having been built. Left in place it
+# is 20-odd GiB of a kernel nothing builds, and a second
+# arch/arm64/boot/dts/rockchip for anyone grepping the tree.
+for stale in kernel/khadas hardware/rockchip vendor/rockchip u-boot RKTools; do
+    if [[ -e "$TREE/$stale" ]]; then
+        echo "removing $stale (Android 10 BSP path, no longer in the manifest)"
+        rm -rf "$TREE/$stale"
+    fi
+done
+
 # The device tree lives in this manifest repo rather than in a repo of its own,
 # so it is placed into the tree rather than synced. This was a symlink, which is
 # exactly why the first build could not find the product: Soong's finder writes
