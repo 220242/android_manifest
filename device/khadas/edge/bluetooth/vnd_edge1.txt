@@ -1,5 +1,0 @@
-# Bluetooth HCI UART tuning for the Edge1. Read by libbt-vendor.
-BLUETOOTH_UART_DEVICE_PORT = "/dev/ttyS0"
-FW_PATCHFILE_LOCATION = "/vendor/etc/firmware/"
-BT_WAKE_VIA_USERIAL_IOCTL = FALSE
-LPM_IDLE_TIMEOUT_MULTIPLE = 5

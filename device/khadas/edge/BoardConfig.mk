@@ -215,6 +215,30 @@ BOARD_AVB_ROLLBACK_INDEX := 0
 # the Edge1's u-boot reads a single vbmeta.
 BOARD_AVB_MAKE_VBMETA_IMAGE_ARGS += --flags 2
 
+# The main vbmeta key is left unset on purpose: core/Makefile:4415 then picks
+# external/avb/test/data/testkey_rsa4096.pem with SHA256_RSA4096, which is what a
+# userdebug bring-up image should be signed with. A real key belongs here only
+# once there is something to protect.
+#
+# Recovery is different, and the build says so:
+#
+#   build/make/core/Makefile:4460: error: BOARD_AVB_RECOVERY_KEY_PATH must be
+#       defined for if non-A/B is supported.
+#
+# On a non-A/B device the standalone recovery image cannot be chained into
+# vbmeta.img - there is no second slot to fall back to, so recovery has to verify
+# on its own and therefore carries its own signature. TARGET_OTA_ALLOW_NON_AB is
+# derived, not set here: board_config.mk turns it on whenever AB_OTA_UPDATER is
+# not true, and marks it read-only.
+#
+# Same test key as the implicit default above, deliberately: two different test
+# keys would suggest a key hierarchy that does not exist.
+BOARD_AVB_RECOVERY_KEY_PATH := external/avb/test/data/testkey_rsa4096.pem
+BOARD_AVB_RECOVERY_ALGORITHM := SHA256_RSA4096
+BOARD_AVB_RECOVERY_ROLLBACK_INDEX := 0
+# Location 0 belongs to vbmeta itself; a self-signed partition needs its own.
+BOARD_AVB_RECOVERY_ROLLBACK_INDEX_LOCATION := 1
+
 # ---------------------------------------------------------------------------
 # fstab / recovery.
 # ---------------------------------------------------------------------------
@@ -282,7 +306,17 @@ BOARD_HAVE_BLUETOOTH := true
 # Bluetooth stack is an APEX module on 14 and nothing reads it. The Broadcom
 # specifics that matter now are the firmware patchram stage in init.edge1.rc and
 # bluetooth/bt_vendor.conf.
-BOARD_BLUETOOTH_BDROID_BUILDCFG_INCLUDE_DIR := device/khadas/edge/bluetooth
+# BOARD_BLUETOOTH_BDROID_BUILDCFG_INCLUDE_DIR pointed at device/khadas/edge/bluetooth,
+# and that directory had no bdroid_buildcfg.h in it. soong_config.mk:147 passes this
+# to Soong as BtConfigIncludeDir and the Bluetooth stack includes the header from
+# there, so this was a compile error waiting further down the build - AOSP's own
+# example, build/make/target/board/mainline_arm64/bluetooth/, exists to show what
+# belongs in such a directory.
+#
+# Left unset, exactly as BoardConfigGsiCommon.mk does, because there is nothing
+# board-specific to put in it: the files that were there (bt_vendor.conf,
+# vnd_edge1.txt) configured libbt-vendor, Broadcom's HIDL-era vendor library, which
+# this tree does not build. See init.edge1.rc for where Bluetooth stands.
 
 # ---------------------------------------------------------------------------
 # Misc.
@@ -301,4 +335,7 @@ BOARD_CHARGER_ENABLE_SUSPEND := true
 # commented-out entry to reinstate it if a board ever needs a fixed mode.
 
 # Keep the Rockchip release tooling reachable for update.img packaging.
+# Set because the default is $(TARGET_DEVICE_DIR)/../common - device/khadas/common,
+# which does not exist. releasetools.py itself is optional (core/Makefile:6035 takes
+# it through $(wildcard)), so this only needs to name a real directory.
 TARGET_RELEASETOOLS_EXTENSIONS := device/khadas/edge

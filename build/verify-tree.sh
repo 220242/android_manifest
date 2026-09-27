@@ -65,7 +65,12 @@ while IFS= read -r ref; do
     else
         err "BoardConfig.mk references a missing file: $ref"
     fi
-done < <(grep -hoE 'device/khadas/edge/[A-Za-z0-9_./-]+' "$DEV/BoardConfig.mk" 2>/dev/null \
+# Comments stripped first. Without that, this check reported
+# device/khadas/edge/bluetooth as a missing file - from the comment that explains
+# why the directory was deleted. A check that fails on its own explanation trains
+# people to ignore it.
+done < <(sed 's/#.*//' "$DEV/BoardConfig.mk" 2>/dev/null \
+            | grep -hoE 'device/khadas/edge/[A-Za-z0-9_./-]+' \
             | grep -vxE 'device/khadas/edge/(sepolicy/vendor|vintf)' | sort -u)
 # Directories referenced for sepolicy/vintf are checked separately since they
 # are dirs, not files.

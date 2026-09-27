@@ -330,14 +330,19 @@ PRODUCT_PROPERTY_OVERRIDES += \
 #      init.edge1.rc brcm_patchram_plus stage rather than by a HAL.
 # ---------------------------------------------------------------------------
 # brcm_patchram_plus is a Broadcom tool from the Rockchip vendor tree, not AOSP,
-# so it is gated. Without it the BCM4359 never gets its firmware patch and
-# Bluetooth will not come up - Wi-Fi is unaffected.
+# The BCM4359 still needs its firmware patch loaded over uart0 before an HCI device
+# exists, and that question is open: the kernel's hci_bcm driver would do it and
+# then own the port, while this HAL expects to open the tty itself. See
+# init.edge1.rc. The service is installed either way - it costs nothing and is what
+# a solution would plug into.
 PRODUCT_PACKAGES += \
     android.hardware.bluetooth-service.default
 
-
-PRODUCT_COPY_FILES += \
-    $(LOCAL_PATH)/bluetooth/bt_vendor.conf:$(TARGET_COPY_OUT_VENDOR)/etc/bluetooth/bt_vendor.conf
+# bluetooth/bt_vendor.conf was copied here. It configured libbt-vendor - the
+# Broadcom vendor library of the HIDL era - with the UART, baud rates and the
+# BCM4359C0.hcd patchram path. Nothing in this build reads it, so the file and the
+# whole bluetooth/ directory are gone: installing a config nothing reads is worse
+# than having none, because it suggests Bluetooth is configured.
 
 PRODUCT_PROPERTY_OVERRIDES += \
     ro.vendor.bluetooth.device=bcm4359 \
