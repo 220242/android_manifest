@@ -9,7 +9,18 @@
 # devices here, which AOSP already has a type for.
 /dev/dri/card0                      u:object_r:graphics_device:s0
 /dev/dri/renderD128                 u:object_r:gpu_device:s0
-/dev/video[0-9]*                    u:object_r:video_device:s0
+# No /dev/video[0-9]* line. AOSP's own file_contexts has that exact spec, and the
+# two files are concatenated before being compiled, so a second identical one is
+# fatal:
+#
+#   file_contexts.concat.tmp: Multiple same specifications for /dev/video[0-9]*.
+#   Error: could not load context file from ...
+#
+# Note "same specifications", not "same path": two different regexes that both
+# match a path are normal and the most specific wins, which is why the /dev/dri
+# lines above are fine next to AOSP's /dev/dri/card[0-9]* and
+# /dev/dri/renderD[0-9]*. It is the identical regex text that is rejected.
+#
 # The media controller that comes with a stateless V4L2 decoder. ueventd.edge1.rc
 # already sets its ownership; without a label here it keeps /dev's default type
 # and no vendor domain can open it.

@@ -369,6 +369,30 @@ if [[ -d "$SEDIR" ]]; then
     done <<< "$declared"
     (( dupe_types )) || ok "no locally declared type collides with a known AOSP type"
 
+    # Specifications AOSP's own file_contexts already has. The platform file and
+    # ours are concatenated and compiled as one, and checkfc rejects the same
+    # specification twice:
+    #
+    #   file_contexts.concat.tmp: Multiple same specifications for /dev/video[0-9]*.
+    #   Error: could not load context file from ...
+    #
+    # "Same specification" is the identical regex text, not an overlapping path:
+    # /dev/dri/card0 next to AOSP's /dev/dri/card[0-9]* is fine and the more
+    # specific one wins. So this list holds exact spellings, and like aosp_types it
+    # is a claim - the module probe resolves ours against the synced
+    # system/sepolicy and gates the run on it.
+    plat_specs="/dev/video[0-9]*"
+    dupe_specs=0
+    while IFS= read -r spec; do
+        [[ -n "$spec" ]] || continue
+        if grep -qxF "$spec" <<< "$plat_specs"; then
+            err "$SEDIR/file_contexts declares '$spec', which AOSP's file_contexts also"
+            err "  declares verbatim; checkfc refuses to load the concatenated file"
+            dupe_specs=$((dupe_specs+1))
+        fi
+    done < <(sed 's/#.*//' "$SEDIR/file_contexts" 2>/dev/null | awk 'NF>=2 {print $1}' | sort -u)
+    (( dupe_specs )) || ok "no file_contexts spec collides with a known AOSP one"
+
     # An exec type nothing labels means the domain transition never happens.
     unused=0
     while read -r t; do

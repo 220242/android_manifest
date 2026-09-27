@@ -479,6 +479,37 @@ device with a vendor partition - `PRODUCT_PROPERTY_OVERRIDES` goes to
 is a vendor property. Properties are global at run time so nothing was broken by
 it, but it is why the failure surfaced in `vendor/build.prop`.
 
+Fifth of the same family, in the labels this time:
+
+```
+file_contexts.concat.tmp: Multiple same specifications for /dev/video[0-9]*.
+Error: could not load context file from ...
+```
+
+The platform's `file_contexts` and ours are concatenated and compiled as one, and
+`checkfc` rejects the same specification twice. Note *specification*, not path: two
+different regexes matching one path is normal and the most specific wins, which is
+why `/dev/dri/card0` sits happily next to AOSP's `/dev/dri/card[0-9]*`. It is the
+identical regex text that is fatal, and `/dev/video[0-9]*` was copied verbatim.
+
+The probe now resolves both `file_contexts` and `genfs_contexts` against the synced
+`system/sepolicy` and prints every spec of ours with whether the platform has it.
+Only the `file_contexts` half gates the run: that is the one observed to be fatal,
+and the same run that hit it linked `precompiled_sepolicy` without objecting to any
+of our `genfscon` lines, so gating on those would be guessing. Those are reported
+instead.
+
+That makes five gates in the probe, all the same shape - the platform already
+declares this, and the build tells you one per run:
+
+| What | Fails at | Tool |
+|---|---|---|
+| module in `PRODUCT_PACKAGES` does not exist | never, it is dropped silently | - |
+| sepolicy type declared twice | ~6 min | `checkpolicy` |
+| property `exact` match declared twice | ~20 min | `host_init_verifier` |
+| `file_contexts` spec declared twice | ~9 min | `checkfc` |
+| property `main.mk` already derives | ~9 min | `post_process_props.py` |
+
 The same run turned up a booby trap in the kernel fragment. `merge_config.sh`
 picks the symbols to merge with two `sed` patterns and then reads each value back
 with `grep -w $CFG`, so a comment that mentions a symbol the fragment also sets

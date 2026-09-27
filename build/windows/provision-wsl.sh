@@ -196,7 +196,8 @@ stage_probe() {
     local dmk="$MANIFEST/device/khadas/edge/device.mk"
     # Cleared first: if the diagnostic block below dies early, a stale count from
     # the last run would gate this one - in whichever direction is wrong.
-    rm -f "$WORK/.probe-miss-hard" "$WORK/.probe-sepol-dupes" "$WORK/.probe-prop-dupes"
+    rm -f "$WORK/.probe-miss-hard" "$WORK/.probe-sepol-dupes" \
+          "$WORK/.probe-prop-dupes" "$WORK/.probe-ctx-dupes"
 
     [[ -d "$TREE/hardware/interfaces" ]] || {
         echo "tree not synced at $TREE" >&2; return 1; }
@@ -757,6 +758,7 @@ def prop_exact(root, skip_prebuilts):
                 continue
             names.setdefault(line[0], os.path.join(base, 'property_contexts'))
     return names
+ctx_dupes = []
 plat_props = prop_exact(os.path.join(tree, 'system', 'sepolicy'), True)
 our_props = prop_exact(sedir, False)
 print('  --- property_contexts exact matches ---')
@@ -770,9 +772,61 @@ if prop_dupes:
     print('  !! %d DUPLICATE exact match(es): %s' % (len(prop_dupes), ' '.join(prop_dupes)))
     print('     host_init_verifier refuses to serialize the property contexts.')
     print('     Drop the line: the platform already labels it.')
+
+# And once more for file_contexts and genfs_contexts.
+#
+#   file_contexts.concat.tmp: Multiple same specifications for /dev/video[0-9]*.
+#   Error: could not load context file from ...
+#
+# The platform's file is concatenated with ours and compiled as one, and checkfc
+# rejects the same specification twice. "Same specification" means the identical
+# regex text, not an overlapping path - two different regexes matching one path is
+# normal and the most specific wins - so this compares first fields verbatim.
+def spec_first_fields(root, fname, skip_prebuilts):
+    names = {}
+    for base, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs if d != '.git' and not (skip_prebuilts and d == 'prebuilts')]
+        if fname not in files:
+            continue
+        path = os.path.join(base, fname)
+        for raw in open(path, errors='replace'):
+            line = raw.split('#', 1)[0].split()
+            if len(line) < 2:
+                continue
+            # genfscon lines are "genfscon <fs> <path> <context>"; the spec is the
+            # filesystem and path together, since the same path under two
+            # filesystems is not a duplicate.
+            key = ' '.join(line[:3]) if line[0] == 'genfscon' else line[0]
+            names.setdefault(key, path)
+    return names
+for fname in ('file_contexts', 'genfs_contexts'):
+    plat_specs = spec_first_fields(os.path.join(tree, 'system', 'sepolicy'), fname, True)
+    our_specs = spec_first_fields(sedir, fname, False)
+    both = sorted(n for n in our_specs if n in plat_specs)
+    print('  --- %s ---' % fname)
+    print('    system/sepolicy declares %d specs; this device declares %d'
+          % (len(plat_specs), len(our_specs)))
+    for n in sorted(our_specs):
+        print('    %-46s %s' % (n, 'DUPLICATE SPEC' if n in plat_specs else 'ours alone, ok'))
+    if both:
+        print('  !! %d DUPLICATE spec(s) in %s: %s' % (len(both), fname, ' '.join(both)))
+        if fname == 'file_contexts':
+            print('     checkfc refuses to load the concatenated file. Drop the line;')
+            print('     the platform already labels it.')
+        else:
+            print('     Not gated on: a vendor genfscon is compiled into')
+            print('     vendor_sepolicy.cil separately, and the run where checkfc')
+            print('     rejected a file_contexts duplicate linked precompiled_sepolicy')
+            print('     without complaining about any of these. Reported because a')
+            print('     duplicate label is still redundant, and worth reading.')
+    # Only file_contexts gates the run - that is the one this has been observed to
+    # be fatal for.
+    if fname == 'file_contexts':
+        ctx_dupes += both
 work = os.environ.get('EDGE1_WORK', '/tmp')
 open(os.path.join(work, '.probe-sepol-dupes'), 'w').write('%d\n' % len(dupes))
 open(os.path.join(work, '.probe-prop-dupes'), 'w').write('%d\n' % len(prop_dupes))
+open(os.path.join(work, '.probe-ctx-dupes'), 'w').write('%d\n' % len(ctx_dupes))
 PY_SEPOL
         else
             echo "  ABSENT at $TREE/system/sepolicy"
@@ -839,6 +893,19 @@ PY_SEPOL
         echo "$prop_dupes property name(s) are labelled both here and by system/sepolicy." >&2
         echo "host_init_verifier refuses to serialize the merged property contexts." >&2
         sed -n '/DUPLICATE exact match/,+2p' "$out" >&2
+        echo "Full probe: $out" >&2
+        rc=1
+    fi
+
+    # A file_contexts or genfs_contexts specification the platform already has.
+    # checkfc stops at the first one, twenty minutes in.
+    local ctx_dupes=0
+    [[ -f "$WORK/.probe-ctx-dupes" ]] && ctx_dupes=$(cat "$WORK/.probe-ctx-dupes")
+    if (( ctx_dupes > 0 )); then
+        echo >&2
+        echo "$ctx_dupes context specification(s) are declared both here and by system/sepolicy." >&2
+        echo "checkfc refuses to load the concatenated context file." >&2
+        sed -n '/DUPLICATE spec/,+2p' "$out" >&2
         echo "Full probe: $out" >&2
         rc=1
     fi
