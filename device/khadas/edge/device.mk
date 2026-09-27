@@ -184,6 +184,12 @@ PRODUCT_PACKAGES += \
 
 # The audio.core shim opens the legacy device but has no stream I/O yet
 # (shims/audio/RkAudioModule.cpp). Without it there is no HDMI audio.
+#
+# Its blueprint is shims/audio/Android.bp.disabled, so this package does not
+# exist as a module yet: two of its AIDL dependency versions are unconfirmed, and
+# an unknown dependency name stops Soong for the whole tree, not just for the
+# module. Enabling EDGE1_ENABLE_INCOMPLETE_HALS therefore needs that file renamed
+# back to Android.bp first.
 ifeq ($(EDGE1_ENABLE_INCOMPLETE_HALS),true)
 PRODUCT_PACKAGES += \
     android.hardware.audio.service.rk3399 \
@@ -358,8 +364,8 @@ PRODUCT_COPY_FILES += \
 PRODUCT_PROPERTY_OVERRIDES += ro.media.xml_variant.codecs=_c2
 endif
 
-# DRM: Widevine L3 only. L1 needs an OP-TEE trusted app, and
-# PRODUCT_HAVE_OPTEE is false for this target.
+# DRM: Widevine L3 only. L1 needs an OP-TEE trusted app, and this board has no
+# provisioned TEE.
 # clearkey only. Widevine is not in AOSP - drm@4.0-service.widevine comes from
 # vendor/widevine, which this overlay does not sync. Add that project and this
 # package together if Widevine L3 is wanted.
@@ -415,8 +421,7 @@ endif
 # KeyMint / Gatekeeper: software ("nonsecure") implementations.
 #
 # This is a deliberate, documented downgrade. The RK3399 has no provisioned
-# TEE on the Edge1 and PRODUCT_HAVE_OPTEE is false, so there is no hardware
-# keystore. Consequence: hardware key attestation is unavailable and the build
+# TEE on the Edge1 and no OP-TEE, so there is no hardware keystore. Consequence: hardware key attestation is unavailable and the build
 # cannot pass CTS/GTS attestation tests. See docs/HAL_MIGRATION.md.
 # keymint-service is AOSP's software KeyMint. There is no '.nonsecure' variant -
 # the probe shows only the plain service plus .rust/.trusty/.strongbox/.remote.

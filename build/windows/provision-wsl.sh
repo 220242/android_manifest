@@ -270,6 +270,181 @@ PY_INNER
         else
             echo "ABSENT at $ad"
         fi
+        echo
+        echo "##### FROZEN AIDL VERSIONS #####"
+        # Why this matters more than it looks: Soong turns each frozen
+        # aidl_api/<package>/<N> directory into a module named
+        # <package>-V<N>-<backend>, and a blueprint that names a version which was
+        # never frozen fails analysis with "depends on undefined module" - which
+        # stops the whole tree, not just that module, and not just when the module
+        # is installed. Writing those suffixes from memory is how the audio shim
+        # ended up disabled.
+        python3 - "$TREE" "$WORK/.probe-aidl-versions" <<'PY_AIDL'
+import os, re, sys
+tree, outmap = sys.argv[1], sys.argv[2]
+skip = {'.repo', 'out', '.git'}
+vers = {}
+for root, dirs, files in os.walk(tree):
+    dirs[:] = [d for d in dirs if d not in skip]
+    if os.path.basename(root) != 'aidl_api':
+        continue
+    dirs[:] = []                      # nothing of interest below a version dir
+    for pkg in sorted(os.listdir(root)):
+        pdir = os.path.join(root, pkg)
+        if not os.path.isdir(pdir):
+            continue
+        v = sorted(d for d in os.listdir(pdir) if re.fullmatch(r'[0-9]+', d))
+        if v:
+            vers.setdefault(pkg, set()).update(int(x) for x in v)
+            vers[pkg + '\0src'] = {os.path.relpath(pdir, tree)}
+print('%d packages with frozen versions' % len([k for k in vers if '\0' not in k]))
+print()
+want = ('android.hardware.graphics', 'android.hardware.audio',
+        'android.media.audio', 'android.hardware.tv',
+        'android.hardware.bluetooth', 'android.hardware.wifi')
+for pkg in sorted(k for k in vers if '\0' not in k):
+    if pkg.startswith(want):
+        v = sorted(vers[pkg])
+        print('  %-52s V%s   (latest: -V%d-ndk)' % (pkg, ','.join(map(str, v)), v[-1]))
+print()
+print('  full map written to %s' % outmap)
+with open(outmap, 'w') as f:
+    for pkg in sorted(k for k in vers if '\0' not in k):
+        f.write('%s %s\n' % (pkg, ','.join(str(x) for x in sorted(vers[pkg]))))
+PY_AIDL
+        echo
+
+        echo "##### SHIM BLUEPRINT DEPENDENCIES #####"
+        # Resolves every shared_libs/static_libs entry in the device shims against
+        # the tree: a plain name has to be a declared module, and a
+        # <package>-V<N>-<backend> name has to have aidl_api/<package>/<N> frozen.
+        python3 - "$MANIFEST/device/khadas/edge/shims" "$found" \
+                  "${WORK}/.probe-aidl-versions" <<'PY_DEPS'
+import os, re, sys
+shims, found, aidl = sys.argv[1], sys.argv[2], sys.argv[3]
+declared = set(open(found).read().split('\n'))
+frozen = {}
+if os.path.exists(aidl):
+    for line in open(aidl):
+        pkg, v = line.split()
+        frozen[pkg] = set(v.split(','))
+bad = 0
+for root, _, files in os.walk(shims):
+    for fn in sorted(files):
+        if not fn.startswith('Android.bp'):
+            continue
+        path = os.path.join(root, fn)
+        body = open(path).read()
+        # Strip // comments first. Without this, a quoted phrase inside a comment
+        # in a shared_libs block is read as a dependency: the allocator
+        # blueprint's own note about "depends on undefined module" was reported
+        # as an undefined module.
+        body = re.sub(r'//[^\n]*', '', body)
+        print('  %s%s' % (os.path.relpath(path, shims),
+                          '   (NOT seen by Soong)' if fn != 'Android.bp' else ''))
+        deps = set()
+        for m in re.finditer(r'(?:shared_libs|static_libs|header_libs)\s*:\s*\[(.*?)\]',
+                             body, re.S):
+            for q in re.finditer(r'"([^"]+)"', m.group(1)):
+                deps.add(q.group(1))
+        for d in sorted(deps):
+            m = re.fullmatch(r'(.+)-V([0-9]+)-(ndk|cpp|java|rust)', d)
+            if m:
+                pkg, ver = m.group(1), m.group(2)
+                if pkg not in frozen:
+                    verdict = 'NO SUCH AIDL PACKAGE'
+                elif ver not in frozen[pkg]:
+                    verdict = 'WRONG VERSION - frozen: ' + ','.join(sorted(frozen[pkg]))
+                else:
+                    verdict = 'ok'
+            else:
+                verdict = 'ok' if d in declared else 'NOT A DECLARED MODULE'
+            if verdict != 'ok':
+                bad += 1
+            print('      %-50s %s' % (d, verdict))
+print()
+print('  %d unresolved dependenc%s' % (bad, 'y' if bad == 1 else 'ies'))
+PY_DEPS
+        echo
+
+        echo "##### VINTF: what the framework requires of us #####"
+        # check_vintf fails the build if a HAL the framework compatibility matrix
+        # marks optional="false" is missing from the device manifest. Level 8 is
+        # the Android 14 FCM, which is what target-level in
+        # device/khadas/edge/vintf/manifest.xml claims.
+        cm="$TREE/hardware/interfaces/compatibility_matrices"
+        if [[ -d "$cm" ]]; then
+            ls "$cm" | grep -E 'compatibility_matrix\.[0-9]+\.xml' | sed 's/^/  /' || true
+            for lvl in 8 7; do
+                f="$cm/compatibility_matrix.$lvl.xml"
+                [[ -f "$f" ]] || continue
+                echo "  --- level $lvl: HALs with optional=false ---"
+                python3 - "$f" <<'PY_VINTF' || true
+import re, sys, xml.etree.ElementTree as ET
+root = ET.parse(sys.argv[1]).getroot()
+n = 0
+for hal in root.findall('hal'):
+    if hal.get('optional') == 'false':
+        name = hal.findtext('name', '?')
+        vers = ','.join(v.text for v in hal.findall('version')) or \
+               ','.join(v.text for v in hal.findall('fqname'))
+        print('    %-46s %-8s %s' % (name, hal.get('format', '?'), vers))
+        n += 1
+print('    (%d required)' % n)
+PY_VINTF
+            done
+            echo "  --- level 8 kernel requirements (4.19.111 is what we have) ---"
+            python3 - "$cm/compatibility_matrix.8.xml" <<'PY_KERNEL' || true
+import sys, xml.etree.ElementTree as ET
+try:
+    root = ET.parse(sys.argv[1]).getroot()
+except Exception as e:
+    print('    could not parse: %s' % e); raise SystemExit(0)
+ks = root.findall('kernel')
+if not ks:
+    print('    (the matrix states no kernel requirement)')
+for k in ks:
+    cfgs = k.findall('config')
+    print('    version %-12s level=%-4s %d required configs'
+          % (k.get('version'), k.get('level', '-'), len(cfgs)))
+PY_KERNEL
+            echo "  --- our device manifest declares ---"
+            grep -E '<name>|target-level' \
+                 "$MANIFEST/device/khadas/edge/vintf/manifest.xml" | sed 's/^/    /' || true
+        else
+            echo "  ABSENT at $cm"
+        fi
+        echo
+
+        echo "##### sepolicy versions BOARD_SEPOLICY_VERS may name #####"
+        # A value that is no longer in the platform's compat set is a hard Kati
+        # error, and the set shrinks with every release. BoardConfig.mk currently
+        # says 29.0.
+        if [[ -d "$TREE/system/sepolicy/prebuilts/api" ]]; then
+            echo "  prebuilt policy APIs in the tree:"
+            ls "$TREE/system/sepolicy/prebuilts/api" | tr '\n' ' ' | sed 's/^/    /' || true
+            echo
+            grep -rhoE 'PLATFORM_SEPOLICY_COMPAT_VERSIONS *:=.*' \
+                 "$TREE/system/sepolicy/Android.mk" 2>/dev/null | sed 's/^/  /' || true
+            grep -rhA 12 'PLATFORM_SEPOLICY_COMPAT_VERSIONS' \
+                 "$TREE/system/sepolicy/Android.bp" 2>/dev/null | head -20 | sed 's/^/  /' || true
+        else
+            echo "  ABSENT at $TREE/system/sepolicy/prebuilts/api"
+        fi
+        echo "  ours: $(grep -h BOARD_SEPOLICY_VERS "$MANIFEST/device/khadas/edge/BoardConfig.mk" || true)"
+        echo
+
+        echo "##### release config (lunch needs it) #####"
+        if [[ -f "$TREE/build/release/release_config_map.mk" ]]; then
+            echo "  build/release/release_config_map.mk present; configs declared:"
+            grep -hoE 'declare-release-config, *[a-z_0-9]+' \
+                 "$TREE/build/release/release_config_map.mk" \
+                 | sed 's/.*, *//' | sort -u | sed 's/^/    /' || true
+        else
+            echo "  MISSING $TREE/build/release/release_config_map.mk"
+            echo "  lunch <product>-<release>-<variant> has no valid release without it"
+        fi
+        echo
         echo "##### END MODULE PROBE #####"
     } > "$out" 2>&1
 
@@ -297,9 +472,13 @@ stage_report() {
     # git-lfs is listed because its absence, combined with repo init --git-lfs,
     # is what broke checkout of the LFS-backed projects - and nothing in the
     # failure said so.
-    for t in git git-lfs repo python3 java make ninja ccache aarch64-linux-gnu-gcc; do
+    # ninja and soong come from the tree's own prebuilts, so a host ninja is not
+    # part of this list - it read as "ninja MISSING" and looked like a problem.
+    for t in git git-lfs repo python3 java make ccache aarch64-linux-gnu-gcc; do
         printf '%-8s %s\n' "$t" "$(command -v $t 2>/dev/null || echo MISSING)"
     done
+    echo "ninja:      $([[ -x $TREE/prebuilts/build-tools/linux-x86/bin/ninja ]] \
+        && echo 'tree prebuilt (the one the build uses)' || echo 'tree prebuilt MISSING')"
     echo "git-lfs:    $(git lfs version 2>&1 | head -1)"
     echo "repo ver:   $(repo --version 2>&1 | head -2 | tr '\n' ' ')"
     echo "ccache:     $(ccache -s 2>/dev/null | head -4 | tr '\n' ' ')"
@@ -311,6 +490,25 @@ stage_report() {
         echo "aosp ref:   $(cat "$TREE/.repo/manifests.git/HEAD" 2>/dev/null || echo unknown)"
         echo "projects:   $(ls "$TREE" 2>/dev/null | wc -l) top-level entries"
         echo "local_manifests: $(ls "$TREE/.repo/local_manifests" 2>/dev/null || echo NONE)"
+    fi
+    echo
+    # Both of these used to be files the user had to find and send separately,
+    # which is why a round went by with a stale probe and no one noticed. The
+    # report is the one thing that gets sent, so the answers belong in it.
+    echo "##### MODULE PROBE #####"
+    if [[ -f "$WORK/module-probe.txt" ]]; then
+        echo "($(wc -l < "$WORK/module-probe.txt") lines total; first 400 below)"
+        head -400 "$WORK/module-probe.txt" 2>&1 || true
+    else
+        echo "(the probe has not run)"
+    fi
+    echo
+    echo "##### AIDL SURFACE (summary) #####"
+    if [[ -f "$WORK/aidl-surface.txt" ]]; then
+        grep -E '\(declared version' "$WORK/aidl-surface.txt" | sed 's/^/  /' || true
+        echo "  full file: $WORK/aidl-surface.txt ($(wc -l < "$WORK/aidl-surface.txt") lines)"
+    else
+        echo "(the aidl stage has not run)"
     fi
     echo
     echo "##### LOGS #####"

@@ -79,7 +79,16 @@ BOARD_KERNEL_PAGESIZE := 2048
 # the Rockchip-specific init stages and the bcmdhd/rtk firmware loader.
 BOARD_BOOT_HEADER_VERSION := 4
 BOARD_MKBOOTIMG_ARGS := --header_version $(BOARD_BOOT_HEADER_VERSION)
-BOARD_INCLUDE_RECOVERY_DTBO := true
+
+# BOARD_INCLUDE_RECOVERY_DTBO used to be set here, carried over from the Android
+# 10 config where the boot header was v2. Boot header v3 and v4 have no
+# recovery_dtbo field at all, so mkbootimg is handed a --recovery_dtbo it cannot
+# place - it does nothing at best. Dropped.
+#
+# With a dedicated recovery partition and no A/B, recovery ships as a whole image
+# rather than as a patch against boot, which is also what package-file flashes.
+# Setting this is what tells the build to stop generating the patch resources.
+BOARD_USES_FULL_RECOVERY_IMAGE := true
 
 # ---------------------------------------------------------------------------
 # Partitions.

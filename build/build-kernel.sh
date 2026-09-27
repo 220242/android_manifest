@@ -189,15 +189,42 @@ echo "==> building Image + dtbs ($JOBS jobs)"
 make "${MAKE_ARGS[@]}" -j"$JOBS" Image "rockchip/${DTS}.dtb"
 make "${MAKE_ARGS[@]}" -j"$JOBS" modules
 
-# resource.img packs the DTB plus the boot logo; the Rockchip bootloader expects
-# it rather than a bare dtbo.
+# resource.img packs the DTB plus the boot logos into Rockchip's RSCE container.
+# Rockchip's bootloader reads it, and the legacy BSP pointed
+# BOARD_PREBUILT_DTBOIMAGE at it, so the platform build needs the file to exist.
+#
+# The kernel's own <dts>.img rule is what builds it - the same target Khadas'
+# own build instructions use. The hand-rolled resource_tool call this replaces
+# was wrong twice over: it sent its stderr to /dev/null, so a real failure read
+# as "not present", and the mkmultidtb.py helper it ran first is Python 2:
+#
+#   File ".../scripts/mkmultidtb.py", line 31
+#       print __doc__
+#   SyntaxError: Missing parentheses in call to 'print'
+#
+# mkmultidtb.py exists for boards that ship several DTBs in one image. A
+# single-DTS build has no use for it.
 echo "==> packing resource.img"
-if [[ -x scripts/mkmultidtb.py ]]; then
-    ./scripts/mkmultidtb.py "$DTS" || true
+echo "    inputs:"
+ls -l scripts/resource_tool logo.bmp logo_kernel.bmp 2>&1 | sed 's/^/      /' || true
+
+if ! make "${MAKE_ARGS[@]}" -j"$JOBS" "${DTS}.img"; then
+    echo "    the ${DTS}.img target failed" >&2
 fi
-./scripts/resource_tool --dtbname "out/arch/arm64/boot/dts/rockchip/${DTS}.dtb" \
-    logo.bmp logo_kernel.bmp 2>/dev/null || \
-    echo "  note: resource_tool not present; pack resource.img with the Rockchip BSP tooling"
+
+resource_img="$(find out -name resource.img -type f 2>/dev/null | head -1)"
+if [[ -n "$resource_img" ]]; then
+    # BoardConfig.mk reads kernel/khadas/edge/resource.img. The legacy BSP built
+    # in tree, so the file sat at the kernel root; with O=out it lands under out/.
+    cp -f "$resource_img" resource.img
+    echo "    resource.img: $(du -h resource.img | cut -f1)  (from $resource_img)"
+else
+    echo "    NO resource.img was produced." >&2
+    echo "    BOARD_PREBUILT_DTBOIMAGE points at kernel/khadas/edge/resource.img," >&2
+    echo "    so the platform build will fail at image packing. Either pack it with" >&2
+    echo "    the Rockchip BSP tooling or drop BOARD_PREBUILT_DTBOIMAGE and" >&2
+    echo "    BOARD_INCLUDE_RECOVERY_DTBO from BoardConfig.mk." >&2
+fi
 
 echo
 echo "kernel: $KERNEL/out/arch/arm64/boot/Image"

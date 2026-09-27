@@ -12,7 +12,18 @@ set -euo pipefail
 
 readonly TREE="${1:-$HOME/aosp-14-edge1}"
 readonly VARIANT="${2:-userdebug}"
-readonly TARGET="edge1_tv-${VARIANT}"
+# Android 14's lunch takes <product>-<release>-<variant> and rejects anything
+# else outright:
+#
+#   IFS="-" read -r product release variant <<< "$selection"
+#   if [[ -z "$product" ]] || [[ -z "$release" ]] || [[ -z "$variant" ]]
+#   then ... "Valid combos must be of the form <product>-<release>-<variant>"
+#
+# (build/envsetup.sh in android-14.0.0_r75, lines 809-820.) The release names
+# come from build/release/release_config_map.mk; trunk_staging is the one AOSP's
+# own products use, and core/release_config.mk falls back to it.
+readonly RELEASE="${3:-trunk_staging}"
+readonly TARGET="edge1_tv-${RELEASE}-${VARIANT}"
 
 cd "$TREE"
 
@@ -33,16 +44,36 @@ jobs=$(( ram_gib / 2 ))
 (( jobs < 1 )) && jobs=1
 echo "==> ${cores} cores, ${ram_gib}GiB RAM -> -j${jobs}"
 
+# AOSP's envsetup.sh, and the shell functions it defines, are not written to run
+# under 'set -u'. It reads $TOP before anything assigns it, so the whole build
+# ended on the very first line it sourced:
+#
+#   build/envsetup.sh: line 21: TOP: unbound variable
+#
+# -u stays off from here to the end: lunch and m are that same code. -e goes off
+# too, because the build's exit status is wanted - a bare abort would lose the
+# chance to point at the log.
+set +eu
 # shellcheck disable=SC1091
 source build/envsetup.sh
 
-# Android 14 (U) uses the two-part product-variant form. The three-part
-# product-release-variant form ("edge1_tv-trunk_staging-userdebug") is Android
-# 15+; passing it here fails.
 lunch "$TARGET"
+lunch_rc=$?
+if [ "$lunch_rc" -ne 0 ]; then
+    echo "lunch $TARGET failed (exit $lunch_rc)" >&2
+    echo "the product is defined in device/khadas/edge/edge1_tv.mk and named by" >&2
+    echo "device/khadas/edge/AndroidProducts.mk; both must be reachable from $TREE" >&2
+    exit 1
+fi
 
 echo "==> building $TARGET"
 m -j"$jobs" 2>&1 | tee "$TREE/build-${VARIANT}.log"
+build_rc=${PIPESTATUS[0]}
+if [ "$build_rc" -ne 0 ]; then
+    echo "m failed (exit $build_rc); the errors are in $TREE/build-${VARIANT}.log" >&2
+    exit "$build_rc"
+fi
+set -e
 
 readonly OUT="$TREE/out/target/product/edge"
 for img in system.img vendor.img super.img boot.img; do

@@ -206,16 +206,49 @@ Ordered by what blocks what.
 4. ~~**Verify the AOSP tag.**~~ Resolved: the `android-14.0.0_r*` series runs
    r1..r75, confirmed from `aosp-mirror/platform_manifest`. `sync.sh` now
    defaults to r75, and `provision-wsl.sh` resolves the newest at run time.
-5. **Run `check_vintf`.** `vintf/manifest.xml` declares `target-level="8"`
-   (Android 14 FCM) and 22 AIDL HALs. The exact permitted versions must be
-   validated against the real framework compatibility matrix; if it rejects the
-   manifest, lowering `target-level` is the escape hatch.
+5. ~~**Run `check_vintf`.**~~ Partly resolved, and the resolution is a warning
+   rather than good news. `--check-compat` - the pass that checks the device
+   manifest against the framework matrix, including the required-HAL list and the
+   kernel requirements - runs only when `PRODUCT_ENFORCE_VINTF_MANIFEST` is true
+   (`build/make/core/Makefile:5303`), and nothing in this product sets it. So the
+   build will **not** fail on `target-level="8"`, on a missing required HAL, or on
+   the 4.19.111 kernel being below any LTS minimum a recent FCM names. Those
+   become first-boot and VTS problems instead of build problems. What does still
+   run is `--check-one` on the vendor manifest, which only checks that manifest's
+   own validity. Turning enforcement on is the hardening step after first boot,
+   and it is expected to fail on the kernel version first.
 6. **Confirm AIDL signatures** with `build/verify-aidl-surface.sh` before writing
-   any remaining shim.
-7. **Kernel config merge.** `build/build-kernel.sh` reports symbols that did not
-   take; several in the fragment are boot-critical. See `KERNEL.md`.
+   any remaining shim. The module probe now also resolves every dependency in the
+   shim blueprints against the tree, which is what an unknown `-V<n>-ndk` suffix
+   needs: Soong resolves dependencies for modules it never builds, so one wrong
+   suffix stops the whole tree. `shims/audio/Android.bp.disabled` is renamed out
+   of Soong's glob until its two unconfirmed suffixes are filled in.
+7. ~~**Kernel config merge.**~~ The kernel builds: `Image`, the DTB and five
+   modules, with the config delta merged and verified symbol by symbol. What is
+   still open there is `resource.img`, which the Rockchip `<dts>.img` target
+   produces and `BOARD_PREBUILT_DTBOIMAGE` needs.
 8. **Replace the invented codec performance numbers** in
    `media/media_codecs_performance.xml` with measurements from real hardware.
+
+## Decisions taken against the real build system
+
+These came out of reading `android-14.0.0_r75` rather than from memory, after
+`aosp-mirror/platform_build` turned out to be clonable from this environment.
+Each one was wrong in the tree before it was checked.
+
+| Setting | Why |
+|---|---|
+| `lunch edge1_tv-trunk_staging-userdebug` | 14's `lunch` requires three parts and rejects two outright. The two-part form would never have started a build. |
+| `set +eu` around `envsetup.sh` | `envsetup.sh:21` reads `$TOP` before anything sets it; under `set -u` that ended the run before `m`. |
+| `PRODUCT_ENABLE_UFFD_GC := false` | The default makes the build decide from the kernel version. 4.19.111 has neither the userfaultfd feature set nor `MREMAP_DONTUNMAP`, so the answer is no - stated directly rather than inferred. |
+| `BOARD_USES_FULL_RECOVERY_IMAGE := true`, no `BOARD_INCLUDE_RECOVERY_DTBO` | Boot header v3 and v4 have no `recovery_dtbo` field, so the flag handed mkbootimg an argument it cannot place. |
+| Four `PRODUCT_*` variables deleted | `PRODUCT_BUILD_PROP_OVERRIDES`, `PRODUCT_HAS_CAMERA`, `PRODUCT_HAVE_OPTEE`, `PRODUCT_TARGET_VNDK_VERSION` appear nowhere in AOSP 14. They were read by `device/rockchip/common`, which this tree does not have, so they were decoration that read like configuration. |
+| No `ro.product.first_api_level` override | `core/main.mk:284` already emits it from `PRODUCT_SHIPPING_API_LEVEL`. Setting both worked only while they agreed, and `post_process_props.py` rejects duplicates that disagree - so raising the shipping level later would have failed the build. |
+
+Also checked and found clean: none of the 69 `KATI_obsolete_var` names are used
+anywhere in the device tree, and the dynamic-partition group naming matches what
+`core/config.mk` derives (`BOARD_ROCKCHIP_DYNAMIC_PARTITIONS_SIZE` and
+`_PARTITION_LIST` are exactly what `to-upper` of the group name asks for).
 
 ## Honest expectation
 

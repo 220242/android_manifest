@@ -76,3 +76,21 @@ wiring could be carried over.
 `device/khadas/edge/vintf/manifest.xml` is the device-wide manifest and must stay
 consistent with the per-shim fragments; a HAL declared in one and not the other
 fails `check_vintf`.
+
+## Which of these Soong actually sees
+
+`graphics/allocator/Android.bp` is live. Every module it depends on is confirmed
+to exist in the synced tree, and since the module is not in `PRODUCT_PACKAGES`
+unless `EDGE1_ENABLE_INCOMPLETE_HALS` is set, Soong analyses it but never
+compiles it - which is the cheap half of the check, and worth keeping.
+
+`audio/Android.bp.disabled` is deliberately not named `Android.bp`. Soong globs
+for that exact filename, so the file is invisible to it. The reason is that Soong
+resolves dependencies for every module it parses, installed or not, and an
+unknown dependency name is an analysis error that stops the entire tree. Two of
+the versioned AIDL libraries that blueprint names
+(`android.hardware.audio.common-V?-ndk`,
+`android.media.audio.common.types-V?-ndk`) were written from memory, and the
+suffix must match the frozen `aidl_api` version directory exactly. The module
+probe now prints those directories; fill the numbers in, implement
+`createOutputStream`, then rename the file back.

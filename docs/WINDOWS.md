@@ -65,9 +65,13 @@ Reach it from Explorer at `\\wsl.localhost\Edge1Build\home\builder\android_khada
 | `Sync` | Resolves the newest `android-14.0.0_r*` tag and syncs (100+ GiB) |
 | `Aidl` | Dumps the real AIDL method surface of all 22 declared HALs to `aidl-surface.txt` |
 | `Kernel` | Builds 4.19.111 with the Android 14 config delta |
-| `Build` | `lunch edge1_tv-userdebug`, `m`, then Rockchip `update.img` packaging |
+| `Build` | `lunch edge1_tv-trunk_staging-userdebug`, `m`, then Rockchip `update.img` packaging |
 
 Run one on its own with `-Stage Build`. Re-run a completed stage with `-Force`.
+`Aidl` and `Probe` ignore the state file and always run: they are read-only
+verification passes whose output is the point, and gating them meant a changed
+check silently never ran again. Their output is now folded into the report, so
+there is only ever one file to send.
 
 ## When something fails: one file to send
 

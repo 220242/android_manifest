@@ -60,15 +60,25 @@ Read the "config symbols did not take" list it prints. See `KERNEL.md`.
 build/build.sh ~/aosp-14-edge1 userdebug
 ```
 
-Which is `source build/envsetup.sh; lunch edge1_tv-userdebug; m -jN`, plus the
-Rockchip `update.img` packaging that has to follow `m` in the same environment.
+Which is `source build/envsetup.sh; lunch edge1_tv-trunk_staging-userdebug;
+m -jN`, plus the Rockchip `update.img` packaging that has to follow `m` in the
+same environment.
 
 `N` is derived from RAM, not core count: soong's Java steps take ~2GiB each, and
 `-j$(nproc)` on a RAM-poor host is the most common cause of a build dying hours
 in with a bare `Killed`.
 
-Note `lunch edge1_tv-userdebug` is the two-part Android 14 form. The three-part
-`product-release-variant` form is Android 15+ and fails here.
+The combo is three-part, `<product>-<release>-<variant>`. This was wrong here
+until it was checked against the release: Android 14's `lunch` splits the string
+on `-` and requires all three parts,
+
+    Invalid lunch combo: edge1_tv-userdebug
+    Valid combos must be of the form <product>-<release>-<variant>
+
+(`build/envsetup.sh:809-820` in `android-14.0.0_r75`), so a two-part combo never
+starts a build. `trunk_staging` is the release AOSP's own products use, declared
+in `build/release/release_config_map.mk`; `core/release_config.mk` also falls
+back to it. `build.sh` takes it as an optional third argument.
 
 ### Building with the unfinished HALs
 

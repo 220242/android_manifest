@@ -172,6 +172,37 @@ else
 fi
 echo
 
+# --- 8. Lunch combo form ------------------------------------------------------
+# Android 14 requires <product>-<release>-<variant> and rejects a two-part combo
+# outright, so a wrong form here is not a warning, it is a build that never
+# starts. Both places that spell the combo out are checked, and against each
+# other: build.sh composes it, AndroidProducts.mk lists it for the menu.
+echo "[8] lunch combo form"
+readonly PRODUCTS_MK="$DEV/AndroidProducts.mk"
+if [[ -f "$PRODUCTS_MK" ]]; then
+    combos=$(sed -n '/^COMMON_LUNCH_CHOICES/,/[^\\]$/p' "$PRODUCTS_MK" \
+             | grep -oE '[a-z0-9_]+-[a-z0-9_]+(-[a-z0-9_]+)?' || true)
+    if [[ -z "$combos" ]]; then
+        err "$PRODUCTS_MK declares no COMMON_LUNCH_CHOICES"
+    fi
+    while read -r c; do
+        [[ -n "$c" ]] || continue
+        if [[ "$(tr -cd - <<< "$c" | wc -c)" -eq 2 ]]; then
+            ok "$c"
+        else
+            err "'$c' is not <product>-<release>-<variant>; Android 14 lunch rejects it"
+        fi
+    done <<< "$combos"
+fi
+if [[ -f "$ROOT/build/build.sh" ]]; then
+    if grep -qE 'TARGET="[a-z0-9_]+-\$\{RELEASE\}-\$\{VARIANT\}"' "$ROOT/build/build.sh"; then
+        ok "build.sh composes product-release-variant"
+    else
+        err "build.sh does not compose a three-part lunch target"
+    fi
+fi
+echo
+
 echo "=========================================="
 echo "errors: $errors   warnings: $warns"
 (( errors )) && exit 1

@@ -855,11 +855,19 @@ try {
     Write-Warn2 "could not refresh the in-distro device tree: $($_.Exception.Message)"
 }
 
+# Aidl and Probe are read-only verification passes whose whole point is their
+# output. Gating them on the state file meant that once they had run, a fix that
+# changed WHAT they check never ran again, and the report kept answering with a
+# probe from several commits ago - which is how two rounds were spent on module
+# names that a current probe would have settled. They cost minutes against a
+# build that costs hours, so they always run.
+$alwaysRun = @('Aidl', 'Probe')
+
 $started = Get-Date
 try {
     foreach ($s in $order) {
         if ($Stage -ne 'All' -and $Stage -ne $s.Name) { continue }
-        if ($Stage -eq 'All' -and (Test-Done $s.Name)) {
+        if ($Stage -eq 'All' -and ($alwaysRun -notcontains $s.Name) -and (Test-Done $s.Name)) {
             Write-Host "  skipping $($s.Name) (already complete; -Force to redo)" -ForegroundColor DarkGray
             continue
         }

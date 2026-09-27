@@ -25,8 +25,17 @@ cc_binary {
     ],
 
     shared_libs: [
+        // The versioned suffix is what Soong generates from the frozen
+        // aidl_api directory, and getting it wrong is not a compile error but an
+        // analysis error - "depends on undefined module" - which stops the whole
+        // tree, including a build that never installs this module.
+        // hardware/interfaces/graphics/allocator/aidl/aidl_api/.../2 is frozen in
+        // this release, so -V2-ndk exists.
+        //
+        // android.hardware.graphics.common is deliberately not listed: the
+        // allocator interface already depends on it and re-exports its headers,
+        // and pinning a version here would be a second guess to get wrong.
         "android.hardware.graphics.allocator-V2-ndk",
-        "android.hardware.graphics.common-V5-ndk",
         "libbase",
         "libbinder_ndk",
         "libcutils",

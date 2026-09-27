@@ -10,7 +10,11 @@
 PRODUCT_MAKEFILES := \
     $(LOCAL_DIR)/edge1_tv.mk
 
+# <product>-<release>-<variant>. Android 14's lunch splits the string on '-' and
+# rejects a two-part combo ("Valid combos must be of the form
+# <product>-<release>-<variant>", build/envsetup.sh:818), so the two-part form
+# these used to be would not have started a build at all.
 COMMON_LUNCH_CHOICES := \
-    edge1_tv-userdebug \
-    edge1_tv-user \
-    edge1_tv-eng
+    edge1_tv-trunk_staging-userdebug \
+    edge1_tv-trunk_staging-user \
+    edge1_tv-trunk_staging-eng

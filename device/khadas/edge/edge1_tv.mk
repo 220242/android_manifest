@@ -55,10 +55,20 @@ PRODUCT_CHARACTERISTICS := tv,nosdcard
 # ---------------------------------------------------------------------------
 PRODUCT_SHIPPING_API_LEVEL := 29
 
+# ART's userfaultfd GC, off. This is a kernel capability question, not a policy
+# one: Android 14's default is PRODUCT_ENABLE_UFFD_GC := default, which makes
+# post_process_props.py decide from the kernel version at build time, and the
+# 4.19.111 kernel here has neither the userfaultfd feature set nor
+# MREMAP_DONTUNMAP that the GC needs. Saying so explicitly also removes the
+# build's dependency on reading the version back out of the kernel image, which
+# is a separate mechanism that can fail on its own.
+PRODUCT_ENABLE_UFFD_GC := false
+
 # VNDK. Vendor code is built against the current VNDK snapshot rather than a
 # frozen Android 10 one, because the Rockchip HALs are being forward-ported
-# rather than kept binary-stable.
-PRODUCT_TARGET_VNDK_VERSION := current
+# rather than kept binary-stable. That is BOARD_VNDK_VERSION := current in
+# BoardConfig.mk; PRODUCT_TARGET_VNDK_VERSION, which used to be set here, is not
+# a variable AOSP 14 reads anywhere and did nothing.
 
 # ---------------------------------------------------------------------------
 # Display / density.
@@ -72,38 +82,49 @@ PRODUCT_AAPT_CONFIG := normal large tvdpi hdpi xhdpi
 PRODUCT_AAPT_PREF_CONFIG := tvdpi
 
 # ---------------------------------------------------------------------------
-# Board hardware feature flags consumed by device.mk.
-# Sensor support is dropped relative to the tablet config: the Edge1 has no
-# accelerometer/compass/gyro populated, and declaring them on a TV SKU makes
-# the framework wait on sensor HALs that will never publish.
+# Board hardware, for the record.
+#
+# The legacy tree set BOARD_HAS_GPS, BOARD_NFC_SUPPORT, the four
+# BOARD_*_SENSOR_SUPPORT flags, BOARD_USB_HOST_SUPPORT, BOARD_HAS_HDMI_CEC,
+# BOARD_HAS_ETHERNET, PRODUCT_HAS_CAMERA, PRODUCT_HAVE_OPTEE and
+# BUILD_WITH_WIDEVINE here, and device/rockchip/common read them to decide what
+# to install. Nothing in AOSP 14 reads any of them, and nothing in this tree does
+# either, so setting them was decoration that read like configuration. What they
+# encoded is now expressed where it takes effect:
+#
+#   no GPS, no NFC, no sensors  -> the HALs are simply absent from device.mk, and
+#                                 the framework features are not declared in
+#                                 permissions/. Declaring a sensor feature on a
+#                                 TV SKU makes the framework wait on a HAL that
+#                                 never publishes.
+#   USB host, HDMI-CEC, Ethernet -> android.hardware.usb.host.xml,
+#                                 the tv.hdmi.cec and tv.hdmi.connection
+#                                 services, and the ethernet feature, all in
+#                                 device.mk.
+#   no OP-TEE                   -> Widevine stays L3: no TEE-backed L1 path, and
+#                                 keymint is the software service.
+#   no camera                   -> no camera HAL, no
+#                                 android.hardware.camera*.xml.
 # ---------------------------------------------------------------------------
-BOARD_HAS_GPS                  := false
-BOARD_NFC_SUPPORT              := false
-BOARD_GRAVITY_SENSOR_SUPPORT   := false
-BOARD_COMPASS_SENSOR_SUPPORT   := false
-BOARD_GYROSCOPE_SENSOR_SUPPORT := false
-BOARD_LIGHT_SENSOR_SUPPORT     := false
-BOARD_USB_HOST_SUPPORT         := true
-BOARD_HAS_HDMI_CEC             := true
-BOARD_HAS_ETHERNET             := true
-PRODUCT_HAS_CAMERA             := false
-
-# Widevine L3 (the L1 TEE path needs OP-TEE, which is off for this target).
-BUILD_WITH_WIDEVINE := true
-PRODUCT_HAVE_OPTEE  := false
 
 $(call inherit-product, device/khadas/edge/device.mk)
 
 # ---------------------------------------------------------------------------
-# Build fingerprint / identity.
+# Build identity.
+#
+# PRODUCT_BUILD_PROP_OVERRIDES used to be set here with a hand-written
+# PRIVATE_BUILD_DESC. AOSP 14 does not read that variable at all - the build
+# description and fingerprint come from PRODUCT_NAME, PRODUCT_DEVICE, the
+# release and the build id - so it was a no-op carrying a string that would have
+# gone stale the moment the variant changed.
+#
+# ro.product.first_api_level is not set here either: core/main.mk already emits
+# it from PRODUCT_SHIPPING_API_LEVEL. Setting both worked only while the two
+# agreed, and post_process_props.py rejects duplicates that disagree - so
+# raising the shipping level later would have failed the build.
 # ---------------------------------------------------------------------------
-PRODUCT_BUILD_PROP_OVERRIDES += \
-    PRODUCT_NAME=edge1_tv \
-    PRIVATE_BUILD_DESC="edge1_tv-userdebug 14 UP1A 1 release-keys"
-
 PRODUCT_PROPERTY_OVERRIDES += \
-    ro.oem.key1=edge1 \
-    ro.product.first_api_level=29
+    ro.oem.key1=edge1
 
 # adb over TCP is convenient on a headless-ish TV box during bring-up and is
 # gated to non-user builds.
