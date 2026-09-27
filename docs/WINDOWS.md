@@ -24,8 +24,7 @@ often needs on first install — just run it again.
   tooling ship for `linux-x86` and `darwin-x86` only.
 * The build generates ext4 and EROFS images, applies POSIX modes, and creates
   symlinks in the output tree. None of that works through Win32 file APIs.
-* `sepolicy` compilation, `mkbootimg`, `avbtool` and the Rockchip `afptool`
-  packaging are all Linux binaries.
+* `sepolicy` compilation, `mkbootimg` and `avbtool` are Linux binaries.
 
 Android Studio builds *apps*. A platform build is a different thing entirely.
 
@@ -63,7 +62,8 @@ Reach it from Explorer at `\\wsl.localhost\Edge1Build\home\builder\android_khada
 | `Tune` | Writes `%USERPROFILE%\.wslconfig` sized to your RAM, plus a 32 GB swap file on the target drive |
 | `Provision` | Installs AOSP dependencies, clones the device tree, runs `preflight.sh` and `verify-tree.sh` |
 | `Sync` | Resolves the newest `android-14.0.0_r*` tag and syncs (100+ GiB) |
-| `Aidl` | Dumps the real AIDL method surface of all 22 declared HALs to `aidl-surface.txt` |
+| `Aidl` | Dumps the real AIDL method surface of every HAL this board speaks to `aidl-surface.txt` |
+| `Probe` | Checks the device tree against the synced tree and **stops the run** on anything it can answer in a minute that the build would take hours to reach |
 | `Kernel` | Builds mainline 6.12 LTS with the Android 14 config delta, and stages the board dtb |
 | `Build` | `lunch edge1_tv-trunk_staging-userdebug`, `m`, then the flash pack (images plus a generated `flash-emmc.sh`) |
 
@@ -72,10 +72,16 @@ Run one on its own with `-Stage Build`. Re-run a completed stage with `-Force`.
 `manifests/khadas_edge_tv14.xml` changes - its hash is kept in the state file -
 because a tree synced against a different manifest is not synced.
 
-`Aidl` and `Probe` ignore the state file and always run: they are read-only
-verification passes whose output is the point, and gating them meant a changed
-check silently never ran again. Their output is now folded into the report, so
-there is only ever one file to send.
+`Aidl` and `Probe` ignore the state file and always run: they are verification
+passes whose output is the point, and gating them meant a changed check silently
+never ran again. Their output is folded into the report, so there is only ever one
+file to send.
+
+`Probe` is the one stage that can fail on purpose. Five consecutive build failures
+were the same mistake — declaring something the platform already declares — and each
+was reported by a different tool between six and twenty minutes into a build, one
+name per run. `Probe` answers all of them against the synced tree in about a minute
+and exits non-zero, naming every collision at once. `STATUS.md` has the list.
 
 ## When something fails: one file to send
 
@@ -160,28 +166,38 @@ powercfg /change hibernate-timeout-ac 0
 
 ## What you get at the end
 
-A build, and possibly more than that. `docs/STATUS.md` has the full picture; the
-short form is that every HAL in the image is an AOSP one talking to a mainline
-driver, rather than a half-ported Rockchip HIDL one:
+`out/target/product/edge/edge1-flash/`: the images plus a generated `flash-emmc.sh`
+that writes a GPT and `dd`s each one into place, to be run on the board from the
+Linux it already boots. `PORTING.md` step 5 has the detail. It has never been run,
+and it erases the eMMC.
+
+Every HAL in the image is an AOSP one talking to a mainline driver rather than a
+half-ported Rockchip HIDL one:
 
 * display: drm_hwcomposer over `drivers/gpu/drm/rockchip`, buffers from minigbm;
 * GLES: Mesa's panfrost over `drivers/gpu/drm/panfrost`;
 * audio: AOSP's AIDL audio HAL over ALSA, HDMI codec through `simple-audio-card`;
-* Wi-Fi: brcmfmac with the firmware from this board's OpenWrt build.
+* Wi-Fi: brcmfmac with the firmware from this board's own OpenWrt build.
 
-What is not there yet: hardware video decode is unwired (software codecs carry
-playback, 1080p rather than 4K), Bluetooth is unresolved because the kernel driver
-and Android's HAL both want the same UART, and nothing about this can be certified —
-software KeyMint, no attestation, Widevine L3.
+What is not there yet: hardware video decode is unwired, so software codecs carry
+playback at 1080p rather than 4K; Bluetooth is unresolved because the kernel driver
+and Android's HAL both want the same UART; and nothing about this can be certified —
+software KeyMint, no attestation, clearkey DRM only. `STATUS.md` is the full picture.
 
-The honest test of the first image is whether it boots to a leanback launcher on
-HDMI with a working remote and network. Everything after that is configuration.
+The honest test of the first image is whether it boots to a leanback launcher on HDMI
+with a working remote and network. Everything after that is configuration.
 
 ## Caveat on the script itself
 
-`Start-EdgeBuild.ps1` was written on a Linux host with no PowerShell available,
-so it has never been executed or parse-checked. Brace/paren balance and a few
-specific hazards were checked statically, and four bugs found that way were
-fixed, but that is not the same as running it. Read it before running it as
-Administrator. Every destructive step prompts for confirmation unless `-Force` is
+It runs as Administrator and it repartitions nothing on Windows, but it does import
+a WSL distribution, write `%USERPROFILE%\.wslconfig` and create a large swap file on
+the target drive. Every destructive step prompts for confirmation unless `-Force` is
 passed.
+
+The earlier version of this note said the script had never been executed, because it
+was written on a Linux host with no PowerShell available. That is no longer true — it
+has driven every build in `STATUS.md`. What is still worth knowing is that it is
+`Set-StrictMode -Version Latest`, so a property that does not exist is an error
+rather than `$null`, and one of the bugs that cost a round was exactly that: a
+missing `manifestHash` in the state file surfaced as a device-tree warning instead of
+the state-file problem it was.
