@@ -53,7 +53,7 @@ TARGET_BOARD_PLATFORM_PRODUCT := atv
 # the facts anyone touching the kernel looks for first. Change them together.
 TARGET_KERNEL_SOURCE := kernel/mainline
 TARGET_KERNEL_CONFIG := defconfig + device/khadas/edge/kernel/edge1_mainline.config
-TARGET_KERNEL_DTS := rk3399-khadas-edge
+TARGET_KERNEL_DTS := rk3399-khadas-edge-v
 TARGET_KERNEL_ARCH := arm64
 
 # TARGET_PREBUILT_KERNEL is not set: the string "PREBUILT_KERNEL" appears nowhere

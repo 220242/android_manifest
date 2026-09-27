@@ -5,9 +5,8 @@
 #   usage: build-kernel.sh [tree-dir]
 #
 # Environment:
-#   EDGE1_DTB          board dts basename, without .dts   (default rk3399-khadas-edge)
-#                      the three carriers are rk3399-khadas-edge,
-#                      rk3399-khadas-edge-v and rk3399-khadas-edge-captain
+#   EDGE1_DTB          board dts basename, without .dts
+#                      (default rk3399-khadas-edge-v)
 #   KERNEL_USE_CLANG=1 build with AOSP's clang instead of the distro cross GCC
 #
 # This replaced a build of the Khadas 4.19 BSP kernel. What that build needed and
@@ -22,7 +21,21 @@ readonly TREE="${1:-$HOME/aosp-14-edge1}"
 readonly KERNEL="$TREE/kernel/mainline"
 readonly DEVICE_DIR="$TREE/device/khadas/edge"
 readonly FRAGMENT="$DEVICE_DIR/kernel/edge1_mainline.config"
-readonly DTB="${EDGE1_DTB:-rk3399-khadas-edge}"
+# rk3399-khadas-edge-v, not rk3399-khadas-edge.
+#
+# The three Khadas Edge dts files share rk3399-khadas-edge.dtsi, which carries the
+# SoC, the GPU, HDMI with its audio, eMMC, USB and the Wi-Fi SDIO node. What the
+# per-board files add is what is wired on that carrier, and the plain "edge" one
+# adds nothing at all - it is thirteen lines, a model name and a compatible:
+#
+#   edge      no gmac, no PCIe
+#   edge-v    &gmac okay, &pcie_phy and &pcie0 okay with 4 lanes
+#   captain   its own set
+#
+# So the plain edge dtb would boot this board with no Ethernet and no M.2 slot.
+# The Edge-V dtb is also the one this board is known to run: the owner's OpenWrt
+# build targets khadas_edge-v and uses Ethernet as its whole reason for existing.
+readonly DTB="${EDGE1_DTB:-rk3399-khadas-edge-v}"
 
 # BOARD_PREBUILT_DTBIMAGE_DIR globs *.dtb out of one directory and concatenates
 # everything it finds into dtb.img. Pointed at the kernel's own output that would

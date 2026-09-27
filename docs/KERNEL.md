@@ -50,12 +50,25 @@ TF-A), so HDMI, eMMC, Ethernet and Wi-Fi are known good on this kernel before
 Android is added on top. That build is also where the Wi-Fi firmware and the board
 NVRAM in `device/khadas/edge/wifi/firmware/brcm` come from.
 
-Board DTS: `arch/arm64/boot/dts/rockchip/rk3399-khadas-edge.dts`. Mainline carries
-all three carriers - `rk3399-khadas-edge.dts`, `-edge-v.dts` and
-`-edge-captain.dts` - and `build/build-kernel.sh` takes the name in `EDGE1_DTB`,
-so switching carrier is one variable. The dtsi already enables what matters:
-`&gpu` (panfrost), `&hdmi` with `&hdmi_sound`, and the `wifi@1` SDIO node with its
-power sequence.
+Board DTS: `arch/arm64/boot/dts/rockchip/rk3399-khadas-edge-v.dts`.
+
+All three Khadas Edge boards share `rk3399-khadas-edge.dtsi`, which is where
+everything this port depends on lives: `&gpu` (panfrost), `&hdmi` with
+`&hdmi_sound`, the `wifi@1` SDIO node with its power sequence, eMMC and USB. The
+per-board files only add what that carrier wires up, and the plain `edge` one adds
+nothing - thirteen lines, a model name and a compatible string:
+
+| dts | adds |
+|---|---|
+| `rk3399-khadas-edge.dts` | nothing: no Ethernet, no PCIe |
+| `rk3399-khadas-edge-v.dts` | `&gmac`, and `&pcie0` with four lanes |
+| `rk3399-khadas-edge-captain.dts` | its own carrier's set |
+
+So "Edge1 and Edge-V are the same board" is right about the hardware that matters
+here and wrong in one expensive way: building the plain `edge` dtb would produce a
+device with no Ethernet and no M.2 slot. `EDGE1_DTB` defaults to the Edge-V dtb,
+which is also the one this board is known to run - the owner's OpenWrt build
+targets `khadas_edge-v` and exists to route Ethernet.
 
 ## The config
 
