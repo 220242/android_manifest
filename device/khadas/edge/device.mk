@@ -524,7 +524,15 @@ PRODUCT_PROPERTY_OVERRIDES += \
 # GPT in flash/partitions.tsv, which build/build.sh turns into a flash script, and
 # nothing needs to be staged into the product output for it.
 
-PRODUCT_PROPERTY_OVERRIDES += \
-    ro.product.board=rk3399 \
-    ro.board.platform=rk3399 \
-    ro.sf.lcd_density=213
+# ro.product.board, ro.board.platform and ro.sf.lcd_density were set here. All
+# three are emitted by core/main.mk from board variables, so they are set as those
+# variables in BoardConfig.mk instead - see the note there for what the duplicate
+# cost.
+#
+# Worth knowing when reading the rest of this file: on a device with a vendor
+# partition, PRODUCT_PROPERTY_OVERRIDES goes to /vendor/build.prop, not
+# /system/build.prop. core/sysprop.mk:368-380 lists it among the vendor
+# build.prop's inputs when property_overrides_split_enabled is set, and drops it
+# from the system one. Properties are global at run time, so this does not change
+# who can read them - but it does mean every line in this file is a vendor
+# property, which is why the duplicate above was found in vendor/build.prop.

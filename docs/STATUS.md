@@ -450,6 +450,35 @@ check 4b now requires every manifest entry to have a package behind it, matched 
 format - a HIDL entry needs `<hal>@<version>...`, an AIDL one `<hal>-service...` or
 `<hal>-V<n>...`, because those are different binaries.
 
+VINTF assembly then passed, and the next one was in `build.prop`:
+
+```
+error: found duplicate sysprop assignments:
+ro.product.board=
+ro.product.board=rk3399
+```
+
+`core/main.mk:332-341` appends `ro.product.board`, `ro.board.platform`,
+`ro.hwui.use_vulkan` and `ro.sf.lcd_density` to `ADDITIONAL_VENDOR_PROPERTIES`,
+from `TARGET_BOOTLOADER_BOARD_NAME`, `TARGET_BOARD_PLATFORM`,
+`TARGET_USES_VULKAN` and `TARGET_SCREEN_DENSITY`. `device.mk` set the first two by
+hand and `TARGET_BOOTLOADER_BOARD_NAME` was unset, so the build emitted an empty
+assignment beside ours. All three now come from their board variables.
+
+What makes this worth a check rather than a one-line fix is the escape hatch:
+`tools/post_process_props.py:112-117` allows duplicates when every value is
+identical, so `ro.board.platform=rk3399` was also set twice and passed - an error
+waiting for `TARGET_BOARD_PLATFORM` to change. `verify-tree.sh` check 9e lists the
+fourteen properties `main.mk` derives and names the variable to set instead.
+
+Reading `core/sysprop.mk` to find where the duplicate met also corrected a
+standing assumption about this tree: with `property_overrides_split_enabled` - any
+device with a vendor partition - `PRODUCT_PROPERTY_OVERRIDES` goes to
+`/vendor/build.prop` and is dropped from `/system/build.prop`
+(`core/sysprop.mk:368-380`). Every property line in `device.mk` and `edge1_tv.mk`
+is a vendor property. Properties are global at run time so nothing was broken by
+it, but it is why the failure surfaced in `vendor/build.prop`.
+
 The same run turned up a booby trap in the kernel fragment. `merge_config.sh`
 picks the symbols to merge with two `sed` patterns and then reads each value back
 with `grep -w $CFG`, so a comment that mentions a symbol the fragment also sets

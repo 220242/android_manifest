@@ -503,6 +503,58 @@ else
 fi
 echo
 
+# --- 9e. properties the build already emits -----------------------------------
+# core/main.mk derives a set of properties from board and product variables and
+# appends them to ADDITIONAL_VENDOR_PROPERTIES / ADDITIONAL_SYSTEM_PROPERTIES.
+# Setting one of those by hand as well produces two assignments in the same
+# build.prop, and post_process_props.py stops the build unless the two values are
+# identical (tools/post_process_props.py:112-117):
+#
+#   error: found duplicate sysprop assignments:
+#   ro.product.board=
+#   ro.product.board=rk3399
+#
+# That empty one is what the build emitted, from an unset
+# TARGET_BOOTLOADER_BOARD_NAME. The identical-values escape is what makes this
+# worth a check rather than a comment: ro.board.platform was also set twice and
+# passed, so it sat there as an error waiting for the two to diverge.
+#
+# The variable to set instead is in the right-hand column. Line numbers are from
+# android-14.0.0_r75.
+echo "[9e] properties core/main.mk already emits"
+# property|the variable that feeds it|where
+readonly DERIVED_PROPS=(
+    'ro.product.board|TARGET_BOOTLOADER_BOARD_NAME|main.mk:335'
+    'ro.board.platform|TARGET_BOARD_PLATFORM|main.mk:336'
+    'ro.hwui.use_vulkan|TARGET_USES_VULKAN|main.mk:337'
+    'ro.sf.lcd_density|TARGET_SCREEN_DENSITY|main.mk:341'
+    'ro.product.first_api_level|PRODUCT_SHIPPING_API_LEVEL|main.mk:284'
+    'ro.vendor.api_level|PRODUCT_SHIPPING_VENDOR_API_LEVEL|main.mk:289'
+    'ro.board.first_api_level|BOARD_SHIPPING_API_LEVEL|main.mk:304'
+    'ro.board.api_level|BOARD_API_LEVEL|main.mk:311'
+    'ro.boot.dynamic_partitions|PRODUCT_USE_DYNAMIC_PARTITIONS|main.mk:274'
+    'ro.build.ab_update|AB_OTA_UPDATER|main.mk:346'
+    'ro.vendor.build.security_patch|VENDOR_SECURITY_PATCH|main.mk:334'
+    'ro.product.cpu.pagesize.max|TARGET_MAX_PAGE_SIZE_SUPPORTED|main.mk:370'
+    'ro.minui.default_rotation|TARGET_RECOVERY_DEFAULT_ROTATION|main.mk:261'
+    'ro.minui.pixel_format|TARGET_RECOVERY_PIXEL_FORMAT|main.mk:269'
+)
+derived=0
+# Comments are stripped before matching: these property names are discussed in the
+# comments here and in the makefiles on purpose, and a comment is not a setting.
+for mkfile in "$DEV"/*.mk; do
+    for entry in "${DERIVED_PROPS[@]}"; do
+        IFS='|' read -r prop var where <<< "$entry"
+        while IFS= read -r n; do
+            err "$(basename "$mkfile"):$n sets ${prop} by hand; the build emits it from"
+            err "  ${var} (${where}). Set that variable instead."
+            derived=$((derived+1))
+        done < <(sed 's/#.*//' "$mkfile" | grep -nE "(^|[[:space:]])${prop}=" | cut -d: -f1)
+    done
+done
+(( derived )) || ok "no product makefile sets a property core/main.mk derives"
+echo
+
 # --- 10. variable ownership --------------------------------------------------
 # Product config runs before BoardConfig.mk and freezes the product variables, so
 # a PRODUCT_* assignment in BoardConfig.mk is fatal:

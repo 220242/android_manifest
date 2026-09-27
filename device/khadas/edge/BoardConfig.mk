@@ -32,6 +32,32 @@ TARGET_BOARD_PLATFORM := rk3399
 TARGET_BOARD_PLATFORM_GPU := mali-t860
 TARGET_BOARD_PLATFORM_PRODUCT := atv
 
+# These two exist so the build emits the properties rather than device.mk setting
+# them by hand. core/main.mk:332-341 puts all of the following into
+# ADDITIONAL_VENDOR_PROPERTIES:
+#
+#   ro.product.board   = $(TARGET_BOOTLOADER_BOARD_NAME)
+#   ro.board.platform  = $(TARGET_BOARD_PLATFORM)
+#   ro.hwui.use_vulkan = $(TARGET_USES_VULKAN)
+#   ro.sf.lcd_density  = $(TARGET_SCREEN_DENSITY), if defined
+#
+# device.mk set ro.product.board and ro.board.platform directly, and
+# TARGET_BOOTLOADER_BOARD_NAME was unset, so the build emitted an empty one beside
+# ours and post_process_props.py stopped:
+#
+#   error: found duplicate sysprop assignments:
+#   ro.product.board=
+#   ro.product.board=rk3399
+#
+# ro.board.platform survived only because duplicates with identical values are
+# allowed (tools/post_process_props.py:114) - it would have become an error the
+# moment TARGET_BOARD_PLATFORM changed.
+TARGET_BOOTLOADER_BOARD_NAME := rk3399
+# 213 is the leanback density for 1080p, and it was ro.sf.lcd_density=213 in
+# device.mk. Set here it goes through the same ADDITIONAL_VENDOR_PROPERTIES path,
+# so there is one source for it.
+TARGET_SCREEN_DENSITY := 213
+
 # Four variables were set here and are gone: BOARD_USE_DRM, BOARD_OPENGL_AEP,
 # ENABLE_CPUSETS and ENABLE_SCHEDBOOST. None of the four appears anywhere in
 # AOSP 14's build/make, and nothing in this tree reads them either. They were
