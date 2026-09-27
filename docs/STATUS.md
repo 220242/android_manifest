@@ -403,6 +403,25 @@ same question for `sysfs_hdmi`, `sysfs_mmc_host`, `sysfs_devfreq`,
 `hdmi_cec_device`, `lirc_device` and `vendor_firmware_file` in one go instead of
 one per build. `verify-tree.sh` check 9 checks the offline half of it.
 
+And once more the run after, one level down:
+
+```
+host_init_verifier: Unable to serialize property contexts:
+Duplicate exact match detected for 'ro.hardware.gralloc'
+```
+
+`ro.hardware.*` is inside the prefixes a vendor partition may own, so
+`check_prop_prefix` passed it - but the platform already labels those five
+properties, because the code that reads them is platform code: the EGL loader
+resolves `ro.hardware.egl`, the gralloc and composer loaders resolve
+`ro.hardware.gralloc` and `ro.hardware.hwcomposer`, and libaudiohal resolves
+`ro.hardware.audio.primary`. Being allowed to own a prefix is not the same as the
+name being free. `property_contexts` and `property.te` are both gone
+(`sepolicy/vendor/README.md` records why); `device.mk` still sets the values,
+which needs no label. The probe gained the matching gate, so this question is
+answered for every name at once rather than one per build, and the report no longer
+truncates the probe at 400 lines - which is what hid both of the last two answers.
+
 The same run turned up a booby trap in the kernel fragment. `merge_config.sh`
 picks the symbols to merge with two `sed` patterns and then reads each value back
 with `grep -w $CFG`, so a comment that mentions a symbol the fragment also sets

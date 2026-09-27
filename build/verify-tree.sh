@@ -414,6 +414,12 @@ readonly ALLOWED_PREFIXES=(
     'ro.boot.' 'ro.hardware.' 'ro.odm.' 'ro.vendor.' 'odm.'
     'persist.odm.' 'persist.vendor.' 'vendor.' 'persist.camera.'
 )
+# The file is absent as of now, and its absence is the correct state - see
+# sepolicy/vendor/README.md. The check stays because the next vendor property that
+# does need a label has to satisfy this rule, and because the two rules it encodes
+# are not obvious: an allowed prefix is necessary and not sufficient. The second
+# half - the name must not be one system/sepolicy already matches exactly - needs
+# the synced tree, so it lives in the module probe and gates the run there.
 if [[ -f "$PCTX" ]]; then
     while read -r name _rest; do
         [[ -n "$name" ]] || continue
@@ -445,6 +451,8 @@ if [[ -f "$PCTX" ]]; then
             wrn "$t is declared in property.te but labels nothing"
         fi
     done
+else
+    ok "no vendor property labels (see sepolicy/vendor/README.md), nothing to check"
 fi
 echo
 

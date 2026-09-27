@@ -196,7 +196,7 @@ stage_probe() {
     local dmk="$MANIFEST/device/khadas/edge/device.mk"
     # Cleared first: if the diagnostic block below dies early, a stale count from
     # the last run would gate this one - in whichever direction is wrong.
-    rm -f "$WORK/.probe-miss-hard" "$WORK/.probe-sepol-dupes"
+    rm -f "$WORK/.probe-miss-hard" "$WORK/.probe-sepol-dupes" "$WORK/.probe-prop-dupes"
 
     [[ -d "$TREE/hardware/interfaces" ]] || {
         echo "tree not synced at $TREE" >&2; return 1; }
@@ -733,8 +733,46 @@ if dupes:
     print('  !! %d DUPLICATE declaration(s): %s' % (len(dupes), ' '.join(dupes)))
     print('     checkpolicy fails on each. Delete the local "type" line and keep')
     print('     labelling with it - borrowing a platform type is the normal case.')
-open(os.path.join(os.environ.get('EDGE1_WORK', '/tmp'), '.probe-sepol-dupes'), 'w').write(
-    '%d\n' % len(dupes))
+
+# The same collision, one level down: a property this tree labels that the
+# platform already labels.
+#
+#   host_init_verifier: Unable to serialize property contexts:
+#   Duplicate exact match detected for 'ro.hardware.gralloc'
+#
+# ro.hardware.* is inside the prefixes a vendor partition may own, so
+# check_prop_prefix passes it - but the platform labels those five properties
+# already, because the code that reads them is platform code. Being allowed to own
+# a prefix is not the same as the name being free. host_init_verifier stops at the
+# first duplicate, so this lists all of them.
+def prop_exact(root, skip_prebuilts):
+    names = {}
+    for base, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs if d != '.git' and not (skip_prebuilts and d == 'prebuilts')]
+        if 'property_contexts' not in files:
+            continue
+        for raw in open(os.path.join(base, 'property_contexts'), errors='replace'):
+            line = raw.split('#', 1)[0].split()
+            if len(line) < 2 or 'exact' not in line:
+                continue
+            names.setdefault(line[0], os.path.join(base, 'property_contexts'))
+    return names
+plat_props = prop_exact(os.path.join(tree, 'system', 'sepolicy'), True)
+our_props = prop_exact(sedir, False)
+print('  --- property_contexts exact matches ---')
+print('    system/sepolicy declares %d; this device declares %d'
+      % (len(plat_props), len(our_props)))
+prop_dupes = sorted(n for n in our_props if n in plat_props)
+for n in sorted(our_props):
+    where = plat_props.get(n)
+    print('    %-30s %s' % (n, ('DUPLICATE, also in ' + where) if where else 'ours alone, ok'))
+if prop_dupes:
+    print('  !! %d DUPLICATE exact match(es): %s' % (len(prop_dupes), ' '.join(prop_dupes)))
+    print('     host_init_verifier refuses to serialize the property contexts.')
+    print('     Drop the line: the platform already labels it.')
+work = os.environ.get('EDGE1_WORK', '/tmp')
+open(os.path.join(work, '.probe-sepol-dupes'), 'w').write('%d\n' % len(dupes))
+open(os.path.join(work, '.probe-prop-dupes'), 'w').write('%d\n' % len(prop_dupes))
 PY_SEPOL
         else
             echo "  ABSENT at $TREE/system/sepolicy"
@@ -787,6 +825,20 @@ PY_SEPOL
         echo "$sepol_dupes sepolicy type(s) are declared both here and in system/sepolicy." >&2
         echo "checkpolicy calls that a duplicate declaration and fails the policy build." >&2
         sed -n '/DUPLICATE declaration/,+2p' "$out" >&2
+        echo "Full probe: $out" >&2
+        rc=1
+    fi
+
+    # A property this tree labels that the platform already labels exactly.
+    # host_init_verifier stops at the first one, so the build reveals them one per
+    # run - and it runs 20 minutes in, after sepolicy compiles.
+    local prop_dupes=0
+    [[ -f "$WORK/.probe-prop-dupes" ]] && prop_dupes=$(cat "$WORK/.probe-prop-dupes")
+    if (( prop_dupes > 0 )); then
+        echo >&2
+        echo "$prop_dupes property name(s) are labelled both here and by system/sepolicy." >&2
+        echo "host_init_verifier refuses to serialize the merged property contexts." >&2
+        sed -n '/DUPLICATE exact match/,+2p' "$out" >&2
         echo "Full probe: $out" >&2
         rc=1
     fi
@@ -861,8 +913,12 @@ stage_report() {
     # report is the one thing that gets sent, so the answers belong in it.
     echo "##### MODULE PROBE #####"
     if [[ -f "$WORK/module-probe.txt" ]]; then
-        echo "($(wc -l < "$WORK/module-probe.txt") lines total; first 400 below)"
-        head -400 "$WORK/module-probe.txt" 2>&1 || true
+        # 400 used to be the cap, and the sections that gate the run - the sepolicy
+        # type and property collisions - are the last thing the probe writes, so
+        # the report cut off exactly the part that answered the question twice in
+        # a row. The whole file goes in; it is 500 lines, not 50000.
+        echo "($(wc -l < "$WORK/module-probe.txt") lines total)"
+        cat "$WORK/module-probe.txt" 2>&1 || true
     else
         echo "(the probe has not run)"
     fi
