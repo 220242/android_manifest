@@ -4,11 +4,14 @@
 #
 #   usage: verify-aidl-surface.sh [tree-dir]
 #
-# Why this exists: the shims in device/khadas/edge/shims must match the AIDL
-# definitions in the synced tree exactly, and those signatures moved between
-# Android 13, 14 and the 14 QPR releases. Writing a shim against a remembered
-# signature produces code that looks right and does not compile. Run this, then
-# write the shim.
+# Why this exists: any board HAL code has to match the AIDL definitions in the
+# synced tree exactly, and those signatures moved between Android 13, 14 and the 14
+# QPR releases. Writing against a remembered signature produces code that looks
+# right and does not compile. Run this first.
+#
+# The two shims this was written for are gone - they bridged to the Rockchip
+# Android 10 HALs - but the interfaces below are still the ones this board's HALs
+# speak, and the versions are what a -V<n>-ndk dependency has to name.
 #
 # The list used to come from the device manifest alone. That stopped working the
 # moment the manifest was cut down to the two HALs this device declares directly
@@ -49,9 +52,10 @@ readonly WANTED=(
     android.hardware.wifi.supplicant
 )
 
-# 2. Anything the device manifest declares as AIDL, and 3. anything the shims'
-#    own VINTF fragments declare. Both are listed even if they duplicate the
-#    built-in list; the union is deduplicated below.
+# 2. Anything the device manifest declares as AIDL, and 3. anything a device-side
+#    VINTF fragment declares - there are none at the moment, since every HAL
+#    service on this device is an AOSP one carrying its own, but the glob costs
+#    nothing and the question comes back the moment board code is added.
 collect_xml_names() {
     local f
     for f in "$@"; do
@@ -72,7 +76,7 @@ PY
 }
 
 names=$(printf '%s\n' "${WANTED[@]}" \
-        | cat - <(collect_xml_names "$MANIFEST" "$DEV"/shims/*/*.xml "$DEV"/shims/*/*/*.xml) \
+        | cat - <(collect_xml_names "$MANIFEST" "$DEV"/*/*/*.xml "$DEV"/*/*/*/*.xml) \
         | sed '/^$/d' | sort -u)
 
 echo "=============================================================="

@@ -88,45 +88,67 @@ Widevine is L3 for the same reason: L1 needs an OP-TEE trusted app.
 
 ## Per-HAL notes for the unfinished work
 
-### Audio (`shims/audio`) — partial
+The two shims this section used to describe - `shims/audio` and
+`shims/graphics/allocator` - have been deleted, and the reason is worth keeping:
+both existed to bridge AIDL down to the Rockchip Android 10 HALs, and those left
+the tree with `hardware/rockchip`. A bridge to code that is no longer synced cannot
+work, and the audio one had gone from useless to harmful - Soong analyses a module
+whether or not anything installs it, and it failed the build with
 
-Device open, version check and lifecycle are implemented. `createOutputStream`
-is not. Verified legacy constraints the bridge must respect:
+    depends on multiple versions of the same aidl_interface:
+    android.media.audio.common.types-V2-ndk-source, ...-V3-ndk-source
 
-* the only format handled is `AUDIO_FORMAT_PCM_16_BIT`;
-* output accepts up to 8 channels, with 8ch@192kHz special-cased;
-* passthrough is `SPDIF_PASSTHROUGH_MODE`, i.e. IEC61937-framed PCM
-  (`setChanSta` / `fill_hdmi_bitstream_buf`), **not** a compressed format.
+because it pinned V2 while the AOSP implementation it linked pulls V3 through
+`android.hardware.bluetooth.audio-V4-ndk`. Fixing the version would have kept a
+file whose whole purpose had gone.
 
-`audio/audio_policy_configuration.xml` matches this exactly and declares only
-PCM 16-bit and IEC61937. Adding real AC3/E-AC3/DTS passthrough means teaching
-the HAL new formats; the IEC61937 framing helper is the starting point. Declaring
-those formats in the policy before the HAL accepts them produces silent playback,
-not a fallback.
+### Audio
 
-Steps: map `StreamContext`'s port config to `struct audio_config`, call
-`open_output_stream`, wrap the returned `audio_stream_out_t` in a
-`DriverInterface` whose `transfer()` calls `stream->write()`, and reject configs
-outside the constraints above.
+AOSP's own AIDL HAL, `android.hardware.audio.service-aidl.example` from
+`hardware/interfaces/audio/aidl/default`, which has both an `alsa/` backend and a
+`primary/` module. On a mainline kernel the HDMI audio path is
+`simple-audio-card` wiring i2s2 to the HDMI bridge's codec, so this is ALSA all the
+way down and the remaining work is configuration: the card and device numbers in
+`audio/audio_policy_configuration.xml` and `audio/mixer_paths.xml`.
 
-### Composer3 (`graphics.composer3-V3`) — the largest gap
+The legacy constraints that file was written against still hold and are still worth
+respecting, because they are properties of the hardware rather than of the old HAL:
+PCM 16-bit, up to 8 channels with 8ch@192kHz special-cased, and passthrough only as
+IEC61937-framed PCM rather than a compressed format. Declaring AC3/E-AC3/DTS in the
+policy before something can produce them gives silence, not a fallback.
 
-No usable AOSP fallback exists for real display output, so without this the
-image cannot composite. Subclass AOSP's composer3 `ComposerClient` and bridge
-Rockchip's `hardware/rockchip/hwcomposer` (a drm_hwcomposer fork). The
-RGA 2D engine is the fallback path for layers no DRM plane can handle, which is
-why `hal_graphics_composer_rk3399.te` grants `rga_device`.
+### Display and GLES
+
+`hwcomposer.drm_minigbm` (AOSP's drm_hwcomposer, HWC2 behind HIDL composer@2.4)
+over `drivers/gpu/drm/rockchip`, with buffers from minigbm. This is why the device
+manifest declares composer@2.4 rather than composer3: the drm_hwcomposer snapshot
+in AOSP 14 contains `hwc2_device/` and no composer3 code at all.
+
+GLES is Mesa's panfrost driver against `drivers/gpu/drm/panfrost`. Not optional:
+AOSP 14 packages no software GLES driver a device can load, so SurfaceFlinger does
+not start without one. The open question is only which board variable
+`external/mesa3d` reads to select the driver - see `BOARD_GPU_DRIVERS` in
+`BoardConfig.mk`, where the evidence so far is written down.
+
+### Video
+
+`android.hardware.media.c2@1.2-service-v4l2` from `external/v4l2_codec2`, over
+`staging/media/rkvdec`. H.264 only in 6.12 - that snapshot has `rkvdec-h264.c` and
+nothing else - so HEVC and VP9 are software. Not yet wired up; the software codecs
+carry playback in the meantime.
 
 ### light / power / memtrack
 
-AOSP examples are wired in so the build completes. Each fallback costs
-something concrete, listed in `device.mk` beside the `else` branch: no LED or
-backlight control, no RK3399 big.LITTLE boost hints (worse UI latency), and Mali
-allocations missing from `dumpsys meminfo`.
+AOSP examples, and each costs something concrete: no LED or backlight control, no
+RK3399 big.LITTLE boost hints, and GPU allocations missing from `dumpsys meminfo`.
+On a mainline kernel these would be written against sysfs - `/sys/class/leds`,
+devfreq, cpufreq - rather than against the Rockchip HIDL libraries.
 
-## Before writing any remaining shim
+## Before writing any board HAL code
 
-Run `build/verify-aidl-surface.sh` against a synced tree. It prints the real
-method list for every AIDL interface `vintf/manifest.xml` declares. AIDL
-signatures moved between Android 13, 14 and the 14 QPRs; a shim written from
-memory compiles against nothing.
+Run `build/verify-aidl-surface.sh` against a synced tree. It prints the real method
+list for every interface this board's HALs speak, and the frozen version of each -
+which is the number a `-V<n>-ndk` dependency has to name. AIDL signatures moved
+between Android 13, 14 and the 14 QPRs, and a module written from memory compiles
+against nothing. The version mismatch above is the same lesson from the other
+direction: the number has to match what the rest of the graph already uses.

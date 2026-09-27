@@ -1,7 +1,7 @@
 # Khadas Edge1 (RK3399) - vendor init.
 #
-# Only board bring-up lives here. HAL services are declared by their own
-# init_rc: entries in shims/*/Android.bp, which is the Android 14 convention -
+# Only board bring-up lives here. Every HAL service on this device is an AOSP one
+# and ships its own .rc and VINTF fragment, which is the Android 14 convention -
 # the Android 10 tree declared every HIDL service by hand in
 # device/rockchip/common/init.rockchip.rc.
 

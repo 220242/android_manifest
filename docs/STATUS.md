@@ -213,10 +213,10 @@ this board's audio is tinyalsa, so wrapping the Android 10 `audio_hw_device` is 
 longer the plan either.
 
 The cost is honest: minigbm's rockchip backend does not implement the RK3399's
-AFBC layouts, so composition is less efficient than Rockchip's own gralloc, and
-without the Mali blob GLES falls back to software. Both are fine for bringing the
-rest of the port up, and the Rockchip path stays behind
-`EDGE1_ENABLE_INCOMPLETE_HALS`.
+AFBC layouts, so composition moves more bytes than Rockchip's own gralloc did.
+GLES is Mesa's panfrost rather than the Mali blob - which on a mainline kernel is
+not a fallback but the only option, since the blob speaks to a kmod this kernel
+does not have.
 
 **Composer is HIDL @2.4, not AIDL composer3.** AOSP 14's drm_hwcomposer snapshot
 is HWC2 only - its tree has `hwc2_device/` and no reference to composer3 at all.
@@ -262,13 +262,14 @@ Ordered by what blocks what.
    run is `--check-one` on the vendor manifest, which only checks that manifest's
    own validity. Turning enforcement on is the hardening step after first boot,
    and it is expected to fail on the kernel version first.
-6. **Confirm AIDL signatures** with `build/verify-aidl-surface.sh` before writing
-   any remaining shim. The probe now resolves every dependency in the shim
-   blueprints against the tree and prints each package's frozen `aidl_api`
-   versions, which is what an unknown `-V<n>-ndk` suffix needs: Soong resolves
-   dependencies for modules it never builds, so one wrong suffix stops the whole
-   tree. Read off the tree so far: `graphics.composer3` V1,2,3;
-   `graphics.allocator` V1,2; `graphics.common` V1-5; `audio.core` V1,2;
+6. **Confirm AIDL versions before naming one.** Soong resolves dependencies for
+   modules it never builds, and it also refuses two versions of the same
+   `aidl_interface` in one module - which is what killed the audio shim: it pinned
+   `media.audio.common.types-V2-ndk` while the AOSP implementation it linked pulls
+   V3 in through `bluetooth.audio-V4-ndk`. Both shims are now deleted, since they
+   bridged to Rockchip HALs that left the tree, but the lesson stands for any board
+   code that follows. Frozen versions read off the tree: `graphics.composer3`
+   V1,2,3; `graphics.allocator` V1,2; `graphics.common` V1-5; `audio.core` V1,2;
    `audio.common` V1,2,3; `media.audio.common.types` V1,2,3; `tv.input` V1,2;
    `tv.hdmi.cec` V1; `tv.hdmi.connection` V1; `bluetooth` V1; `wifi` V1,2.
 7. ~~**Kernel config merge.**~~ The kernel builds: `Image`, the DTB and five

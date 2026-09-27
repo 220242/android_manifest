@@ -160,13 +160,22 @@ powercfg /change hibernate-timeout-ac 0
 
 ## What you get at the end
 
-A build, not a working ROM. `docs/STATUS.md` has the full picture, but the short
-form: the composer3 (display) and audio.core (sound) AIDL HALs are unfinished, so
-`EDGE1_ENABLE_INCOMPLETE_HALS` defaults to off and the image is built against
-AOSP fallbacks. Flashing it verifies that the tree builds and the device boots
-far enough to be debugged over adb — it will not put a picture on the TV.
+A build, and possibly more than that. `docs/STATUS.md` has the full picture; the
+short form is that every HAL in the image is an AOSP one talking to a mainline
+driver, rather than a half-ported Rockchip HIDL one:
 
-Finish those two HALs first if a usable image is the goal.
+* display: drm_hwcomposer over `drivers/gpu/drm/rockchip`, buffers from minigbm;
+* GLES: Mesa's panfrost over `drivers/gpu/drm/panfrost`;
+* audio: AOSP's AIDL audio HAL over ALSA, HDMI codec through `simple-audio-card`;
+* Wi-Fi: brcmfmac with the firmware from this board's OpenWrt build.
+
+What is not there yet: hardware video decode is unwired (software codecs carry
+playback, 1080p rather than 4K), Bluetooth is unresolved because the kernel driver
+and Android's HAL both want the same UART, and nothing about this can be certified —
+software KeyMint, no attestation, Widevine L3.
+
+The honest test of the first image is whether it boots to a leanback launcher on
+HDMI with a working remote and network. Everything after that is configuration.
 
 ## Caveat on the script itself
 

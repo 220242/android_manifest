@@ -192,13 +192,9 @@ PRODUCT_PACKAGES += \
     libtinyalsa \
     libtinycompress
 
-# The audio.core shim opens the legacy device but has no stream I/O yet
-# (shims/audio/RkAudioModule.cpp). Without it there is no HDMI audio.
-#
-# The blueprint is shims/audio/Android.bp and its dependency names are confirmed
-# against the tree's frozen aidl_api directories, so Soong analyses the module.
-# It is still gated out of PRODUCT_PACKAGES, so nothing compiles it until
-# createOutputStream exists.
+# There is no Rockchip audio shim any more. It wrapped the Android 10
+# audio_hw_device, which left the tree with hardware/rockchip, and on a mainline
+# kernel the path is ALSA through the HDMI codec anyway.
 # AOSP's reference audio HAL. hardware/interfaces/audio/aidl/default is a full
 # AIDL implementation with ALSA support, and this board's audio is tinyalsa over
 # the HDMI i2s and S/PDIF cards, so it is a far better starting point than

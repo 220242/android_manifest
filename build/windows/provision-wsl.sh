@@ -336,41 +336,49 @@ PY_INNER
         fi
         echo
         echo "##### MESA / PANFROST (the GLES driver) #####"
-        # Last run this section printed "present at external/mesa3d" and then three
-        # empty lists, which answers nothing: either the directory is a stub, or the
-        # greps were looking in the wrong place. Since libGLES_mesa and
-        # libmesa_pipe_panfrost do appear in the tree-wide module list, something
-        # defines them - so this now goes looking for where, rather than assuming.
+        # The last version of this section said libGLES_mesa was NOT DEFINED
+        # ANYWHERE, which was its own bug: it searched only for name: "..." in
+        # Android.bp files, and AOSP's mesa3d snapshot is Android.mk-based - the
+        # module is a LOCAL_MODULE. The module-name check at the top of this report,
+        # which reads both forms, said nothing was missing at the same time. Both
+        # forms are searched here now.
         md="$TREE/external/mesa3d"
         echo "  external/mesa3d: $(if [[ -d $md ]]; then echo present; else echo ABSENT; fi)"
         if [[ -d "$md" ]]; then
-            echo "    files: $(find "$md" -type f 2>/dev/null | wc -l), of which Android.bp/mk: $(find "$md" -name 'Android.bp' -o -name 'Android.mk' 2>/dev/null | wc -l)"
-            echo "    top level:"
-            ls -A "$md" 2>/dev/null | head -20 | sed 's/^/      /'
+            echo "    $(find "$md" -type f | wc -l) files; build files at top level:"
+            ls "$md" 2>/dev/null | grep -E '^Android|^CleanSpec|meson.build' | sed 's/^/      /'
             echo "    git: $(git -C "$md" log --oneline -1 2>&1 | head -1)"
+            echo "  how it selects drivers - every *GPU_DRIVERS* and BOARD_* it reads:"
+            grep -rhoE '(BOARD|MESA|TARGET)_[A-Z0-9_]*(GPU_DRIVERS|DRIVERS|MESA3D)[A-Z0-9_]*' "$md" \
+                2>/dev/null | sort | uniq -c | sort -rn | head -12 | sed 's/^/    /'
+            echo "  the lines that read them:"
+            grep -rhnE '^[^#]*\$\((BOARD|MESA)_[A-Z0-9_]*(GPU_DRIVERS|DRIVERS)' "$md" \
+                --include='*.mk' --include='*.bp' 2>/dev/null | head -8 | sed 's/^/    /'
+            echo "  is panfrost one of the drivers it can build:"
+            grep -rlE 'panfrost' "$md"/Android*.mk "$md"/Android*.bp "$md"/src/gallium/Android*.mk \
+                2>/dev/null | sed 's/^/    /' | head -5
+            grep -rhoE 'panfrost' "$md"/Android.common.mk 2>/dev/null | head -1 | sed 's/^/    Android.common.mk mentions panfrost: /'
+            echo "  the EGL/GLES and gallium modules it defines:"
+            { grep -rhoE 'name: "lib(EGL|GLES|mesa|gbm)[a-zA-Z0-9_]*"' "$md" --include='*.bp' 2>/dev/null \
+                | sed -E 's/name: "([^"]+)"/\1/'
+              grep -rhoE 'LOCAL_MODULE *:= *lib[a-zA-Z0-9_]*' "$md" --include='*.mk' 2>/dev/null \
+                | sed -E 's/LOCAL_MODULE *:= *//'
+            } | sort -u | head -25 | sed 's/^/    /'
         fi
-        echo "  where the tree defines the modules this port needs:"
-        # vendor/ no longer exists in this tree - the Rockchip projects were the only
-        # thing in it - and naming a missing directory is enough to make grep exit
-        # non-zero on its own.
-        searchdirs=()
-        for d in external hardware device frameworks vendor system; do
-            [[ -d "$TREE/$d" ]] && searchdirs+=( "$d" )
-        done
-        for m in libGLES_mesa libmesa_pipe_panfrost libmesa_winsys_panfrost libgbm_mesa; do
-            hit=$( (cd "$TREE" && grep -rl "name: \"$m\"" --include=Android.bp \
-                    "${searchdirs[@]}" 2>/dev/null) | head -2 | tr '\n' ' ' )
-            printf '    %-28s %s\n' "$m" "${hit:-NOT DEFINED ANYWHERE}"
-        done
-        echo "  every BOARD_MESA3D_* the tree mentions, and where:"
-        (cd "$TREE" && grep -rn 'BOARD_MESA3D_[A-Z_]*' \
-             --include=Android.bp --include=*.mk --include=*.py --include=*.md \
-             external build device 2>/dev/null | head -20 | sed 's/^/    /') || true
-        echo "  soong_config namespaces mesa declares:"
-        (cd "$TREE" && grep -rhA 3 'soong_config_module_type\|soong_config_string_variable' \
-             external/mesa3d --include=Android.bp 2>/dev/null | grep -E 'name:|namespace:' \
-             | head -14 | sed 's/^/    /') || true
-        echo "  ours: $(grep -h '^BOARD_MESA3D' "$MANIFEST/device/khadas/edge/BoardConfig.mk" || echo NONE)"
+        echo "  the one working Mesa integration in this tree, to copy from:"
+        db="$TREE/device/linaro/dragonboard/shared/graphics/mesa"
+        if [[ -d "$db" ]]; then
+            echo "    $db"
+            ls -R "$db" 2>/dev/null | head -20 | sed 's/^/      /'
+            for f in "$db"/*.mk; do
+                [[ -f "$f" ]] || continue
+                echo "    --- $(basename "$f") ---"
+                grep -vE '^\s*$|^\s*#' "$f" 2>/dev/null | head -25 | sed 's/^/      /'
+            done
+        else
+            echo "    ABSENT at $db"
+        fi
+        echo "  ours: $(grep -hE '^BOARD_(MESA3D|GPU)' "$MANIFEST/device/khadas/edge/BoardConfig.mk" | tr '\n' ' ' || echo NONE)"
         echo
 
         echo "##### V4L2 CODEC2 (hardware decode via rkvdec) #####"
@@ -493,6 +501,13 @@ PY_AIDL
         echo
 
         echo "##### SHIM BLUEPRINT DEPENDENCIES #####"
+        # Kept for whatever board code this tree grows next. There are no shims at
+        # the moment: both existed to bridge to the Rockchip Android 10 HALs, and
+        # they went with them - the audio one had started failing the build, since
+        # Soong analyses a module whether or not anything installs it.
+        if [[ ! -d "$MANIFEST/device/khadas/edge/shims" ]]; then
+            echo "  no shims in the device tree"
+        fi
         # Resolves every shared_libs/static_libs entry in the device shims against
         # the tree: a plain name has to be a declared module, and a
         # <package>-V<N>-<backend> name has to have aidl_api/<package>/<N> frozen.

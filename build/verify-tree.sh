@@ -76,12 +76,17 @@ echo
 
 # --- 4. VINTF: fragments must NOT duplicate the device manifest ----------------
 #
-# This check used to assert the opposite - that every HAL in a shim fragment also
+# This check used to assert the opposite - that every HAL in a fragment also
 # appeared in vintf/manifest.xml - and that was backwards. Soong's
 # vintf_fragments: installs each service's fragment into
 # /vendor/etc/vintf/manifest/, and VINTF merges those into the device manifest at
 # build time, so a HAL declared in both places is declared twice.
-echo "[4] VINTF: shim fragments vs device manifest (duplicates are the error)"
+#
+# This tree now has no fragments of its own: every HAL service on it comes from
+# AOSP and carries its own. The check stays because the moment one is added, the
+# question comes back - and it excludes vintf/manifest.xml itself, which would
+# otherwise be read as a fragment duplicating every HAL in it.
+echo "[4] VINTF: device fragments vs device manifest (duplicates are the error)"
 manifest_hals=$(python3 - "$DEV/vintf/manifest.xml" <<'PYX'
 import sys, xml.etree.ElementTree as ET
 for hal in ET.parse(sys.argv[1]).getroot().findall("hal"):
@@ -103,8 +108,9 @@ for hal in ET.parse(sys.argv[1]).getroot().findall("hal"):
     print(hal.findtext("name"))
 PYX
 )
-done < <(find "$DEV/shims" -name '*.xml' 2>/dev/null | sort)
-(( frag_total == 0 )) && ok "no shim fragments found"
+done < <(find "$DEV" -name '*.xml' -path '*vintf*' ! -name 'manifest.xml' \
+              ! -name 'compatibility_matrix.xml' 2>/dev/null | sort)
+(( frag_total == 0 )) && ok "no device-side VINTF fragments (every HAL service is AOSP's)"
 echo "  device manifest declares $(grep -c '<hal ' "$DEV/vintf/manifest.xml") HAL(s) directly"
 echo
 

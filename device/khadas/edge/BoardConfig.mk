@@ -144,17 +144,30 @@ BOARD_USES_MINIGBM := true
 #
 # external/mesa3d builds nothing by default - the drivers are selected per board,
 # and with none selected libGLES_mesa still builds and ships and then finds no
-# driver at run time. That is the failure mode to avoid, because it looks like a
-# working build.
+# driver at run time. That is the failure mode worth spending a round to avoid,
+# because it looks like a working build.
 #
-# panfrost is the Midgard/Bifrost gallium driver and binds to
-# drivers/gpu/drm/panfrost, which this kernel builds in. kmsro is what lets it
-# render on a display controller that is not the GPU - the Rockchip VOP here -
-# which is exactly the split this SoC has.
+# BOARD_MESA3D_GALLIUM_DRIVERS was set here first, from Mesa's upstream Android
+# documentation. The probe then found that the only place in the whole tree that
+# mentions BOARD_MESA3D_* is device/linaro/dragonboard, which sets it alongside
+# BOARD_MESA3D_USES_MESON_BUILD := true and drives meson from its own makefiles -
+# so those names are dragonboard's interface to its own build, not Mesa's to the
+# platform. external/mesa3d itself never reads them.
 #
-# No BOARD_MESA3D_VULKAN_DRIVERS: panvk on Midgard is not something to depend on,
-# and nothing in this configuration asks for Vulkan.
-BOARD_MESA3D_GALLIUM_DRIVERS := panfrost kmsro
+# BOARD_GPU_DRIVERS is the variable the Android.mk build in that snapshot reads
+# (Android.common.mk: MESA_GPU_DRIVERS := $(strip $(BOARD_GPU_DRIVERS))), and this
+# snapshot is Android.mk-based - libGLES_mesa is a LOCAL_MODULE in it. The probe
+# now prints every driver-selection variable external/mesa3d actually reads, with
+# the lines that read them, so the next report confirms or corrects this.
+#
+# panfrost is the Midgard gallium driver and binds to drivers/gpu/drm/panfrost,
+# which this kernel builds in. kmsro is what lets it render on a display
+# controller that is not the GPU - the Rockchip VOP here - which is exactly the
+# split this SoC has.
+#
+# No Vulkan driver: panvk on Midgard is not something to depend on, and nothing in
+# this configuration asks for Vulkan.
+BOARD_GPU_DRIVERS := panfrost kmsro
 
 # 4608 MiB super. Leaves room on a 16GB eMMC for userdata.
 BOARD_SUPER_PARTITION_SIZE := 4831838208
