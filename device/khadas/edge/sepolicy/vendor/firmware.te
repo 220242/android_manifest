@@ -1,0 +1,18 @@
+# /vendor/firmware - brcmfmac's firmware and the board NVRAM.
+#
+# vendor_firmware_file is declared here rather than borrowed. It looked like an
+# AOSP type and this tree relied on it as one; the module probe, scanning the
+# synced system/sepolicy, found that AOSP 14 has no such type - the default label
+# for that directory is plain vendor_file.
+#
+# A distinct type is still worth having: it is the difference between "the kernel
+# may read the firmware we ship" and "the kernel may read anything under /vendor".
+# Which means the read has to be granted explicitly, because the platform's grant
+# covers vendor_file and not this.
+#
+# The reader is the kernel, not a HAL: brcmfmac asks the firmware loader for
+# brcm/brcmfmac4359-sdio.{bin,txt} and the kernel reads them directly.
+type vendor_firmware_file, vendor_file_type, file_type;
+
+allow kernel vendor_firmware_file:dir r_dir_perms;
+allow kernel vendor_firmware_file:file r_file_perms;

@@ -230,11 +230,15 @@ if [[ -d "$SEDIR" ]]; then
                 } | sort -u)
     # Types this tree knowingly takes from AOSP's own policy. Listed rather than
     # matched by pattern: if a release renames one, this is where it surfaces.
-    # The module probe checks the same list against the synced system/sepolicy,
-    # which is the only place the answer is authoritative.
+    #
+    # This list is a claim, not evidence, and it was wrong twice: sysfs_devfreq and
+    # vendor_firmware_file were on it and AOSP 14 defines neither. Both are declared
+    # in this tree now. The module probe checks the list against the synced
+    # system/sepolicy, which is the only authoritative answer - trust that over
+    # this.
     aosp_types="gpu_device graphics_device hal_bluetooth_default_exec
                 vendor_firmware_file vendor_kernel_modules vendor_file
-                vendor_configs_file sysfs_type sysfs_devfreq sysfs_leds
+                vendor_configs_file sysfs_type sysfs_leds
                 sysfs_thermal sysfs_devices_system_cpu video_device"
     missing_types=0
     while read -r t; do

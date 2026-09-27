@@ -1,5 +1,11 @@
 # Sysfs types referenced by genfs_contexts that AOSP does not already define.
+#
+# sysfs_devfreq is one of them, which was not obvious: sysfs_thermal, sysfs_leds
+# and sysfs_devices_system_cpu are all AOSP types, so it read like one too, and
+# verify-tree.sh listed it as borrowed. The module probe settled it by scanning the
+# synced system/sepolicy - 1891 types, and sysfs_devfreq is not among them.
 type sysfs_gpu, fs_type, sysfs_type;
 type sysfs_hdmi, fs_type, sysfs_type;
 # sysfs_wlan_fwpath is gone with bcmdhd's firmware_path module parameter.
 type sysfs_mmc_host, fs_type, sysfs_type;
+type sysfs_devfreq, fs_type, sysfs_type;

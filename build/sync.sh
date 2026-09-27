@@ -27,6 +27,22 @@ echo
 mkdir -p "$TREE"
 cd "$TREE"
 
+# Before repo touches anything: the projects this manifest used to carry on the
+# Android 10 BSP path.
+#
+# Order matters here, and getting it wrong was the first version of this. repo
+# deletes a project that has left the manifest only if its checkout is clean, and
+# the old kernel is not - it has an out/ directory from having been built - so a
+# sync would have stopped on "cannot remove project: uncommitted changes are
+# present" for the one path that most needed removing. Doing it first also frees
+# 20-odd GiB before the new kernel is fetched rather than after.
+for stale in kernel/khadas hardware/rockchip vendor/rockchip u-boot RKTools; do
+    if [[ -e "$TREE/$stale" ]]; then
+        echo "removing $stale ($(du -sh "$TREE/$stale" 2>/dev/null | cut -f1), Android 10 BSP path, no longer in the manifest)"
+        rm -rf "$TREE/$stale"
+    fi
+done
+
 # repo init against upstream AOSP, not a Khadas fork of the whole platform.
 # The Android 10 manifest forked all 737 projects; tracking upstream instead
 # means AOSP security patches arrive with a tag bump rather than 737 merges.
@@ -76,17 +92,6 @@ for attempt in 1 2 3 4; do
     sleep "$delay"
 done
 
-# Projects this manifest used to carry, from the Android 10 BSP path. repo removes
-# a project that leaves the manifest only if its checkout is clean, and the old
-# kernel is not: it has an out/ directory from having been built. Left in place it
-# is 20-odd GiB of a kernel nothing builds, and a second
-# arch/arm64/boot/dts/rockchip for anyone grepping the tree.
-for stale in kernel/khadas hardware/rockchip vendor/rockchip u-boot RKTools; do
-    if [[ -e "$TREE/$stale" ]]; then
-        echo "removing $stale (Android 10 BSP path, no longer in the manifest)"
-        rm -rf "$TREE/$stale"
-    fi
-done
 
 # The device tree lives in this manifest repo rather than in a repo of its own,
 # so it is placed into the tree rather than synced. This was a symlink, which is

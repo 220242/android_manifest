@@ -126,6 +126,11 @@ function Write-Good { param([string] $Text) Write-Host "  [ok] $Text" -Foregroun
 function Write-Warn2 { param([string] $Text) Write-Host "  [warn] $Text" -ForegroundColor Yellow }
 function Write-Bad  { param([string] $Text) Write-Host "  [fail] $Text" -ForegroundColor Red }
 
+# Initialised, not left to be created on first assignment: under StrictMode reading
+# an undefined variable is an error, and this one is read in a branch that the
+# assignment does not always reach.
+$script:DistroReady = $false
+
 function Get-State {
     if (Test-Path -LiteralPath $script:StatePath) {
         try { return Get-Content -LiteralPath $script:StatePath -Raw | ConvertFrom-Json }
@@ -153,7 +158,18 @@ function Invalidate-OnManifestChange {
     if (-not $hash) { return }
 
     $s = Get-State
-    $known = $s.manifestHash
+    # Set-StrictMode -Version Latest makes reading a property that does not exist a
+    # terminating error, and on the first run there is no manifestHash yet. That is
+    # what "The property 'manifestHash' cannot be found on this object" was, and
+    # because the call sat inside the try/catch around Update-DistroRepo it surfaced
+    # as a warning about the device tree and the invalidation silently did not
+    # happen - so Sync stayed complete and the Kernel stage ran against a kernel
+    # that had never been fetched.
+    $known = if ($s.PSObject.Properties.Name -contains 'manifestHash') {
+        $s.manifestHash
+    } else {
+        $null
+    }
     if ($known -eq $hash) { return }
 
     # An absent hash invalidates too, not just a different one. The first run after
@@ -882,10 +898,22 @@ try {
     if ($registered -contains $script:DistroName) {
         Write-Stage 'Updating the device tree inside the distro'
         Update-DistroRepo
-        Invalidate-OnManifestChange
+        $script:DistroReady = $true
     }
 } catch {
     Write-Warn2 "could not refresh the in-distro device tree: $($_.Exception.Message)"
+}
+
+# Separate from the refresh above, and deliberately not inside its try block: when
+# this failed there, the message said the device tree could not be refreshed, which
+# was not what had gone wrong and sent the next hour in the wrong direction.
+if ($script:DistroReady) {
+    try {
+        Invalidate-OnManifestChange
+    } catch {
+        Write-Warn2 ("could not check whether the manifest changed: " +
+                     "$($_.Exception.Message). Run -Stage Sync by hand if it did.")
+    }
 }
 
 # Aidl and Probe are read-only verification passes whose whole point is their

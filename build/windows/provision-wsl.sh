@@ -324,27 +324,34 @@ PY_INNER
         fi
         echo
         echo "##### MESA / PANFROST (the GLES driver) #####"
-        # There is no software GLES driver a real device can load in AOSP 14, so
-        # this is not a nice-to-have: without libGLES_mesa SurfaceFlinger does not
-        # start. What must be right is the board variable that selects the gallium
-        # driver - if it is wrong Mesa still builds and ships and then finds no
-        # driver at run time, which is the one failure mode that does not announce
-        # itself.
+        # Last run this section printed "present at external/mesa3d" and then three
+        # empty lists, which answers nothing: either the directory is a stub, or the
+        # greps were looking in the wrong place. Since libGLES_mesa and
+        # libmesa_pipe_panfrost do appear in the tree-wide module list, something
+        # defines them - so this now goes looking for where, rather than assuming.
         md="$TREE/external/mesa3d"
+        echo "  external/mesa3d: $(if [[ -d $md ]]; then echo present; else echo ABSENT; fi)"
         if [[ -d "$md" ]]; then
-            echo "  present at external/mesa3d"
-            echo "  BOARD_MESA3D_* variables it reads:"
-            grep -rhoE 'BOARD_MESA3D_[A-Z_]+' "$md" 2>/dev/null | sort -u | sed 's/^/    /' || true
-            echo "  gallium drivers it knows about:"
-            grep -rhoE 'libmesa_pipe_[a-z0-9_]+' "$md" --include=Android.bp 2>/dev/null \
-                | sort -u | sed 's/^/    /' | head -30 || true
-            echo "  EGL/GLES modules it defines:"
-            grep -rhoE 'name: "lib(EGL|GLES)[a-zA-Z0-9_]*"' "$md" --include=Android.bp 2>/dev/null \
-                | sed -E 's/name: "([^"]+)"/    \1/' | sort -u || true
-            echo "  ours: $(grep -h BOARD_MESA3D "$MANIFEST/device/khadas/edge/BoardConfig.mk" || echo NONE)"
-        else
-            echo "  ABSENT at $md - there is no GLES driver on this path without it"
+            echo "    files: $(find "$md" -type f 2>/dev/null | wc -l), of which Android.bp/mk: $(find "$md" -name 'Android.bp' -o -name 'Android.mk' 2>/dev/null | wc -l)"
+            echo "    top level:"
+            ls -A "$md" 2>/dev/null | head -20 | sed 's/^/      /'
+            echo "    git: $(git -C "$md" log --oneline -1 2>&1 | head -1)"
         fi
+        echo "  where the tree defines the modules this port needs:"
+        for m in libGLES_mesa libmesa_pipe_panfrost libmesa_winsys_panfrost libgbm_mesa; do
+            hit=$(cd "$TREE" && grep -rl "name: \"$m\"" --include=Android.bp \
+                  external hardware device vendor frameworks 2>/dev/null | head -2 | tr '\n' ' ')
+            printf '    %-28s %s\n' "$m" "${hit:-NOT DEFINED ANYWHERE}"
+        done
+        echo "  every BOARD_MESA3D_* the tree mentions, and where:"
+        (cd "$TREE" && grep -rn 'BOARD_MESA3D_[A-Z_]*' \
+             --include=Android.bp --include=*.mk --include=*.py --include=*.md \
+             external build device 2>/dev/null | head -20 | sed 's/^/    /') || true
+        echo "  soong_config namespaces mesa declares:"
+        (cd "$TREE" && grep -rhA 3 'soong_config_module_type\|soong_config_string_variable' \
+             external/mesa3d --include=Android.bp 2>/dev/null | grep -E 'name:|namespace:' \
+             | head -14 | sed 's/^/    /') || true
+        echo "  ours: $(grep -h '^BOARD_MESA3D' "$MANIFEST/device/khadas/edge/BoardConfig.mk" || echo NONE)"
         echo
 
         echo "##### V4L2 CODEC2 (hardware decode via rkvdec) #####"
@@ -353,9 +360,13 @@ PY_INNER
             echo "  present. modules:"
             grep -rhoE 'name: "[^"]+"' "$vd" --include=Android.bp 2>/dev/null \
                 | sed -E 's/name: "([^"]+)"/    \1/' | sort -u || true
-            echo "  how it is switched on (soong config / board vars):"
-            grep -rhoE '(BOARD|TARGET)_[A-Z0-9_]*V4L2[A-Z0-9_]*|soong_config_set[^)]*' "$vd" 2>/dev/null \
+            echo "  the Codec2 service to put in PRODUCT_PACKAGES:"
+            grep -rhoE 'name: "android\.hardware\.media\.c2[^"]*"' "$vd" --include=Android.bp 2>/dev/null \
+                | sed -E 's/name: "([^"]+)"/    \1/' | sort -u || echo "    (none found)"
+            echo "  what it needs configured (its own README / board vars):"
+            grep -rhoE '(BOARD|TARGET)_[A-Z0-9_]*(V4L2|CODEC2)[A-Z0-9_]*' "$vd" 2>/dev/null \
                 | sort -u | head -10 | sed 's/^/    /' || true
+            ls "$vd" 2>/dev/null | grep -iE 'readme|doc' | sed 's/^/    file: /' || true
         else
             echo "  ABSENT at $vd"
         fi
@@ -597,7 +608,11 @@ PY_KERNEL
         else
             echo "  ABSENT at $TREE/system/sepolicy/prebuilts/api"
         fi
-        echo "  ours: $(grep -h BOARD_SEPOLICY_VERS "$MANIFEST/device/khadas/edge/BoardConfig.mk" || true)"
+        # Not grepped out of BoardConfig.mk any more: the variable is not set there,
+        # it is derived by core/config.mk from the release config, and grepping for
+        # it printed the comment explaining that instead of a value.
+        echo "  ours: not set by the board - core/config.mk:877 derives it from"
+        echo "        PLATFORM_SEPOLICY_VERSION and freezes it (202404 in this release)"
         echo
 
         echo "##### sepolicy types our *_contexts files rely on #####"
