@@ -196,7 +196,7 @@ stage_probe() {
     local dmk="$MANIFEST/device/khadas/edge/device.mk"
     # Cleared first: if the diagnostic block below dies early, a stale count from
     # the last run would gate this one - in whichever direction is wrong.
-    rm -f "$WORK/.probe-miss-hard"
+    rm -f "$WORK/.probe-miss-hard" "$WORK/.probe-sepol-dupes"
 
     [[ -d "$TREE/hardware/interfaces" ]] || {
         echo "tree not synced at $TREE" >&2; return 1; }
@@ -677,7 +677,7 @@ PY_KERNEL
         # round none of the device sepolicy was compiled at all (the device tree
         # was a symlink, invisible to Soong's finder).
         if [[ -d "$TREE/system/sepolicy" ]]; then
-            python3 - "$TREE" "$MANIFEST/device/khadas/edge/sepolicy/vendor" <<'PY_SEPOL'
+            EDGE1_WORK="$WORK" python3 - "$TREE" "$MANIFEST/device/khadas/edge/sepolicy/vendor" <<'PY_SEPOL'
 import os, re, sys
 tree, sedir = sys.argv[1], sys.argv[2]
 def types_in(root):
@@ -711,6 +711,30 @@ if unknown:
         print('       %s' % t)
 else:
     print('  every labelled type resolves')
+
+# The direction this probe used to be blind to, and the one that cost a build.
+#
+# "borrowed" subtracts `ours`, so a type that BOTH AOSP and this tree declare
+# never appeared anywhere in the output - it just looked locally declared. That is
+# the fatal case: checkpolicy rejects a second declaration outright.
+#
+#   sysfs_types.te:8:ERROR 'Duplicate declaration of type' at token ';'
+#   type sysfs_gpu, fs_type, sysfs_type;
+#
+# sysfs_gpu reads like a board type, so it was declared here; the platform needs
+# it too and declares it first. Printing every type this device declares with
+# whether AOSP has it makes that visible for all of them at once, rather than one
+# per build.
+dupes = sorted(t for t in ours if t in plat)
+print('  --- every type this device declares ---')
+for t in sorted(ours):
+    print('    %-28s %s' % (t, 'ALSO IN AOSP - DUPLICATE' if t in plat else 'ours alone, ok'))
+if dupes:
+    print('  !! %d DUPLICATE declaration(s): %s' % (len(dupes), ' '.join(dupes)))
+    print('     checkpolicy fails on each. Delete the local "type" line and keep')
+    print('     labelling with it - borrowing a platform type is the normal case.')
+open(os.path.join(os.environ.get('EDGE1_WORK', '/tmp'), '.probe-sepol-dupes'), 'w').write(
+    '%d\n' % len(dupes))
 PY_SEPOL
         else
             echo "  ABSENT at $TREE/system/sepolicy"
@@ -737,8 +761,12 @@ PY_SEPOL
     # printed nothing at all - the one summary the pipeline shows on screen.
     sed -n '/^--- MISSING AND REQUESTED/,/^missing:/p' "$out"
 
-    # The gate. A missing module is not a build error (see the note above), so it
-    # has to be one here or it reaches the image as an absence.
+    # The gates. Both of these are things the probe can answer in seconds and the
+    # build answers in hours, so they stop the run here.
+    local rc=0
+
+    # A missing module is not a build error (see the note above), so it has to be
+    # one here or it reaches the image as an absence.
     local miss_hard=0
     [[ -f "$WORK/.probe-miss-hard" ]] && miss_hard=$(cat "$WORK/.probe-miss-hard")
     if (( miss_hard > 0 )); then
@@ -747,8 +775,23 @@ PY_SEPOL
         echo "The build will not fail on them - it will drop them and produce an image without" >&2
         echo "them. Fix the names, or gate them behind EDGE1_ENABLE_INCOMPLETE_HALS, then re-run." >&2
         echo "Full probe: $out" >&2
-        return 1
+        rc=1
     fi
+
+    # A type this tree declares that system/sepolicy already declares. checkpolicy
+    # stops on the first one, so a build only ever reveals one per run.
+    local sepol_dupes=0
+    [[ -f "$WORK/.probe-sepol-dupes" ]] && sepol_dupes=$(cat "$WORK/.probe-sepol-dupes")
+    if (( sepol_dupes > 0 )); then
+        echo >&2
+        echo "$sepol_dupes sepolicy type(s) are declared both here and in system/sepolicy." >&2
+        echo "checkpolicy calls that a duplicate declaration and fails the policy build." >&2
+        sed -n '/DUPLICATE declaration/,+2p' "$out" >&2
+        echo "Full probe: $out" >&2
+        rc=1
+    fi
+
+    return $rc
 }
 
 stage_report() {

@@ -179,6 +179,47 @@ if [[ -f "$FRAG" ]]; then
         err "$FRAG uses '$bad'; Kconfig needs '# ${bad%=n} is not set'"
     done < <(grep -oE '^CONFIG_[A-Z0-9_]+=n$' "$FRAG" || true)
 
+    # Comments must not shadow a symbol the fragment sets, and must not look like a
+    # directive.
+    #
+    # merge_config.sh collects what to merge with two sed patterns:
+    #
+    #   s/^\(CONFIG_[a-zA-Z0-9_]*\)=.*/\1/p
+    #   s/^# \(CONFIG_[a-zA-Z0-9_]*\) is not set$/\1/p
+    #
+    # and then reads the value back with "grep -w $CFG $MERGE_FILE". So a comment
+    # that mentions a symbol the fragment also sets makes that grep return two
+    # lines, and the override warning prints the comment as the new value:
+    #
+    #   New value: # ... "NOT SET: CONFIG_DWMAC_ROCKCHIP=y". CONFIG_DWMAC_ROCKCHIP=y
+    #
+    # The merge itself is unaffected - it appends the whole fragment and runs
+    # olddefconfig - but the one report that says whether a symbol took becomes
+    # unreadable, and without -m the same artifact makes merge_config claim the
+    # value is missing from the final .config. Write the bare name in prose.
+    #
+    # The second pattern is the sharper edge: "# CONFIG_X is deliberately absent"
+    # is inert, but it is four words away from being read as a directive to turn X
+    # off. Only the exact "is not set" form may start a comment with CONFIG_.
+    set_syms=$(grep -oE '^CONFIG_[A-Z0-9_]+' "$FRAG" | sed 's/^CONFIG_//' | sort -u)
+    shadowed=0
+    while read -r sym; do
+        [[ -n "$sym" ]] || continue
+        while IFS= read -r n; do
+            err "$FRAG:$n mentions CONFIG_${sym} in a comment, and the fragment sets it;"
+            err "  merge_config.sh's value lookup is a grep, so its report becomes unreadable"
+            shadowed=$((shadowed+1))
+        done < <(grep -nE "^[[:space:]]*#.*CONFIG_${sym}([^A-Z0-9_]|$)" "$FRAG" | cut -d: -f1)
+    done <<< "$set_syms"
+    while IFS= read -r line; do
+        n="${line%%:*}"
+        err "$FRAG:$n starts a comment with '# CONFIG_' but is not the exact"
+        err "  '# CONFIG_X is not set' form; that is one edit away from silently disabling it"
+        shadowed=$((shadowed+1))
+    done < <(grep -nE '^# CONFIG_[A-Za-z0-9_]+' "$FRAG" \
+             | grep -vE '^[0-9]+:# CONFIG_[A-Za-z0-9_]+ is not set$' || true)
+    (( shadowed )) || ok "no comment shadows a symbol the fragment sets"
+
     # Contradictions: a symbol both set and unset.
     while read -r sym; do
         if grep -qE "^CONFIG_${sym}=" "$FRAG" && grep -qE "^# CONFIG_${sym} is not set" "$FRAG"; then
@@ -239,17 +280,21 @@ if [[ -d "$SEDIR" ]]; then
                   grep -hoE '^[a-z_]*_prop\([a-z0-9_]+' "$SEDIR"/*.te 2>/dev/null \
                     | sed -E 's/.*\(//'
                 } | sort -u)
-    # Types this tree knowingly takes from AOSP's own policy. Listed rather than
-    # matched by pattern: if a release renames one, this is where it surfaces.
+    # Types this tree knowingly takes from AOSP's own policy - borrowed, never
+    # declared here. Listed rather than matched by pattern: if a release renames
+    # one, this is where it surfaces.
     #
-    # This list is a claim, not evidence, and it was wrong twice: sysfs_devfreq and
-    # vendor_firmware_file were on it and AOSP 14 defines neither. Both are declared
-    # in this tree now. The module probe checks the list against the synced
-    # system/sepolicy, which is the only authoritative answer - trust that over
-    # this.
+    # This list is a claim, not evidence, and it has been wrong in both directions.
+    # sysfs_devfreq and vendor_firmware_file were on it and AOSP 14 defines
+    # neither, so both are declared in this tree now and both came off the list.
+    # sysfs_gpu was the other direction: it was declared here, AOSP declares it
+    # too, and checkpolicy rejected the second declaration six minutes into a
+    # build. The module probe resolves this list against the synced
+    # system/sepolicy and prints every type this device declares with whether AOSP
+    # already has it - that is the authoritative answer, and it gates the run.
     aosp_types="gpu_device graphics_device hal_bluetooth_default_exec
-                vendor_firmware_file vendor_kernel_modules vendor_file
-                vendor_configs_file sysfs_type sysfs_leds
+                vendor_kernel_modules vendor_file
+                vendor_configs_file sysfs_type sysfs_gpu sysfs_leds
                 sysfs_thermal sysfs_devices_system_cpu video_device"
     missing_types=0
     while read -r t; do
@@ -262,6 +307,20 @@ if [[ -d "$SEDIR" ]]; then
     done < <(grep -hoE 'u:object_r:[a-z0-9_]+' "$SEDIR"/*_contexts 2>/dev/null \
              | sed 's/u:object_r://' | sort -u)
     (( missing_types )) || ok "every labelled type is declared or a known AOSP type"
+
+    # The other direction. A type declared here that AOSP also declares is a
+    # duplicate declaration, which checkpolicy treats as fatal - and it fails on
+    # the first one only, so the build reveals them one per run.
+    dupe_types=0
+    while read -r t; do
+        [[ -n "$t" ]] || continue
+        if grep -qw "$t" <<< "$aosp_types"; then
+            err "$t is declared in $SEDIR and is an AOSP type; checkpolicy calls that"
+            err "  a duplicate declaration. Drop the local 'type' line and keep labelling with it."
+            dupe_types=$((dupe_types+1))
+        fi
+    done <<< "$declared"
+    (( dupe_types )) || ok "no locally declared type collides with a known AOSP type"
 
     # An exec type nothing labels means the domain transition never happens.
     unused=0

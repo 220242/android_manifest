@@ -4,7 +4,16 @@
 # and sysfs_devices_system_cpu are all AOSP types, so it read like one too, and
 # verify-tree.sh listed it as borrowed. The module probe settled it by scanning the
 # synced system/sepolicy - 1891 types, and sysfs_devfreq is not among them.
-type sysfs_gpu, fs_type, sysfs_type;
+# sysfs_gpu is NOT declared here. AOSP 14 declares it, and checkpolicy treats a
+# second declaration as fatal:
+#
+#   sysfs_types.te:8:ERROR 'Duplicate declaration of type' at token ';'
+#   type sysfs_gpu, fs_type, sysfs_type;
+#
+# It reads like a board type - the GPU is the board's - but the platform needs it
+# too: surfaceflinger, gpuservice and the composer HAL all have rules against it.
+# genfs_contexts still labels /devices/platform/ff9a0000.gpu with it; borrowing a
+# platform type is the normal case, declaring one twice is the error.
 type sysfs_hdmi, fs_type, sysfs_type;
 # sysfs_wlan_fwpath is gone with bcmdhd's firmware_path module parameter.
 type sysfs_mmc_host, fs_type, sysfs_type;

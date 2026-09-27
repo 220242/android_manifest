@@ -385,6 +385,34 @@ named `<address>.<node name>`, and the BSP renamed several of those nodes.
 | `init.edge1.rc`: a bare `oneshot`, `start brcm_patchram` | removed | Left over from a deleted service stanza; init read `oneshot` as a command inside `on boot`. |
 | fragment: `CONFIG_DWMAC_ROCKCHIP=y` alone | `+ CONFIG_STMMAC_PLATFORM=y` | `DWMAC_ROCKCHIP` is inside `if STMMAC_PLATFORM`, a tristate. While the parent was `m` the child could not be `y`, so `olddefconfig` demoted it - no Ethernet, on a board whose dts enables `&gmac`. |
 
+One more of the same shape, found the run after: `sysfs_gpu`. It was declared in
+`sepolicy/vendor/sysfs_types.te` because the GPU is the board's - but the platform
+declares it too (surfaceflinger, gpuservice and the composer HAL all have rules
+against it), and `checkpolicy` treats a second declaration as fatal:
+
+```
+sysfs_types.te:8:ERROR 'Duplicate declaration of type' at token ';'
+type sysfs_gpu, fs_type, sysfs_type;
+```
+
+The probe had been blind to exactly this: its "borrowed from AOSP" list is
+`referenced ∩ platform − ours`, so a type both sides declare was subtracted out
+and read as locally declared. It now prints every type this device declares with
+whether AOSP already has it, and fails the run on a collision - which answers the
+same question for `sysfs_hdmi`, `sysfs_mmc_host`, `sysfs_devfreq`,
+`hdmi_cec_device`, `lirc_device` and `vendor_firmware_file` in one go instead of
+one per build. `verify-tree.sh` check 9 checks the offline half of it.
+
+The same run turned up a booby trap in the kernel fragment. `merge_config.sh`
+picks the symbols to merge with two `sed` patterns and then reads each value back
+with `grep -w $CFG`, so a comment that mentions a symbol the fragment also sets
+makes that `grep` return two lines and the override report print the comment as
+the value. The merge is unaffected, but the one output that says whether a symbol
+took becomes unreadable - and `# CONFIG_X is deliberately absent` is four words
+away from matching the second pattern, `# CONFIG_X is not set`, and turning the
+symbol off. Comments name symbols without the `CONFIG_` prefix now, and check 7
+enforces both halves.
+
 Two gates were added so this class of thing stops being found by reading:
 `build-kernel.sh` now exits non-zero when any symbol in the fragment did not take
 (it printed `NOT SET: CONFIG_DWMAC_ROCKCHIP=y` and the build went ahead anyway),
