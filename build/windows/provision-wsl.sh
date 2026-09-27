@@ -247,6 +247,18 @@ for n in sorted(names):
     print(n, names[n])
 PY_INNER
 
+    # Everything below runs with errexit and pipefail OFF, in a subshell.
+    #
+    # This is the third time the same shape of bug has truncated this report: a
+    # `grep -r ... | head -n` over a large tree, where head closes the pipe, grep
+    # takes SIGPIPE, pipefail turns 141 into failure and errexit ends the block -
+    # losing every section after it. Twice it was fixed with a `|| true` on the
+    # offending line, and twice a new line brought it back.
+    #
+    # A diagnostic that aborts is worse than one that prints something odd, so the
+    # property is enforced once, here, instead of being re-argued per line.
+    (
+    set +e +o pipefail
     {
         echo "##### MODULE PROBE #####"
         echo "tree: $TREE"
@@ -338,9 +350,16 @@ PY_INNER
             echo "    git: $(git -C "$md" log --oneline -1 2>&1 | head -1)"
         fi
         echo "  where the tree defines the modules this port needs:"
+        # vendor/ no longer exists in this tree - the Rockchip projects were the only
+        # thing in it - and naming a missing directory is enough to make grep exit
+        # non-zero on its own.
+        searchdirs=()
+        for d in external hardware device frameworks vendor system; do
+            [[ -d "$TREE/$d" ]] && searchdirs+=( "$d" )
+        done
         for m in libGLES_mesa libmesa_pipe_panfrost libmesa_winsys_panfrost libgbm_mesa; do
-            hit=$(cd "$TREE" && grep -rl "name: \"$m\"" --include=Android.bp \
-                  external hardware device vendor frameworks 2>/dev/null | head -2 | tr '\n' ' ')
+            hit=$( (cd "$TREE" && grep -rl "name: \"$m\"" --include=Android.bp \
+                    "${searchdirs[@]}" 2>/dev/null) | head -2 | tr '\n' ' ' )
             printf '    %-28s %s\n' "$m" "${hit:-NOT DEFINED ANYWHERE}"
         done
         echo "  every BOARD_MESA3D_* the tree mentions, and where:"
@@ -675,6 +694,7 @@ PY_SEPOL
         echo
         echo "##### END MODULE PROBE #####"
     } > "$out" 2>&1
+    )
 
     log "written to $out ($(wc -l < "$out") lines)"
     sed -n '/^--- MISSING AOSP/,/^missing:/p' "$out"
@@ -720,6 +740,24 @@ stage_report() {
         echo "local_manifests: $(ls "$TREE/.repo/local_manifests" 2>/dev/null || echo NONE)"
     fi
     echo
+    echo "--- kernel checkout ---"
+    # In the report rather than in the probe, because the probe is what died last
+    # run and this is the fact the whole stage depends on. A manifest can sync
+    # "successfully" without the project having landed where the build looks.
+    local kdir="$TREE/kernel/mainline"
+    if [[ -d "$kdir/.git" ]]; then
+        echo "path:       $kdir"
+        echo "revision:   $(git -C "$kdir" describe --tags --always 2>&1 | head -1)"
+        echo "version:    $(grep -hE '^(VERSION|PATCHLEVEL|SUBLEVEL) =' "$kdir/Makefile" 2>/dev/null | tr -d ' ' | tr '\n' ' ')"
+        echo "board dts:  $(ls "$kdir/arch/arm64/boot/dts/rockchip/" 2>/dev/null | grep -c khadas) khadas dts files"
+        echo "Image:      $([[ -f $kdir/out/arch/arm64/boot/Image ]] && du -h "$kdir/out/arch/arm64/boot/Image" | cut -f1 || echo 'not built')"
+        echo "staged dtb: $(ls "$kdir/out/android-dtb/" 2>/dev/null | tr '\n' ' ' || echo 'none')"
+    elif [[ -d "$kdir" ]]; then
+        echo "$kdir exists but is not a git checkout - the sync did not land it"
+    else
+        echo "ABSENT at $kdir - repo sync did not fetch it"
+    fi
+    echo
     # Both of these used to be files the user had to find and send separately,
     # which is why a round went by with a stale probe and no one noticed. The
     # report is the one thing that gets sent, so the answers belong in it.
@@ -746,7 +784,10 @@ stage_report() {
         [[ -f "$f" ]] || continue
         local total; total=$(wc -l < "$f")
         echo
-        echo "===== $(basename "$f")  (${total} lines) ====="
+        # The age matters: a stage that did not run leaves its log from the last time
+        # it did, and two reports running were read as if a fixed error had come
+        # back.
+        echo "===== $(basename "$f")  (${total} lines, written $(date -r "$f" '+%H:%M:%S' 2>/dev/null), $(( ( $(date +%s) - $(stat -c %Y "$f" 2>/dev/null || date +%s) ) / 60 )) min ago) ====="
         # The pattern list earns its keep only if it catches the FIRST real
         # error. It missed the kernel's actual failure once already: Rockchip's
         # gcc-wrapper.py prints "error, forbidden warning:file.c:398" - a comma,
