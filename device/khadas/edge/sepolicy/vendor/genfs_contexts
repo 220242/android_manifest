@@ -9,13 +9,20 @@
 # the SoC, not the driver - but it is panfrost that binds to it now.
 
 genfscon sysfs /devices/platform/ff9a0000.gpu                    u:object_r:sysfs_gpu:s0
-genfscon sysfs /devices/platform/dmc                             u:object_r:sysfs_devfreq:s0
 genfscon sysfs /class/devfreq                                    u:object_r:sysfs_devfreq:s0
 genfscon sysfs /devices/system/cpu/cpufreq                       u:object_r:sysfs_devices_system_cpu:s0
-genfscon sysfs /devices/platform/fe380000.dwmmc/mmc_host         u:object_r:sysfs_mmc_host:s0
+# The SD card controller, which is what vold walks. Two things were wrong with
+# the line this replaces, "/devices/platform/fe380000.dwmmc/mmc_host":
+# fe380000 is usb@fe380000, an EHCI controller, not an mmc one, and mainline
+# names the node mmc@<address> where the BSP named it dwmmc@<address>. The three
+# real controllers are fe310000 (sdio0, the Wi-Fi module), fe320000 (sdmmc, the
+# card slot) and fe330000 (sdhci, the eMMC this boots from).
+genfscon sysfs /devices/platform/fe320000.mmc/mmc_host           u:object_r:sysfs_mmc_host:s0
 # /module/bcmdhd/parameters/firmware_path was labelled here so init could write
 # it. brcmfmac has no such parameter: the kernel firmware loader finds the
 # firmware by name under /vendor/firmware, so nothing writes a path at run time.
 genfscon sysfs /devices/platform/ff940000.hdmi                   u:object_r:sysfs_hdmi:s0
-genfscon sysfs /class/backlight                                  u:object_r:sysfs_leds:s0
+# /class/backlight was labelled sysfs_leds here. This board has no backlight
+# device - it drives HDMI, and the kernel fragment does not build
+# BACKLIGHT_CLASS_DEVICE - so the directory never appears.
 genfscon sysfs /class/thermal                                    u:object_r:sysfs_thermal:s0

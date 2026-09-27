@@ -134,6 +134,18 @@ $(call inherit-product, device/khadas/edge/device.mk)
 PRODUCT_PROPERTY_OVERRIDES += \
     ro.oem.key1=edge1
 
+# USB gadget. AOSP's init.usb.configfs.rc builds the whole gadget, but only when
+# sys.usb.configfs is 1, and it binds it by writing ${sys.usb.controller} to UDC.
+# Both are properties rather than init actions, because that file's own actions
+# read them - setting them from an action races with the actions that consume it.
+#
+# fe800000.usb is the peripheral controller on this board, not a guess:
+# rk3399-khadas-edge.dtsi sets dr_mode = "otg" on usbdrd_dwc3_0, which is
+# usb@fe800000, and dr_mode = "host" on usbdrd_dwc3_1 at fe900000.
+PRODUCT_PROPERTY_OVERRIDES += \
+    sys.usb.configfs=1 \
+    sys.usb.controller=fe800000.usb
+
 # adb over TCP is convenient on a headless-ish TV box during bring-up and is
 # gated to non-user builds.
 ifneq ($(TARGET_BUILD_VARIANT),user)

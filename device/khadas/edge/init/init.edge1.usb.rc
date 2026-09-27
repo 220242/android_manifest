@@ -1,12 +1,30 @@
-# Khadas Edge1 - USB gadget (dwc3, USB-C).
-on init
-    write /sys/class/android_usb/android0/f_ffs/aliases adb
-
-on boot
-    setprop sys.usb.configfs 1
-
-on property:sys.usb.config=mtp && property:sys.usb.configfs=1
-    write /config/usb_gadget/g1/configs/b.1/strings/0x409/configuration "mtp"
-
-on property:sys.usb.config=mtp,adb && property:sys.usb.configfs=1
-    write /config/usb_gadget/g1/configs/b.1/strings/0x409/configuration "mtp_adb"
+# Khadas Edge1 - USB gadget (dwc3 on the USB-C port).
+#
+# AOSP's own system/core/rootdir/init.usb.configfs.rc does all of the work: it
+# creates /config/usb_gadget/g1, the functions and configurations for every
+# sys.usb.config combination, and binds the gadget by writing
+# ${sys.usb.controller} to UDC. A device only has to say which controller that is,
+# and that is a property, set in edge1_tv.mk alongside sys.usb.configfs.
+#
+# The dts decides the controller: rk3399-khadas-edge.dtsi gives usbdrd_dwc3_0
+# (usb@fe800000) dr_mode = "otg" and usbdrd_dwc3_1 (usb@fe900000) dr_mode =
+# "host", so the peripheral UDC is fe800000.usb.
+#
+# What this file used to contain could not work on a mainline kernel:
+#
+#   write /sys/class/android_usb/android0/f_ffs/aliases adb
+#     android_usb is the pre-configfs gadget. It was removed from upstream long
+#     before 6.12; the path does not exist.
+#   setprop sys.usb.configfs 1, in "on boot"
+#     init.usb.configfs.rc's actions are themselves gated on this property, so
+#     setting it from an action is a race with the actions that read it. It is a
+#     build property now.
+#   two "on property:sys.usb.config=mtp[,adb]" handlers
+#     They wrote the configuration string and nothing else - no functions, no UDC
+#     bind. init.usb.configfs.rc already handles mtp, mtp,adb, ptp, rndis,
+#     accessory and the rest; a partial duplicate only competes with it.
+#
+# So there is nothing left for this file to do. It is kept, and kept installed,
+# because init.edge1.rc imports it and because the next USB question (an ADB-only
+# gadget, or accessory mode for a TV remote) belongs here rather than in the
+# board's main rc.

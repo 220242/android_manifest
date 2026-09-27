@@ -152,17 +152,33 @@ PRODUCT_PACKAGES += \
 #
 # The rest of this block is copied from device/linaro/dragonboard's Mesa
 # integration, the one working example of this in the tree, rather than assembled
-# from what seemed necessary. Three things came from it that were missing here:
+# from what seemed necessary. Two things came from it that were missing here:
 #
 #   PRODUCT_SOONG_NAMESPACES. external/mesa3d refuses to build without it -
 #     "external/mesa3d must be in PRODUCT_SOONG_NAMESPACES" (its Android.mk:41) -
 #     and that was the whole of the last build failure.
-#   The other five packages. libGLES_mesa alone is not the driver: the EGL loader
-#     also resolves libEGL_mesa and the two libGLESv*_mesa entry points, and the
-#     gallium driver itself lives in libgallium_dri with libglapi under it.
 #   ro.opengles.version. The framework reports what this says, not what the driver
 #     can do. 196608 is 3.0 (0x30000), which is what panfrost delivers on Midgard;
 #     claiming 3.1 here would only make applications ask for what is not there.
+#
+# What was NOT copied from dragonboard, on purpose: libEGL_mesa,
+# libGLESv1_CM_mesa, libGLESv2_mesa and libgallium_dri. dragonboard lists all
+# four, but nothing in this tree defines them - two independent scans of the
+# synced tree agree, one over every Android.bp/Android.mk in it and one over
+# external/mesa3d alone, and the only EGL/GLES modules mesa3d defines are
+# libGLES_mesa and libglapi. Those four names come from the newer meson-based
+# Mesa packaging, which this snapshot does not use (dragonboard's default is
+# BOARD_USE_CUSTOMIZED_MESA, a prebuilt).
+#
+# Naming them cost nothing and bought nothing, which is the problem:
+# core/main.mk:1341 only checks that PRODUCT_PACKAGES exist when a product opts
+# in with PRODUCT_ENFORCE_PACKAGES_EXIST, so a name that matches no module is
+# dropped in silence. The list read like five libraries being installed when one
+# was.
+#
+# One library is the supported form. frameworks/native's EGL loader takes
+# libGLES_$(ro.hardware.egl).so as a single combined driver, and only falls back
+# to the libEGL_/libGLESv1_CM_/libGLESv2_ triplet when that is absent.
 #
 # Vulkan is deliberately absent, which is where this diverges from dragonboard:
 # panvk on Midgard is not something to depend on, and HWUI uses GLES unless told
@@ -172,10 +188,6 @@ PRODUCT_SOONG_NAMESPACES += \
 
 PRODUCT_PACKAGES += \
     libGLES_mesa \
-    libEGL_mesa \
-    libGLESv1_CM_mesa \
-    libGLESv2_mesa \
-    libgallium_dri \
     libglapi
 
 PRODUCT_PROPERTY_OVERRIDES += \
@@ -196,11 +208,16 @@ PRODUCT_PROPERTY_OVERRIDES += \
     ro.surface_flinger.has_HDR_display=true \
     debug.sf.disable_backpressure=1
 
-# HDMI primary, DisplayPort-over-USB-C secondary. Carried over from the legacy
-# product, which set these on the tablet SKU too.
-PRODUCT_PROPERTY_OVERRIDES += \
-    sys.hwc.device.primary=HDMI-A \
-    sys.hwc.device.extend=DP
+# sys.hwc.device.primary=HDMI-A / sys.hwc.device.extend=DP were set here. Both
+# are gone, for two independent reasons:
+#
+#   - Nothing reads them. They are Rockchip's own hwcomposer properties, read by
+#     hardware/rockchip/hwcomposer, which left the tree with the rest of the BSP.
+#     drm_hwcomposer takes no display hint - it enumerates DRM connectors and
+#     uses the first connected one, which on this board is HDMI.
+#   - "sys." is not a prefix a vendor partition may own. check_prop_prefix
+#     rejected the property_contexts line that labelled it and stopped the build
+#     at 71%, six hours in; VTS enforces the same rule on device.
 
 # ---------------------------------------------------------------------------
 # Audio.

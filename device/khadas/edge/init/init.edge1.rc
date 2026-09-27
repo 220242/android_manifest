@@ -17,11 +17,12 @@ on init
     write /sys/devices/system/cpu/cpufreq/policy0/scaling_governor schedutil
     write /sys/devices/system/cpu/cpufreq/policy4/scaling_governor schedutil
 
-    # DDR devfreq. The legacy tree drove this from a userspace daemon; on 14
-    # the dmc governor handles it.
-    write /sys/class/devfreq/dmc/governor dmc_ondemand
-
-    chown system system /sys/class/devfreq/dmc/governor
+    # No DDR devfreq line. There were two, and neither could work on mainline:
+    # /sys/class/devfreq/dmc did not exist (the node is "dmc: memory-controller"
+    # in rk3399-base.dtsi with status = "disabled", and neither
+    # rk3399-khadas-edge.dtsi nor rk3399-khadas-edge-v.dts enables it), and
+    # "dmc_ondemand" is a Rockchip BSP governor that upstream does not have.
+    # Leaving them in meant two init errors per boot and nothing tuned.
     chown system system /sys/class/devfreq/ff9a0000.gpu/governor
 
 on post-fs-data
@@ -78,16 +79,19 @@ on boot
 # userspace with brcm_patchram_plus - a vendor tool this tree no longer carries.
 # The kernel driver is left out of the config so the port stays free for whichever
 # is chosen. docs/STATUS.md tracks it.
+#
+# A bare "oneshot" sat here, left over from a deleted "service brcm_patchram"
+# stanza - inside the "on boot" section, where init reads it as a command and
+# logs an unknown one - together with an "on property:bluetooth.hci.enabled=1 /
+# start brcm_patchram" that named that same deleted service. Both are gone.
+# Bluetooth gets wired up when one of the two owners above is chosen, not before.
 # ---------------------------------------------------------------------------
-    oneshot
-
-on property:bluetooth.hci.enabled=1
-    start brcm_patchram
 
 # ---------------------------------------------------------------------------
 # Android TV specifics.
 # ---------------------------------------------------------------------------
-on property:sys.boot_completed=1
-    # A TV box has no battery and no ambient light sensor; keep the display on
-    # and let HDMI-CEC standby drive power state instead.
-    write /sys/class/backlight/backlight/brightness 255
+# Nothing runs on boot_completed. There was a write to
+# /sys/class/backlight/backlight/brightness, carried over from the tablet SKU
+# this config started as. This board drives an HDMI display: there is no
+# backlight device, the kernel fragment does not build BACKLIGHT_CLASS_DEVICE,
+# and display power comes from HDMI-CEC standby instead.

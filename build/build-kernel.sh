@@ -107,6 +107,25 @@ if (( missing )); then
     echo "==> $missing symbols did not take. Each is either unavailable in this" >&2
     echo "    kernel or blocked by an unmet dependency; several are boot-critical." >&2
     echo "    See docs/KERNEL.md." >&2
+    # This used to be a warning and the build carried on. It printed
+    # "NOT SET: CONFIG_DWMAC_ROCKCHIP=y" - no Ethernet - and the six-hour platform
+    # build ran anyway, because nothing downstream reads this output. Four symbols
+    # were in that list and the two that were noise (one needing GCC 12, one
+    # needing hardware this board does not have) are what made it easy to skim
+    # past the two that were not.
+    #
+    # So the fragment is a contract now: every symbol in it has to take, and the
+    # noise was removed from the fragment rather than tolerated in the check.
+    # EDGE1_ALLOW_CONFIG_MISS=1 is for trying a symbol out, not for the pipeline.
+    if [[ "${EDGE1_ALLOW_CONFIG_MISS:-0}" != "1" ]]; then
+        echo >&2
+        echo "    Stopping here. Fix the fragment - add the missing dependency, or drop" >&2
+        echo "    the symbol with a comment saying why it cannot be set - rather than" >&2
+        echo "    building a kernel that is missing what the fragment asked for." >&2
+        echo "    EDGE1_ALLOW_CONFIG_MISS=1 overrides this for a one-off experiment." >&2
+        exit 1
+    fi
+    echo "    EDGE1_ALLOW_CONFIG_MISS=1 is set; continuing anyway." >&2
 fi
 
 echo "==> building Image and $DTB.dtb ($JOBS jobs)"

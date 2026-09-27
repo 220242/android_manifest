@@ -1,7 +1,8 @@
 # Khadas Edge1 (RK3399) - Android TV 14 fstab.
 #
-# Non-A/B layout: a full Rockchip update.img is flashed over the whole
-# partition set and a discrete recovery partition is kept, so no slotselect.
+# Non-A/B layout with a discrete recovery partition, so no slotselect. The
+# partition set is the GPT in flash/partitions.tsv, written by the generated
+# flash-emmc.sh - not a Rockchip update.img, which this tree no longer produces.
 #
 # system/system_ext/product/vendor/odm are logical partitions inside super
 # (PRODUCT_USE_DYNAMIC_PARTITIONS := true). The Android 10 fstab this replaces
@@ -21,23 +22,41 @@ odm          /odm          ext4  ro,barrier=1  wait,logical,first_stage_mount,av
 
 # ---- userdata ----
 #
-# File-based encryption is pinned to policy v1, not v2.
+# File-based encryption at policy v2.
 #
-# fscrypt v2 policies landed in mainline 5.4. This board runs 4.19.111, where
-# v2 is only available if the ACK android-4.19-stable fscrypt backports are
-# present - they are not in the Khadas khadas-edge-Qt kernel. Because
-# PRODUCT_SHIPPING_API_LEVEL is 29 this device is an *upgrade* device, for
-# which v1 remains permitted. Moving to v2 requires the kernel work described
-# in docs/KERNEL.md.
+# This line said v1 for as long as the tree targeted the Khadas 4.19 BSP, where
+# v2 needed fscrypt backports that kernel did not have. The kernel is mainline
+# 6.12 now; v2 policies have been upstream since 5.4, so the reason for pinning
+# v1 is gone. v1 was only ever permitted here because PRODUCT_SHIPPING_API_LEVEL
+# is 29 - an upgrade device - and it is deprecated for anything newer.
 #
-# Metadata encryption (keydirectory=, dm-default-key) is likewise omitted: the
-# 4.19 Rockchip kernel has no dm-default-key target.
-/dev/block/by-name/userdata  /data  f2fs  noatime,nosuid,nodev,discard,reserve_root=32768,resgid=1065,fsync_mode=nobarrier  latemount,wait,check,fileencryption=aes-256-xts:aes-256-cts:v1,quota,formattable,resize
+# Metadata encryption (keydirectory=, dm-default-key) is still omitted. That is a
+# choice, not a limitation: 6.12 has dm-default-key only in the Android common
+# kernels, not upstream, so /metadata would have to be left unencrypted anyway.
+/dev/block/by-name/userdata  /data  f2fs  noatime,nosuid,nodev,discard,reserve_root=32768,resgid=1065,fsync_mode=nobarrier  latemount,wait,check,fileencryption=aes-256-xts:aes-256-cts:v2,quota,formattable,resize
 
-# ---- misc / vendor-specific Rockchip partitions ----
+# ---- misc ----
+#
+# baseparameter was listed here too. It is a Rockchip partition read by their
+# hwcomposer for the saved display mode; that HAL is gone, flash/partitions.tsv
+# does not create the partition, and nothing left in the tree opens it.
 /dev/block/by-name/misc      /misc      emmc  defaults  defaults
-/dev/block/by-name/baseparameter /baseparameter emmc defaults defaults
 
 # ---- removable ----
-/devices/platform/fe320000.dwmmc/mmc_host*      /storage/sdcard1  vfat  nosuid,nodev  wait,voldmanaged=sdcard1:auto
-/devices/platform/usb*                          /storage/usbotg   vfat  nosuid,nodev  wait,voldmanaged=usbotg:auto
+#
+# vold matches these patterns against the block device's sysfs path, so they have
+# to name the nodes the *mainline* dts creates. Both were Rockchip BSP paths and
+# neither could ever have matched:
+#
+#   fe320000.dwmmc -> fe320000.mmc. The SD controller is "sdmmc: mmc@fe320000" in
+#     rk3399-base.dtsi, and a platform device is named <address>.<node name>. The
+#     BSP called the node dwmmc@fe320000; mainline does not.
+#   /devices/platform/usb* -> /devices/platform/*.usb*. Every USB controller on
+#     this SoC is a "usb@<address>" node (fe380000, fe3a0000, fe3c0000, fe3e0000,
+#     fe800000, fe900000), so nothing is ever called "usb" directly under
+#     platform/. The address has to be allowed to come first.
+#
+# vold's match is fnmatch without FNM_PATHNAME, so * crosses / and one pattern
+# covers the controller, the hub and the block device below it.
+/devices/platform/fe320000.mmc/mmc_host*        /storage/sdcard1  vfat  nosuid,nodev  wait,voldmanaged=sdcard1:auto
+/devices/platform/*.usb*                        /storage/usbotg   vfat  nosuid,nodev  wait,voldmanaged=usbotg:auto

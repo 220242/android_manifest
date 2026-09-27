@@ -2,5 +2,6 @@
 allow vendor_init sysfs_devices_system_cpu:file w_file_perms;
 allow vendor_init sysfs_devfreq:file w_file_perms;
 allow vendor_init sysfs_gpu:file w_file_perms;
-allow vendor_init sysfs_wlan_fwpath:file w_file_perms;
-set_prop(vendor_init, vendor_hwc_prop)
+# sysfs_wlan_fwpath was granted here for the write to
+# /sys/module/bcmdhd/parameters/firmware_path. brcmfmac has no such parameter, the
+# genfs label for it is gone, and init writes nothing there any more.

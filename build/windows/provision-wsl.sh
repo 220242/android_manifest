@@ -194,6 +194,9 @@ stage_probe() {
     place_device
     local out="$WORK/module-probe.txt"
     local dmk="$MANIFEST/device/khadas/edge/device.mk"
+    # Cleared first: if the diagnostic block below dies early, a stale count from
+    # the last run would gate this one - in whichever direction is wrong.
+    rm -f "$WORK/.probe-miss-hard"
 
     [[ -d "$TREE/hardware/interfaces" ]] || {
         echo "tree not synced at $TREE" >&2; return 1; }
@@ -279,10 +282,19 @@ PY_INNER
         echo "tree defines $(wc -l < "$found") module names"
         echo
 
-        # Only one of these two buckets can break a build. A name device.mk asks
-        # for unconditionally has to exist or Kati stops with "module not found";
-        # a name behind EDGE1_ENABLE_INCOMPLETE_HALS is a vendor component not yet
-        # forward-ported, and is expected to be absent.
+        # A name device.mk asks for unconditionally and that matches no module is
+        # NOT a build error, which is worse than one. core/main.mk:1341 checks that
+        # PRODUCT_PACKAGES exist only when the product sets
+        # PRODUCT_ENFORCE_PACKAGES_EXIST; otherwise the name is dropped in
+        # silence, the build succeeds, and the library is simply not on the image.
+        # Four of those - libEGL_mesa, libGLESv1_CM_mesa, libGLESv2_mesa,
+        # libgallium_dri - sat in device.mk for several rounds looking installed.
+        #
+        # So this count is the gate: the probe exits non-zero on it, before the
+        # six-hour build, rather than only printing it.
+        #
+        # A name behind EDGE1_ENABLE_INCOMPLETE_HALS is a vendor component not yet
+        # forward-ported and is expected to be absent, so it does not gate.
         local miss_hard=0 miss_gated=0
         local hard_list="" gated_list=""
         while read -r n gate; do
@@ -303,6 +315,8 @@ PY_INNER
         echo
         echo "missing: $miss_hard unconditional, $miss_gated gated"
         echo
+        # Read back after the subshell: $miss_hard cannot escape it.
+        echo "$miss_hard" > "$WORK/.probe-miss-hard"
 
         echo "##### drm_hwcomposer (generic DRM composer3) #####"
         if [[ -d "$TREE/external/drm_hwcomposer" ]]; then
@@ -719,7 +733,22 @@ PY_SEPOL
     )
 
     log "written to $out ($(wc -l < "$out") lines)"
-    sed -n '/^--- MISSING AOSP/,/^missing:/p' "$out"
+    # "MISSING AOSP" was the heading in an earlier version of this probe, so this
+    # printed nothing at all - the one summary the pipeline shows on screen.
+    sed -n '/^--- MISSING AND REQUESTED/,/^missing:/p' "$out"
+
+    # The gate. A missing module is not a build error (see the note above), so it
+    # has to be one here or it reaches the image as an absence.
+    local miss_hard=0
+    [[ -f "$WORK/.probe-miss-hard" ]] && miss_hard=$(cat "$WORK/.probe-miss-hard")
+    if (( miss_hard > 0 )); then
+        echo >&2
+        echo "$miss_hard module(s) device.mk requests unconditionally do not exist in the tree." >&2
+        echo "The build will not fail on them - it will drop them and produce an image without" >&2
+        echo "them. Fix the names, or gate them behind EDGE1_ENABLE_INCOMPLETE_HALS, then re-run." >&2
+        echo "Full probe: $out" >&2
+        return 1
+    fi
 }
 
 stage_report() {
@@ -819,9 +848,54 @@ stage_report() {
         # gcc-wrapper.py prints "error, forbidden warning:file.c:398" - a comma,
         # not a colon - and make prints "*** [...] Error 1", so a 2727-line log
         # reported a single unrelated grep warning and nothing else.
-        echo "--- matches for error patterns (max 200 lines) ---"
-        grep -nE 'error[:,]|ERROR|FAILED:|fatal error|forbidden warning|internal compiler error|multiple definition|collect2:|\*\*\* \[|\*\*\* No rule|ninja: build stopped|No such file|Killed|out of memory|cannot find|undefined reference|Permission denied|Segmentation fault' \
-            "$f" 2>/dev/null | head -200 || echo "(none)"
+        # One flat pattern list with one budget failed on a 143k-line platform
+        # log: "ERROR" matched the ALOGE macro echoed in every -Wall warning
+        # context, "error[:,]" matched the crate name "thiserror:", and the
+        # 200-line budget was spent by line 6000 - so the report never reached the
+        # one FAILED: line at 143395 and said nothing about the real failure.
+        #
+        # Three tiers with their own budgets instead, decisive markers first, and
+        # the word patterns anchored so they cannot match inside an identifier.
+        echo "--- [1] the verdict: what ninja, kati or make actually refused ---"
+        grep -nE '^FAILED:|^ninja: build stopped|ninja failed with|failed to build some targets|\*\*\* No rule to make target|^make(\[[0-9]+\])?: \*\*\* |error, forbidden warning' \
+            "$f" 2>/dev/null | head -60 || true
+        # The tool output that explains a FAILED: line follows it. Print that
+        # window for the first one - it is almost always the whole diagnosis.
+        local first_failed
+        first_failed=$(grep -nE '^FAILED:' "$f" 2>/dev/null | head -1 | cut -d: -f1)
+        if [[ -n "${first_failed:-}" ]]; then
+            echo "--- [1a] context around the first FAILED: (line $first_failed) ---"
+            sed -n "$((first_failed > 3 ? first_failed - 3 : 1)),$((first_failed + 30))p" "$f" 2>/dev/null
+        fi
+        echo "--- [2] compiler and tool errors (first 40, last 40) ---"
+        # Every part of this pattern is load-bearing:
+        #   (^|[^[:alnum:]_])  keeps "thiserror:" out - a real diagnostic has a
+        #                      space, a colon or a line start in front.
+        #   error: / ERROR:    with the colon. Bare "ERROR" matched the ALOGE
+        #                      macro in every warning context, and aidl's
+        #                      -Wredundant-name warnings quote enumerators like
+        #                      'ERROR_UNKNOWN' hundreds of times.
+        # The filter then drops lines that announce themselves as warnings, which
+        # is how "WARNING: ... has a redundant substring 'ERROR'" stops competing
+        # with the failure for the budget.
+        local tier2
+        tier2=$(grep -nE '(^|[^[:alnum:]_])(fatal )?error:|(^|[^[:alnum:]_])ERROR:|internal compiler error|multiple definition|collect2:|undefined reference' \
+                "$f" 2>/dev/null | grep -vE '^[0-9]+:[[:space:]]*(WARNING|Warning)[:[:space:]]' || true)
+        if [[ -n "$tier2" ]]; then
+            local n2; n2=$(wc -l <<< "$tier2")
+            head -40 <<< "$tier2"
+            if (( n2 > 80 )); then
+                echo "    ... $(( n2 - 80 )) more ..."
+                tail -40 <<< "$tier2"
+            elif (( n2 > 40 )); then
+                tail -n "$(( n2 - 40 ))" <<< "$tier2"
+            fi
+        else
+            echo "(none)"
+        fi
+        echo "--- [3] environment: the build dying rather than rejecting code ---"
+        grep -nE 'Killed|[Oo]ut of memory|No space left|Read-only file system|Permission denied|Segmentation fault|Cannot allocate memory|Bus error' \
+            "$f" 2>/dev/null | head -40 || true
         echo "--- last 120 lines ---"
         tail -120 "$f" 2>/dev/null
     done

@@ -336,6 +336,59 @@ audio_policy_engine_configuration.xml"
 fi
 echo
 
+# --- 9d. vendor property namespace --------------------------------------------
+# A vendor partition may only own properties under a fixed set of prefixes.
+# system/sepolicy's check_prop_prefix enforces it on the merged vendor
+# property_contexts, and VTS enforces the same list on device
+# (test/vts-testcase/security/system_property/vts_treble_sys_prop_test.py).
+#
+# The check runs at 71% of a full build. A "sys.hwc." line here cost six hours to
+# find out that Rockchip's hwcomposer properties are not ours to label - so the
+# same rule is applied here, where it costs a second.
+echo "[9d] vendor property namespace"
+readonly PCTX="$DEV/sepolicy/vendor/property_contexts"
+# The list check_prop_prefix prints when it rejects a file. Order matters only for
+# readability; every entry is a literal prefix.
+readonly ALLOWED_PREFIXES=(
+    'ctl.odm.' 'ctl.vendor.' 'ctl.start$odm.' 'ctl.start$vendor.'
+    'ctl.stop$odm.' 'ctl.stop$vendor.' 'init.svc.odm.' 'init.svc.vendor.'
+    'ro.boot.' 'ro.hardware.' 'ro.odm.' 'ro.vendor.' 'odm.'
+    'persist.odm.' 'persist.vendor.' 'vendor.' 'persist.camera.'
+)
+if [[ -f "$PCTX" ]]; then
+    while read -r name _rest; do
+        [[ -n "$name" ]] || continue
+        [[ "$name" == \#* ]] && continue
+        allowed=0
+        for pre in "${ALLOWED_PREFIXES[@]}"; do
+            [[ "$name" == "$pre"* ]] && { allowed=1; break; }
+        done
+        if (( allowed )); then
+            ok "$name"
+        else
+            err "$name is not a prefix a vendor partition may own; check_prop_prefix will fail the build"
+        fi
+    done < "$PCTX"
+    # Every type used here has to be declared, and every declared type used - an
+    # unused vendor_*_prop is dead policy, and an undeclared one fails the compile.
+    used=$(grep -v '^[[:space:]]*#' "$PCTX" | grep -oE 'u:object_r:[a-z0-9_]+:s0' \
+           | sed -E 's/u:object_r:([a-z0-9_]+):s0/\1/' | sort -u)
+    declared=$(grep -hoE '^[[:space:]]*vendor_(internal|restricted|public)_prop\([a-z0-9_]+\)' \
+               "$DEV/sepolicy/vendor/property.te" 2>/dev/null \
+               | sed -E 's/.*\(([a-z0-9_]+)\)/\1/' | sort -u)
+    for t in $used; do
+        grep -qxF "$t" <<< "$declared" || err "$t is labelled in property_contexts but declared in no property.te"
+    done
+    for t in $declared; do
+        if grep -qxF "$t" <<< "$used"; then
+            ok "$t declared and used"
+        else
+            wrn "$t is declared in property.te but labels nothing"
+        fi
+    done
+fi
+echo
+
 # --- 10. variable ownership --------------------------------------------------
 # Product config runs before BoardConfig.mk and freezes the product variables, so
 # a PRODUCT_* assignment in BoardConfig.mk is fatal:

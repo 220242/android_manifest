@@ -1,6 +1,17 @@
+# Vendor property labels.
+#
+# Every name here must start with one of the prefixes Android 14 allows a
+# vendor partition to own - check_prop_prefix enforces it at build time and
+# VTS enforces it on device:
+#
+#   vendor.  odm.  ro.vendor.  ro.odm.  ro.hardware.  ro.boot.
+#   persist.vendor.  persist.odm.  persist.camera.
+#   ctl.vendor.  ctl.odm.  ctl.{start,stop}$vendor.  ctl.{start,stop}$odm.
+#   init.svc.vendor.  init.svc.odm.
+#
+# A "sys.hwc." prefix line here failed the build at 71%, six hours in.
 ro.hardware.gralloc            u:object_r:vendor_graphics_prop:s0 exact string
 ro.hardware.hwcomposer         u:object_r:vendor_graphics_prop:s0 exact string
 ro.hardware.egl                u:object_r:vendor_graphics_prop:s0 exact string
 ro.hardware.vulkan             u:object_r:vendor_graphics_prop:s0 exact string
-sys.hwc.                       u:object_r:vendor_hwc_prop:s0 prefix
 ro.hardware.audio.primary      u:object_r:vendor_audio_prop:s0 exact string

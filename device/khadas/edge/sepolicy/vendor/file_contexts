@@ -10,6 +10,10 @@
 /dev/dri/card0                      u:object_r:graphics_device:s0
 /dev/dri/renderD128                 u:object_r:gpu_device:s0
 /dev/video[0-9]*                    u:object_r:video_device:s0
+# The media controller that comes with a stateless V4L2 decoder. ueventd.edge1.rc
+# already sets its ownership; without a label here it keeps /dev's default type
+# and no vendor domain can open it.
+/dev/media[0-9]*                    u:object_r:video_device:s0
 /dev/cec0                           u:object_r:hdmi_cec_device:s0
 /dev/lirc0                          u:object_r:lirc_device:s0
 

@@ -359,6 +359,41 @@ anywhere in the device tree, and the dynamic-partition group naming matches what
 `core/config.mk` derives (`BOARD_ROCKCHIP_DYNAMIC_PARTITIONS_SIZE` and
 `_PARTITION_LIST` are exactly what `to-upper` of the group name asks for).
 
+## Paths that were still the BSP's
+
+Moving to a mainline kernel changed every sysfs and device path the board config
+names, and a stale one of those does not fail a build - it fails silently on the
+device. The platform build reaching 71% is what made this worth sweeping: the next
+failure will be at boot, where there is no log to grep.
+
+Each of these was checked against `rk3399-base.dtsi`, `rk3399-khadas-edge.dtsi`
+and `rk3399-khadas-edge-v.dts` at v6.12.111, not from memory. A platform device is
+named `<address>.<node name>`, and the BSP renamed several of those nodes.
+
+| Was | Is | What it broke |
+|---|---|---|
+| `fstab`: `/devices/platform/fe320000.dwmmc/mmc_host*` | `fe320000.mmc` | vold matches this against the block device's sysfs path. No SD card, ever. |
+| `fstab`: `/devices/platform/usb*` | `/devices/platform/*.usb*` | Every USB controller is a `usb@<address>` node, so nothing sits at `platform/usb*`. No USB storage. |
+| `fstab`: `fileencryption=...:v1` | `:v2` | v1 was pinned because 4.19 lacked the fscrypt v2 backports. 6.12 has had them since 5.4. |
+| `fstab`: `/dev/block/by-name/baseparameter` | removed | A Rockchip partition read by their hwcomposer. `flash/partitions.tsv` does not create it. |
+| `genfs_contexts`: `fe380000.dwmmc/mmc_host` | `fe320000.mmc/mmc_host` | `fe380000` is `usb@fe380000`, an EHCI controller. The label was on nothing. |
+| `genfs_contexts`: `/devices/platform/dmc` | removed | `dmc: memory-controller` is `status = "disabled"` and no Khadas dts enables it. |
+| `genfs_contexts`: `/class/backlight` | removed | No backlight device on an HDMI board. |
+| `init.edge1.rc`: `write /sys/class/devfreq/dmc/governor dmc_ondemand` | removed | Device does not exist, and `dmc_ondemand` is a BSP governor upstream does not have. Two init errors per boot. |
+| `init.edge1.rc`: `write /sys/class/backlight/backlight/brightness` | removed | Same missing device. |
+| `init.edge1.usb.rc`: `/sys/class/android_usb/android0/...` | `sys.usb.controller=fe800000.usb` | `android_usb` is the pre-configfs gadget. The dts gives `usbdrd_dwc3_0` (`usb@fe800000`) `dr_mode = "otg"`, so that is the UDC. |
+| `init.edge1.rc`: a bare `oneshot`, `start brcm_patchram` | removed | Left over from a deleted service stanza; init read `oneshot` as a command inside `on boot`. |
+| fragment: `CONFIG_DWMAC_ROCKCHIP=y` alone | `+ CONFIG_STMMAC_PLATFORM=y` | `DWMAC_ROCKCHIP` is inside `if STMMAC_PLATFORM`, a tristate. While the parent was `m` the child could not be `y`, so `olddefconfig` demoted it - no Ethernet, on a board whose dts enables `&gmac`. |
+
+Two gates were added so this class of thing stops being found by reading:
+`build-kernel.sh` now exits non-zero when any symbol in the fragment did not take
+(it printed `NOT SET: CONFIG_DWMAC_ROCKCHIP=y` and the build went ahead anyway),
+and the module probe exits non-zero when `device.mk` requests a module that does
+not exist. The second matters because `core/main.mk:1341` only checks
+`PRODUCT_PACKAGES` names when a product sets `PRODUCT_ENFORCE_PACKAGES_EXIST` -
+otherwise a name that matches nothing is dropped in silence, which is how four
+Mesa libraries sat in `device.mk` looking installed.
+
 ## Honest expectation
 
 With items 1-3 done this should boot to a leanback launcher over HDMI. It will

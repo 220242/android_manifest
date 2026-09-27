@@ -837,6 +837,11 @@ function Stage-Aidl {
 function Stage-Probe {
     Write-Stage 'Stage 8/10  Module probe'
     Write-Info 'checking every module device.mk requests against the synced tree'
+    # This stage stops the run when a requested module does not exist. The build
+    # would not: AOSP only checks PRODUCT_PACKAGES names when a product opts in
+    # with PRODUCT_ENFORCE_PACKAGES_EXIST, so otherwise the module is dropped and
+    # the absence shows up on the device, not in the log.
+    Write-Info 'a name that matches no module stops the run here - the build would drop it silently'
     Invoke-InDistro -Command '~/android_khadas/android_manifest/build/windows/provision-wsl.sh probe'
     Write-Good 'written to the distro home as module-probe.txt'
     Write-Info "reachable at \\wsl.localhost\$($script:DistroName)\home\builder\android_khadas\module-probe.txt"
