@@ -28,10 +28,42 @@ readonly TARGET="edge1_tv-${RELEASE}-${VARIANT}"
 cd "$TREE"
 
 # ccache pays for itself on the second build onwards.
+#
+# CCACHE_DIR has to be set, and has to be inside out/. Without it ccache uses
+# $HOME/.cache/ccache, and Android 14 runs ninja with the source tree - and
+# everything else outside $OUT_DIR - bind-mounted read-only, so the first
+# compile died at target 151 of 167136 with:
+#
+#   ccache: error: Failed to create directory /home/builder/.cache/ccache/tmp:
+#   Read-only file system
+#   Write to a read-only file system detected. Possible fixes include
+#   1. Generate file directly to out/ which is ReadWrite, #recommend solution
+#   2. BUILD_BROKEN_SRC_DIR_RW_ALLOWLIST := ... #discouraged
+#   3. BUILD_BROKEN_SRC_DIR_IS_WRITABLE := true #highly discouraged
+#
+# This is fix 1, the one the build itself recommends: out/ is the one writable
+# tree inside the sandbox, so the cache lives there. ccache's temp dir follows
+# CCACHE_DIR, so that stops writing to $HOME too.
+#
+# ccache is a plain compiler wrapper here, not a build-system feature:
+# core/ccache.mk only sets CC_WRAPPER/CXX_WRAPPER when CCACHE_EXEC is set, which
+# is why both variables are needed - USE_CCACHE alone does nothing since AOSP
+# dropped its ccache prebuilt.
 if command -v ccache >/dev/null 2>&1; then
     export USE_CCACHE=1
     export CCACHE_EXEC="$(command -v ccache)"
-    ccache -M 50G >/dev/null
+    export CCACHE_DIR="$TREE/out/ccache"
+    mkdir -p "$CCACHE_DIR"
+    # The same directory written into ccache's own config, in both places ccache
+    # looks for it: $CCACHE_DIR/ccache.conf when CCACHE_DIR is set, and the XDG
+    # path when it is not. Soong sanitises the environment it hands to ninja, so
+    # if CCACHE_DIR does not survive that, the config still keeps the cache out
+    # of the read-only $HOME. max_size goes in the file for the same reason -
+    # "ccache -M" only writes it to whichever config is primary right now.
+    for conf in "$CCACHE_DIR/ccache.conf" "$HOME/.config/ccache/ccache.conf"; do
+        mkdir -p "$(dirname "$conf")"
+        printf 'cache_dir = %s\nmax_size = 50G\n' "$CCACHE_DIR" > "$conf"
+    done
 fi
 
 # Parallelism from available RAM, not just core count. Soong's Java steps take

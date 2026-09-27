@@ -352,6 +352,7 @@ Each one was wrong in the tree before it was checked.
 | `BOARD_USES_FULL_RECOVERY_IMAGE := true`, no `BOARD_INCLUDE_RECOVERY_DTBO` | Boot header v3 and v4 have no `recovery_dtbo` field, so the flag handed mkbootimg an argument it cannot place. |
 | Four `PRODUCT_*` variables deleted | `PRODUCT_BUILD_PROP_OVERRIDES`, `PRODUCT_HAS_CAMERA`, `PRODUCT_HAVE_OPTEE`, `PRODUCT_TARGET_VNDK_VERSION` appear nowhere in AOSP 14. They were read by `device/rockchip/common`, which this tree does not have, so they were decoration that read like configuration. |
 | No `ro.product.first_api_level` override | `core/main.mk:284` already emits it from `PRODUCT_SHIPPING_API_LEVEL`. Setting both worked only while they agreed, and `post_process_props.py` rejects duplicates that disagree - so raising the shipping level later would have failed the build. |
+| `CCACHE_DIR=$TREE/out/ccache` | 14 runs ninja with everything outside `$OUT_DIR` bind-mounted read-only. ccache's default `$HOME/.cache/ccache` is on the wrong side of that, so the first real compile died at target 151 of 167136 on `Failed to create directory ...: Read-only file system`. The build's own error text names the fix it wants: generate into `out/`. The directory is also written into `ccache.conf` in both places ccache looks, in case Soong strips the variable out of the environment it hands ninja. |
 
 Also checked and found clean: none of the 69 `KATI_obsolete_var` names are used
 anywhere in the device tree, and the dynamic-partition group naming matches what

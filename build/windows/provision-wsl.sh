@@ -81,7 +81,9 @@ stage_deps() {
     # AOSP's git operations are large; the default 1MB post buffer causes
     # "RPC failed" on slow links.
     git config --global http.postBuffer 524288000
-    ccache -M 50G >/dev/null 2>&1 || true
+    # ccache's size is set by build.sh, not here: the cache lives in the tree's
+    # out/ (the only directory Android 14's build sandbox leaves writable) and
+    # the tree does not exist yet at this stage.
     log "dependencies installed"
 }
 
@@ -749,7 +751,11 @@ stage_report() {
         && echo 'tree prebuilt (the one the build uses)' || echo 'tree prebuilt MISSING')"
     echo "git-lfs:    $(git lfs version 2>&1 | head -1)"
     echo "repo ver:   $(repo --version 2>&1 | head -2 | tr '\n' ' ')"
-    echo "ccache:     $(ccache -s 2>/dev/null | head -4 | tr '\n' ' ')"
+    # Read the cache build.sh actually uses ($TREE/out/ccache), not ccache's
+    # default $HOME/.cache/ccache - which is empty, and unwritable under the
+    # build sandbox.
+    echo "ccache dir: $TREE/out/ccache $([[ -d $TREE/out/ccache ]] && echo present || echo '(not created yet)')"
+    echo "ccache:     $(CCACHE_DIR="$TREE/out/ccache" ccache -s 2>/dev/null | head -4 | tr '\n' ' ')"
     echo
     echo "--- tree ---"
     echo "manifest:   $MANIFEST $([[ -d $MANIFEST/.git ]] && git -C "$MANIFEST" log --oneline -1 2>&1 || echo MISSING)"

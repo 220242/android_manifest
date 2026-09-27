@@ -90,7 +90,7 @@ else
 fi
 
 if command -v ccache >/dev/null 2>&1; then
-    pass "tool:ccache" "$(command -v ccache) (set USE_CCACHE=1 CCACHE_EXEC=\$(which ccache))"
+    pass "tool:ccache" "$(command -v ccache) (build.sh sets USE_CCACHE, CCACHE_EXEC and CCACHE_DIR=\$TREE/out/ccache)"
 else
     warn "tool:ccache" "not found; rebuilds will be much slower"
 fi
