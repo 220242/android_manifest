@@ -14,7 +14,7 @@
 # scripts/gcc-wrapper.py (which failed the build on any compiler warning), a
 # -fcommon workaround for scripts/dtc, a probed list of -Wno- flags for
 # 2019-vintage code, and Rockchip's resource.img container. 6.12 compiles clean
-# with a current toolchain and Android reads the dtb from vendor_boot.
+# with a current toolchain and Android packs the dtb into boot.img.
 set -euo pipefail
 
 readonly TREE="${1:-$HOME/aosp-14-edge1}"
@@ -131,9 +131,10 @@ fi
 echo "==> building Image and $DTB.dtb ($JOBS jobs)"
 make "${MAKE_ARGS[@]}" -j"$JOBS" Image "rockchip/${DTB}.dtb"
 
-# One dtb, staged alone. Android puts it in vendor_boot (boot header v4 has no dtb
-# field of its own), via BOARD_INCLUDE_DTB_IN_BOOTIMG and
-# BOARD_PREBUILT_DTBIMAGE_DIR - see BoardConfig.mk.
+# One dtb, staged alone. Android concatenates every *.dtb in this directory into
+# dtb.img and packs it into boot.img, via BOARD_INCLUDE_DTB_IN_BOOTIMG and
+# BOARD_PREBUILT_DTBIMAGE_DIR - see BoardConfig.mk, which explains why this board
+# uses boot header v2 and no vendor_boot.
 echo "==> staging the dtb for dtb.img"
 rm -rf "$DTB_STAGE"
 mkdir -p "$DTB_STAGE"
@@ -144,5 +145,5 @@ echo "Image:  $KERNEL/out/arch/arm64/boot/Image  ($(du -h out/arch/arm64/boot/Im
 echo "dtb:    $DTB_STAGE/${DTB}.dtb  ($(du -h "$DTB_STAGE/${DTB}.dtb" | cut -f1))"
 echo
 echo "The platform build copies the Image to \$(PRODUCT_OUT)/kernel and packs the"
-echo "dtb into vendor_boot. Both are read at Kati parse time, so the kernel has to"
+echo "dtb into boot.img. Both are read at Kati parse time, so the kernel has to"
 echo "be built before m - which is the order the pipeline runs them in."

@@ -79,6 +79,58 @@ for d in sepolicy/vendor vintf; do
 done
 echo
 
+# --- 3b. flash layout vs the partition sizes the build enforces ----------------
+# Two numbers describe each partition and nothing makes them agree:
+# BOARD_*_PARTITION_SIZE, which the build checks the image against, and the size
+# column in flash/partitions.tsv, which is what the GPT actually gets. If the tsv
+# is smaller, an image the build accepted does not fit the partition it is written
+# to - and that is discovered by a board that does not boot, with no log.
+#
+# The other half is images that no longer exist. When BoardConfig.mk moved from
+# boot header v4 to v2 the build stopped producing vendor_boot.img, and a
+# vendor_boot row in the tsv would have had flash-emmc.sh write a partition from a
+# file that was never built.
+echo "[3b] flash layout vs BOARD_*_PARTITION_SIZE"
+readonly TSV="$DEV/flash/partitions.tsv"
+if [[ -f "$TSV" ]]; then
+    bc_get() { sed 's/#.*//' "$DEV/BoardConfig.mk" | grep -oE "^[[:space:]]*$1[[:space:]]*:?=[[:space:]]*[0-9]+" \
+               | grep -oE '[0-9]+$' | tail -1; }
+    layout_bad=0
+    while IFS=$'\t' read -r name mib img; do
+        [[ -n "$name" && "$name" != \#* ]] || continue
+        case "$name" in
+            boot)        var=BOARD_BOOTIMAGE_PARTITION_SIZE ;;
+            recovery)    var=BOARD_RECOVERYIMAGE_PARTITION_SIZE ;;
+            vendor_boot) var=BOARD_VENDOR_BOOTIMAGE_PARTITION_SIZE ;;
+            init_boot)   var=BOARD_INIT_BOOT_IMAGE_PARTITION_SIZE ;;
+            dtbo)        var=BOARD_DTBOIMG_PARTITION_SIZE ;;
+            *)           var= ;;
+        esac
+        [[ -n "$var" ]] || continue
+        board=$(bc_get "$var")
+        if [[ -z "$board" ]]; then
+            if [[ "$img" != "-" ]]; then
+                err "$name is in partitions.tsv with an image ($img) but BoardConfig.mk sets no"
+                err "  $var, so the build produces no such image"
+                layout_bad=$((layout_bad+1))
+            fi
+            continue
+        fi
+        tsv=$(( mib * 1024 * 1024 ))
+        if (( tsv < board )); then
+            err "$name: partitions.tsv gives ${mib}MiB but $var is $board bytes"
+            err "  ($(( board / 1024 / 1024 ))MiB); an image the build accepts would not fit the partition"
+            layout_bad=$((layout_bad+1))
+        else
+            ok "$name ${mib}MiB >= $var ($(( board / 1024 / 1024 ))MiB)"
+        fi
+    done < "$TSV"
+    (( layout_bad )) || ok "every sized partition matches the size the build enforces"
+else
+    err "missing $TSV"
+fi
+echo
+
 # --- 4. VINTF: fragments must NOT duplicate the device manifest ----------------
 #
 # This check used to assert the opposite - that every HAL in a fragment also

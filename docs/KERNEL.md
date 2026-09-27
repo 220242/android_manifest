@@ -112,7 +112,7 @@ before `m`:
   AOSP 14 has no `TARGET_PREBUILT_KERNEL`: the string `PREBUILT_KERNEL` appears
   nowhere in `build/make`. `core/Makefile:1018` defines `INSTALLED_KERNEL_TARGET`
   as that path and leaves producing it to the device.
-- the board dtb → `dtb.img` inside `vendor_boot`, via
+- the board dtb → `dtb.img` inside `boot.img` (header v2), via
   `BOARD_INCLUDE_DTB_IN_BOOTIMG` and `BOARD_PREBUILT_DTBIMAGE_DIR`. That variable
   is globbed for `*.dtb` and everything found is concatenated, so it points at a
   directory `build-kernel.sh` stages with exactly one dtb - not at the kernel's

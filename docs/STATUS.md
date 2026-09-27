@@ -510,6 +510,51 @@ declares this, and the build tells you one per run:
 | `file_contexts` spec declared twice | ~9 min | `checkfc` |
 | property `main.mk` already derives | ~9 min | `post_process_props.py` |
 
+## The vendor_boot that had nothing to carry
+
+`recovery.img` built, `system.img` started, and then:
+
+```
+panic: lstat out/target/product/edge/vendor_ramdisk: no such file or directory
+    build/soong/cmd/fileslist/fileslist.go:130
+```
+
+`INTERNAL_VENDOR_RAMDISK_FILES` is whatever is installed under
+`$(TARGET_VENDOR_RAMDISK_OUT)` (`core/Makefile:1559`). Nothing was, so the
+directory was never created, and the rule that lists it walks it anyway
+(`core/Makefile:3000` creates `$(TARGET_VENDOR_DEBUG_RAMDISK_OUT)` but not the
+plain one). `mkbootfs` would have been the next failure for the same reason.
+
+The fix was not to fill the directory. The board had `BOARD_BOOT_HEADER_VERSION :=
+4`, chosen because v4 plus a separate `vendor_boot` is what Android 13+ expects -
+true of devices that ship a GKI kernel and load vendor modules from the vendor
+ramdisk. This board is not one of those: the kernel is built from source with every
+driver compiled in, `BOARD_USES_GENERIC_KERNEL_IMAGE` is unset, and there is no
+`vendor_dlkm`. The vendor ramdisk genuinely had nothing to hold.
+
+What `vendor_boot` costs is not an empty directory. With `BUILDING_VENDOR_BOOT_IMAGE`
+the kernel command line moves out of `boot.img` into `vendor_boot`'s
+`vendor_cmdline` (`core/Makefile:1614`) and the dtb moves with it
+(`core/Makefile:1600-1606`); without it, both go into `boot.img`
+(`core/Makefile:1303-1311`). This board is booted by mainline U-Boot, not by a
+vendor bootloader written against `vendor_boot`, so `console=ttyS2,1500000n8` and
+`androidboot.hardware=edge1` were sitting in a field a bootloader that reads only
+`boot.img` never looks at. A board that boots to nothing, with no console, is the
+hardest failure to diagnose on a board whose only output is that console.
+
+So: header v2, one `boot.img` with kernel + ramdisk + dtb, no `vendor_boot`
+partition. v0/v1/v2 share the classic `andr_img_hdr` in U-Boot, which is its
+best-tested path. If the board ever gets a GKI kernel and loadable modules, v4 is
+the right answer again.
+
+Two more numbers changed with it. `boot` and `recovery` went from 64MiB to 96MiB:
+the kernel `Image` is 50MB on its own, uncompressed with everything built in, and
+`boot.img` now carries the dtb as well. And `flash/partitions.tsv` lost its
+`vendor_boot` row - it would have had the generated flash script write a partition
+from a file the build no longer produces. `verify-tree.sh` check 3b now cross-checks
+that file against `BOARD_*_PARTITION_SIZE` in both directions, because nothing else
+makes the two agree and the failure mode is a board that does not boot.
+
 The same run turned up a booby trap in the kernel fragment. `merge_config.sh`
 picks the symbols to merge with two `sed` patterns and then reads each value back
 with `grep -w $CFG`, so a comment that mentions a symbol the fragment also sets

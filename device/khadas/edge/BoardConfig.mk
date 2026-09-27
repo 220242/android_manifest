@@ -87,16 +87,20 @@ TARGET_KERNEL_ARCH := arm64
 # $(PRODUCT_OUT)/kernel and leaves producing it to the device, so device.mk copies
 # the Image there.
 #
-# The device tree blob goes into vendor_boot, which is where boot header v4 keeps
-# it. BOARD_PREBUILT_DTBIMAGE_DIR is globbed for *.dtb at Kati parse time and
+# The device tree blob goes into boot.img. core/Makefile:1303-1311 adds
+# "--dtb $(INSTALLED_DTBIMAGE_TARGET)" to the boot image only when
+# BUILDING_VENDOR_BOOT_IMAGE is unset; when a vendor_boot is built the dtb goes
+# there instead (core/Makefile:1600-1606). With header v2 there is no vendor_boot,
+# so the dtb, the kernel and the ramdisk are all in one image.
+#
+# BOARD_PREBUILT_DTBIMAGE_DIR is globbed for *.dtb at Kati parse time and
 # everything found is concatenated into dtb.img - so it points at a directory
 # build-kernel.sh stages with exactly one dtb, not at the kernel's dts output,
 # which holds about ninety.
 #
 # BOARD_PREBUILT_DTBOIMAGE is gone with the BSP: it pointed at Rockchip's
 # resource.img, an RSCE container holding the dtb and the boot logos that only
-# Rockchip's own bootloader reads. Mainline U-Boot takes the dtb from
-# vendor_boot like any other Android device.
+# Rockchip's own bootloader reads.
 BOARD_INCLUDE_DTB_IN_BOOTIMG := true
 BOARD_PREBUILT_DTBIMAGE_DIR := kernel/mainline/out/android-dtb
 
@@ -123,10 +127,32 @@ endif
 BOARD_KERNEL_BASE := 0x00200000
 BOARD_KERNEL_PAGESIZE := 2048
 
-# Boot image header v4 + a separate vendor_boot, which is what Android 13+
-# expects. The vendor ramdisk carries the board's init stages; with a mainline
-# kernel there are no vendor modules to load from it.
-BOARD_BOOT_HEADER_VERSION := 4
+# Boot image header v2: one boot.img with the kernel, the ramdisk and the dtb, and
+# no vendor_boot.
+#
+# This was 4, on the reasoning that v4 plus a separate vendor_boot is what Android
+# 13+ expects. That is true of devices that ship a GKI kernel and load vendor
+# modules from the vendor ramdisk. This board is not one: the kernel is built from
+# source with every driver it needs compiled in, BOARD_USES_GENERIC_KERNEL_IMAGE is
+# not set, and there is no vendor_dlkm. So the vendor ramdisk had nothing to hold,
+# and the build said so - core/Makefile never creates the directory when no module
+# installs into it, and fileslist walked it anyway:
+#
+#   panic: lstat out/target/product/edge/vendor_ramdisk: no such file or directory
+#
+# Filling it to satisfy the walk would have been the wrong repair, because what
+# vendor_boot costs is not an empty directory. With BUILDING_VENDOR_BOOT_IMAGE the
+# kernel command line moves out of boot.img into vendor_boot's vendor_cmdline
+# (core/Makefile:1614), and the dtb moves with it. Both are then invisible to a
+# bootloader that reads only boot.img - and this board is booted by mainline
+# U-Boot, not by a vendor bootloader written against vendor_boot. A silent boot
+# with no console and no ro.boot.hardware is the hardest failure to diagnose on a
+# board whose only output is that console.
+#
+# Header v2 is also the best-tested path in U-Boot: v0/v1/v2 share the classic
+# andr_img_hdr, and "abootimg get dtb" reads the v2 dtb field directly. If the
+# board ever gets a GKI kernel and loadable modules, v4 is the right answer again.
+BOARD_BOOT_HEADER_VERSION := 2
 BOARD_MKBOOTIMG_ARGS := --header_version $(BOARD_BOOT_HEADER_VERSION)
 
 # BOARD_INCLUDE_RECOVERY_DTBO used to be set here, carried over from the Android
@@ -211,11 +237,17 @@ TARGET_COPY_OUT_PRODUCT := product
 TARGET_COPY_OUT_SYSTEM_EXT := system_ext
 TARGET_COPY_OUT_ODM := odm
 
-BOARD_BOOTIMAGE_PARTITION_SIZE := 67108864
-BOARD_VENDOR_BOOTIMAGE_PARTITION_SIZE := 67108864
-BOARD_RECOVERYIMAGE_PARTITION_SIZE := 67108864
+# 96MiB each, not 64. The kernel Image is 50MB on its own - uncompressed, with
+# every driver built in - and boot.img now carries the ramdisk and the dtb beside
+# it, where the dtb used to be in vendor_boot. recovery.img carries the same kernel
+# plus the recovery ramdisk, which is the larger of the two. 64MiB left single-digit
+# megabytes of headroom on both, and exceeding the partition size is a build error
+# at the very end of a run.
+BOARD_BOOTIMAGE_PARTITION_SIZE := 100663296
+BOARD_RECOVERYIMAGE_PARTITION_SIZE := 100663296
+# No BOARD_VENDOR_BOOTIMAGE_PARTITION_SIZE: header v2 builds no vendor_boot.
 # No BOARD_DTBOIMG_PARTITION_SIZE and no dtbo partition: the dtb travels inside
-# vendor_boot on this path, so there is no dtbo.img to give a partition to.
+# boot.img, so there is no dtbo.img to give a partition to.
 BOARD_FLASH_BLOCK_SIZE := 131072
 
 BOARD_SYSTEMIMAGE_FILE_SYSTEM_TYPE := ext4

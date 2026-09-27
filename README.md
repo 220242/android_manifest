@@ -57,8 +57,11 @@ not 34: declaring 34 would assert launch-device status and demand a 5.15 kernel
 and 64-bit-only userspace. [`docs/KERNEL.md`](docs/KERNEL.md).
 
 **Partitions.** Fixed Android 10 partitions become a 4608MiB `super` holding
-system/system_ext/product/vendor/odm as logical partitions, plus `metadata` and
-`vendor_boot`. Non-A/B, matching the Rockchip `update.img` flow.
+system/system_ext/product/vendor/odm as logical partitions, plus `metadata`,
+`misc`, `vbmeta` and one 96MiB `boot` that carries the kernel, the ramdisk and the
+dtb together - boot image header v2, no `vendor_boot`. Non-A/B, written as an
+ordinary GPT by the generated `flash-emmc.sh`, not as a Rockchip `update.img`. The
+layout is `device/khadas/edge/flash/partitions.tsv`.
 
 ## Known limitations
 

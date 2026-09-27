@@ -22,10 +22,15 @@
 # super        system, system_ext, product, vendor and odm as logical partitions.
 #              Never flash those images individually - that bypasses the
 #              dynamic-partition metadata and the device does not boot.
+# vendor_boot is not here any more. BoardConfig.mk moved to boot image header v2,
+# which puts the kernel, the ramdisk and the dtb in one boot.img - see the note
+# there for why. boot and recovery are 96MiB to match
+# BOARD_BOOTIMAGE_PARTITION_SIZE and BOARD_RECOVERYIMAGE_PARTITION_SIZE; the sizes
+# here and there have to agree, or an image that the build accepted will not fit
+# the partition it is written to.
 misc	4	-
-boot	64	boot.img
-recovery	64	recovery.img
-vendor_boot	64	vendor_boot.img
+boot	96	boot.img
+recovery	96	recovery.img
 vbmeta	1	vbmeta.img
 metadata	16	-
 super	4608	super.img
