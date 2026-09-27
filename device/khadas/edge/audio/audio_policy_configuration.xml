@@ -104,11 +104,15 @@
             </routes>
         </module>
 
-        <!-- Remote submix (Cast), USB audio and Bluetooth A2DP come from the
-             AOSP module configs pulled in by device.mk. -->
+        <!-- Remote submix (Cast) and USB audio come from AOSP's own module configs,
+             installed by device.mk as r_submix_audio_policy_configuration and
+             usb_audio_policy_configuration.
+
+             Bluetooth A2DP was included here as well. It is out until Bluetooth
+             itself comes up on this board: an xi:include that does not resolve on
+             the device fails the whole policy parse, not just its own section. -->
         <xi:include href="r_submix_audio_policy_configuration.xml"/>
         <xi:include href="usb_audio_policy_configuration.xml"/>
-        <xi:include href="bluetooth_audio_policy_configuration.xml"/>
     </modules>
 
     <xi:include href="audio_policy_volumes.xml"/>

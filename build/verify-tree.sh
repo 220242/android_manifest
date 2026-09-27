@@ -293,6 +293,49 @@ done
 (( dangling )) || ok "no list continues into a comment or a blank line"
 echo
 
+# --- 9c. audio policy includes ------------------------------------------------
+# Every xi:include in the audio policy has to resolve on the device, or the parse
+# fails and takes the whole policy with it - not just the section that could not be
+# found. So each href must be either a file this tree installs or one of the AOSP
+# modules device.mk asks for, under the name that module installs.
+#
+# This is not hypothetical: bluetooth_audio_policy_configuration.xml was included
+# under that name while AOSP's file is bluetooth_audio_policy_configuration_7_0.xml,
+# and it only resolved because a PRODUCT_COPY_FILES line renamed it on the way in.
+# Installing the module instead would have kept the suffix and broken the include.
+echo "[9c] audio policy xi:include targets"
+readonly APC="$DEV/audio/audio_policy_configuration.xml"
+if [[ -f "$APC" ]]; then
+    # Names AOSP modules install, as filenames. Extend this when adding a module.
+    aosp_installed="r_submix_audio_policy_configuration.xml
+usb_audio_policy_configuration.xml
+default_volume_tables.xml
+audio_policy_engine_configuration.xml"
+    bad_inc=0
+    while read -r href; do
+        [[ -n "$href" ]] || continue
+        if [[ -f "$DEV/audio/$href" ]]; then
+            ok "$href (ours)"
+        elif grep -qxF "$href" <<< "$aosp_installed"; then
+            # And the module that provides it must actually be requested.
+            mod="${href%.xml}"
+            # Backslashes stripped first: these are continuation lines in a
+            # PRODUCT_PACKAGES list, so the module name is followed by " \\" and a
+            # pattern anchored at end-of-line never matches it.
+            if tr -d '\\' < "$DEV/device.mk" | grep -qxE "[[:space:]]*$mod[[:space:]]*"; then
+                ok "$href (AOSP module $mod, installed)"
+            else
+                err "$href is an AOSP config but device.mk does not install $mod"
+                bad_inc=$((bad_inc+1))
+            fi
+        else
+            err "$href resolves to nothing this tree installs; the policy parse will fail"
+            bad_inc=$((bad_inc+1))
+        fi
+    done < <(grep -oE 'xi:include href="[^"]+"' "$APC" | sed -E 's/.*href="([^"]+)"/\1/')
+fi
+echo
+
 # --- 10. variable ownership --------------------------------------------------
 # Product config runs before BoardConfig.mk and freezes the product variables, so
 # a PRODUCT_* assignment in BoardConfig.mk is fatal:

@@ -240,12 +240,36 @@ PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/audio/mixer_paths.xml:$(TARGET_COPY_OUT_VENDOR)/etc/mixer_paths.xml \
     $(LOCAL_PATH)/audio/audio_effects.xml:$(TARGET_COPY_OUT_VENDOR)/etc/audio_effects.xml
 
-PRODUCT_COPY_FILES += \
-    frameworks/av/services/audiopolicy/config/r_submix_audio_policy_configuration.xml:$(TARGET_COPY_OUT_VENDOR)/etc/r_submix_audio_policy_configuration.xml \
-    frameworks/av/services/audiopolicy/config/usb_audio_policy_configuration.xml:$(TARGET_COPY_OUT_VENDOR)/etc/usb_audio_policy_configuration.xml \
-    frameworks/av/services/audiopolicy/config/default_volume_tables.xml:$(TARGET_COPY_OUT_VENDOR)/etc/default_volume_tables.xml \
-    frameworks/av/services/audiopolicy/config/audio_policy_engine_configuration.xml:$(TARGET_COPY_OUT_VENDOR)/etc/audio_policy_engine_configuration.xml \
-    frameworks/av/services/audiopolicy/config/bluetooth_audio_policy_configuration_7_0.xml:$(TARGET_COPY_OUT_VENDOR)/etc/bluetooth_audio_policy_configuration.xml
+# The shared parts of the audio policy: installed as modules, not copied from
+# AOSP source paths.
+#
+# They were copied by path, and ninja stopped on one of them:
+#
+#   'frameworks/av/services/audiopolicy/config/audio_policy_engine_configuration.xml',
+#   needed by '.../vendor/etc/audio_policy_engine_configuration.xml', missing and no
+#   known rule to make it
+#
+# The file moved; the module did not. Every one of these exists as a module in the
+# tree - checked, not assumed - and a module carries its own source path and install
+# location, so this cannot rot the same way again.
+#
+# Why it matters more than a normal missing file: our audio_policy_configuration.xml
+# pulls these in with xi:include, and an include that does not resolve on the device
+# fails the whole policy parse rather than that one section.
+PRODUCT_PACKAGES += \
+    r_submix_audio_policy_configuration \
+    usb_audio_policy_configuration \
+    default_volume_tables \
+    audio_policy_engine_configuration
+
+# bluetooth_audio_policy_configuration was copied here too, renamed on the way in -
+# the AOSP file is bluetooth_audio_policy_configuration_7_0.xml and the copy landed
+# it without the suffix, which is what our xi:include named. Installing the module
+# instead would keep the _7_0 in the filename and the include would not resolve.
+#
+# It is dropped rather than renamed: Bluetooth does not come up on this board yet
+# (see init.edge1.rc), so there is nothing for a Bluetooth audio policy to describe,
+# and the include is gone from audio_policy_configuration.xml with it.
 
 PRODUCT_PROPERTY_OVERRIDES += \
     persist.sys.media.avsync=true \
