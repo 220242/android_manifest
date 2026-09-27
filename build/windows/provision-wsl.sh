@@ -197,7 +197,7 @@ stage_probe() {
     # Cleared first: if the diagnostic block below dies early, a stale count from
     # the last run would gate this one - in whichever direction is wrong.
     rm -f "$WORK/.probe-miss-hard" "$WORK/.probe-sepol-dupes" \
-          "$WORK/.probe-prop-dupes" "$WORK/.probe-ctx-dupes"
+          "$WORK/.probe-prop-dupes" "$WORK/.probe-ctx-dupes" "$WORK/.probe-fcm-bad"
 
     [[ -d "$TREE/hardware/interfaces" ]] || {
         echo "tree not synced at $TREE" >&2; return 1; }
@@ -644,6 +644,80 @@ PY_KERNEL
             echo "  --- our device manifest declares ---"
             grep -E '<name>|target-level' \
                  "$MANIFEST/device/khadas/edge/vintf/manifest.xml" | sed 's/^/    /' || true
+
+            # The gate. check_vintf runs 15 minutes into a build and reports this:
+            #
+            #   The following instances are in the device manifest but not
+            #   specified in framework compatibility matrix:
+            #       android.hardware.cas@1.2::IMediaCasService/default
+            #       android.hardware.graphics.composer@2.4::IComposer/default
+            #
+            # Every input it needs is already read above: our manifest's
+            # target-level and declared HALs, and the matrix at that level. So the
+            # same question gets answered here in a second.
+            #
+            # Only the device manifest's own entries are checked. The instances that
+            # come from an installed service's VINTF fragment - the HIDL cas one
+            # above arrives with an AOSP apex - are not visible without a built
+            # image, so this narrows the answer rather than replacing check_vintf.
+            echo "  --- our declared HALs against the matrix at our target-level ---"
+            EDGE1_WORK="$WORK" python3 - "$cm" \
+                "$MANIFEST/device/khadas/edge/vintf/manifest.xml" <<'PY_FCM'
+import os, re, sys, xml.etree.ElementTree as ET
+cm, mf = sys.argv[1], sys.argv[2]
+root = ET.parse(mf).getroot()
+level = root.get('target-level')
+print('    target-level: %s' % level)
+path = os.path.join(cm, 'compatibility_matrix.%s.xml' % level)
+if not os.path.exists(path):
+    print('    !! no compatibility_matrix.%s.xml in the tree; check_vintf has no' % level)
+    print('       matrix to check against at this level.')
+    open(os.path.join(os.environ.get('EDGE1_WORK', '/tmp'), '.probe-fcm-bad'), 'w').write('1\n')
+    raise SystemExit(0)
+# What the matrix at this level accepts: name -> set of versions, per format.
+accept = {}
+for hal in ET.parse(path).getroot().findall('hal'):
+    name = hal.findtext('name')
+    fmt = hal.get('format', 'hidl')
+    vers = [v.text for v in hal.findall('version')]
+    vers += [(f.text or '').lstrip('@').split('::')[0] for f in hal.findall('fqname')]
+    accept.setdefault((name, fmt), []).extend(v for v in vers if v)
+def covered(want, ranges):
+    # Matrix versions are "major.minor" or "major.minorLow-minorHigh"; AIDL uses a
+    # bare integer or "low-high".
+    for r in ranges:
+        if r == want:
+            return True
+        m = re.match(r'^(\d+)\.(\d+)-(\d+)$', r)
+        if m and re.match(r'^%s\.(\d+)$' % m.group(1), want):
+            lo, hi = int(m.group(2)), int(m.group(3))
+            if lo <= int(want.split('.')[1]) <= hi:
+                return True
+        m = re.match(r'^(\d+)-(\d+)$', r)
+        if m and want.isdigit() and int(m.group(1)) <= int(want) <= int(m.group(2)):
+            return True
+    return False
+bad = 0
+for hal in root.findall('hal'):
+    name = hal.findtext('name')
+    fmt = hal.get('format', 'hidl')
+    want = hal.findtext('version') or (hal.findtext('fqname') or '').lstrip('@')
+    ranges = accept.get((name, fmt), [])
+    if not ranges:
+        print('    %-44s %-5s %-6s NOT IN THE MATRIX AT ALL' % (name, fmt, want))
+        bad += 1
+    elif not covered(want, ranges):
+        print('    %-44s %-5s %-6s matrix has %s' % (name, fmt, want, ','.join(ranges)))
+        bad += 1
+    else:
+        print('    %-44s %-5s %-6s ok (matrix: %s)' % (name, fmt, want, ','.join(ranges)))
+if bad:
+    print('    !! %d declared HAL(s) the level %s matrix does not accept.' % (bad, level))
+    print('       check_vintf will call the device INCOMPATIBLE. Either lower')
+    print('       target-level to one that lists them, or provide the version the')
+    print('       matrix names.')
+open(os.path.join(os.environ.get('EDGE1_WORK', '/tmp'), '.probe-fcm-bad'), 'w').write('%d\n' % bad)
+PY_FCM
         else
             echo "  ABSENT at $cm"
         fi
@@ -906,6 +980,20 @@ PY_SEPOL
         echo "$ctx_dupes context specification(s) are declared both here and by system/sepolicy." >&2
         echo "checkfc refuses to load the concatenated context file." >&2
         sed -n '/DUPLICATE spec/,+2p' "$out" >&2
+        echo "Full probe: $out" >&2
+        rc=1
+    fi
+
+    # A HAL declared in the device manifest that the framework matrix at our
+    # target-level does not list. check_vintf calls that INCOMPATIBLE, 15 minutes
+    # into a build, and names the instances rather than the reason.
+    local fcm_bad=0
+    [[ -f "$WORK/.probe-fcm-bad" ]] && fcm_bad=$(cat "$WORK/.probe-fcm-bad")
+    if (( fcm_bad > 0 )); then
+        echo >&2
+        echo "$fcm_bad HAL(s) in vintf/manifest.xml are not accepted by the framework" >&2
+        echo "compatibility matrix at this manifest's target-level." >&2
+        sed -n '/declared HAL(s) the level/,+3p' "$out" >&2
         echo "Full probe: $out" >&2
         rc=1
     fi

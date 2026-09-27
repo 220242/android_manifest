@@ -20,8 +20,8 @@ written to the board yet**, so nothing here is claimed to boot.
 | VINTF: `vendor_manifest.xml` | assembles |
 | `vendor/build.prop`, `system/build.prop` | generated |
 | `recovery.img` | builds |
+| `check_vintf_all` | passes with `target-level="7"`; rejected `"8"` |
 | `system.img`, `super.img`, `boot.img`, `vbmeta.img` | in progress |
-| `check_vintf_all` | not reached |
 | Flash pack (`edge1-flash/` + generated `flash-emmc.sh`) | written, never run |
 
 ## The approach
@@ -78,10 +78,9 @@ Rockchip's own gralloc did.
    from userspace with a vendor tool this tree no longer carries. The kernel
    transport is left out of the config so `/dev/ttyS0` stays free until that is
    decided. See `KERNEL.md`.
-4. **`check_vintf_all` has not run.** `PRODUCT_ENFORCE_VINTF_MANIFEST` is true in
-   this build, so it will run, and `target-level="8"` with a HIDL `composer@2.4` is
-   the entry most likely to be argued with. Lowering `target-level` is defensible
-   for an upgrade device at shipping API 29.
+4. **The device targets FCM level 7, not 8.** That was forced rather than chosen —
+   see below — and it is worth knowing when reading anything that says this is an
+   Android 14 device: the vendor image's HAL surface is Android-13-era.
 5. **Codec performance numbers are placeholders.** `media/media_codecs_performance.xml`
    holds datasheet ceilings, not measurements from this board.
 6. **`kmsro` in `BOARD_GPU_DRIVERS` is confirmed valid but unproven useful.** It is
@@ -126,11 +125,11 @@ Also checked and found clean: none of the 69 `KATI_obsolete_var` names are used
 anywhere in the device tree, and the dynamic-partition group naming matches what
 `core/config.mk` derives.
 
-## One failure shape, five times
+## One failure shape, six times
 
-Five consecutive build failures were the same mistake in five different files: the
-platform already declares this, and the tool that objects reports one per run. Each
-now has a gate in the module probe (`build/windows/provision-wsl.sh`, `stage_probe`),
+Six build failures were variations of one mistake: the tree claims something the
+platform does not agree with, and the tool that objects reports one instance per run.
+Each now has a gate in the module probe (`build/windows/provision-wsl.sh`, `stage_probe`),
 which runs before the build and takes about a minute.
 
 | What | The build says | When |
@@ -140,6 +139,7 @@ which runs before the build and takes about a minute.
 | `file_contexts` specification declared twice | `checkfc`: `Multiple same specifications for ...` | ~9 min |
 | Property the build derives from a variable | `post_process_props.py`: `found duplicate sysprop assignments` | ~9 min |
 | Property `exact` match labelled twice | `host_init_verifier`: `Duplicate exact match detected` | ~20 min |
+| HAL declared at an FCM level that does not list it | `check_vintf`: `INCOMPATIBLE` | ~15 min |
 
 Two of those are worth spelling out because the rule is not the obvious one:
 
@@ -158,6 +158,47 @@ Two of those are worth spelling out because the rule is not the obvious one:
 `verify-tree.sh` covers the offline half of each of these with a hand-kept list of
 what the platform declares. The probe resolves the same questions against the
 synced tree, which is the authoritative answer, and gates on it.
+
+## FCM level 7, because the composer is HIDL
+
+`check_vintf_all` runs when `PRODUCT_ENFORCE_VINTF_MANIFEST` is true, which it is in
+this build, and it called the device INCOMPATIBLE:
+
+```
+The following instances are in the device manifest but not specified in
+framework compatibility matrix:
+    android.hardware.cas@1.2::IMediaCasService/default
+    android.hardware.graphics.composer@2.4::IComposer/default
+```
+
+Both HALs are real and both are provided. What changed at level 8 is that the
+framework stopped listing their HIDL versions — read out of the matrices in the
+synced tree:
+
+| | level 7 | level 8 |
+|---|---|---|
+| `android.hardware.cas` | hidl 1.1-2 | aidl only |
+| `android.hardware.graphics.composer` | hidl 2.1-4 | — |
+| `android.hardware.graphics.composer3` | aidl 1 | aidl 2 |
+
+Neither instance is something to remove. The composer is HIDL because AOSP 14's
+drm_hwcomposer snapshot is HWC2 only, and the HIDL cas service is installed by AOSP
+itself: `base_vendor.mk:90` puts `android.hardware.cas@1.2-service` in
+`PRODUCT_PACKAGES_SHIPPING_API_LEVEL_33`, and this device ships at API 29. AOSP's own
+configuration assumes a device like this one sits below level 8.
+
+So `target-level` is 7. That is permitted because this is an upgrade device rather
+than a launch device — an upgrade device keeps the FCM level it launched with and may
+raise it, and API 29 is level 4, so 7 is already a raise. The floor in practice is 5,
+the oldest matrix AOSP 14 still installs. The honest reading is that the vendor image
+is Android-13-era in its HAL surface, and level 7 says so.
+
+The probe now answers this before the build: it reads `target-level` and each
+declared HAL out of `vintf/manifest.xml`, checks them against the matrix at that
+level, and fails the run naming the ones that are not accepted. It covers the device
+manifest's own entries only — instances that arrive with an installed service's VINTF
+fragment, like the cas one, are not visible without a built image — so it narrows
+`check_vintf` rather than replacing it.
 
 ## The vendor_boot that had nothing to carry
 

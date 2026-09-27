@@ -8,10 +8,10 @@ would have failed the build separately.
 
 ## The result in one line
 
-Of the 24 HIDL interfaces the Android 10 tree declared, **23 need no vendor code**:
-7 are deleted outright, and 16 are satisfied by an AOSP implementation talking to a
-mainline driver. The one that is board-specific is the codec2 service, and it is not
-wired up yet.
+Of the 27 HIDL interfaces the Android 10 tree declared, **26 need no vendor code**:
+7 are deleted outright (absent hardware, no TEE, or removed from the platform) and 19
+are satisfied by an AOSP implementation talking to a mainline driver. The one that is
+board-specific is the codec2 service, and it is not wired up yet.
 
 That ratio is what makes the port tractable, and it is a consequence of the move to
 a mainline kernel rather than of anything clever here. On the 4.19 BSP the same table
@@ -25,7 +25,7 @@ the userspace that spoke to them.
 | `graphics.allocator@2.0` | `graphics.allocator-V2` (AIDL) | `android.hardware.graphics.allocator-service.minigbm` | AOSP |
 | `graphics.mapper@{2,3}.0` | IMapper 5 (stable-c) | `mapper.minigbm` | AOSP |
 | — | gralloc0 backend | `gralloc.minigbm` | AOSP |
-| `graphics.composer@2.{1,2,3}` | `graphics.composer@2.4` (HIDL) | `android.hardware.graphics.composer@2.4-service` loading `hwcomposer.drm_minigbm` | AOSP, see below |
+| `graphics.composer@2.{1,2,3}` | `graphics.composer@2.4` (HIDL) | `android.hardware.graphics.composer@2.4-service` loading `hwcomposer.drm_minigbm` | AOSP, sets FCM level 7 |
 | `audio@5.0` | `audio.core-V2` (AIDL) | AOSP AIDL audio HAL, ALSA backend | AOSP, needs config |
 | `audio.effect@5.0` | `audio.effect-V2` (AIDL) | `audio.effect.service-aidl.example` | AOSP |
 | `tv.input@1.0` | `tv.input-V1` (AIDL) | AOSP example — no tuner inputs on this board | AOSP |
@@ -48,6 +48,13 @@ the userspace that spoke to them.
 | `sensors@1.0` | — | dropped: no sensors on the TV SKU | removed |
 | `gnss@1.1`, `nfc@1.2`, `vibrator@1.0` | — | dropped: absent hardware | removed |
 | `atrace@1.0` | — | removed from the platform | removed |
+
+One HAL not in the table above also ends up in the image and matters for
+compatibility: `android.hardware.cas@1.2-service`, the HIDL conditional access
+service. Nothing here asks for it — `base_vendor.mk:90` puts it in
+`PRODUCT_PACKAGES_SHIPPING_API_LEVEL_33`, and this device ships at API 29. It arrives
+with its own VINTF fragment, and together with the HIDL composer it is why the device
+manifest targets FCM level 7.
 
 Only two HALs are declared in `vintf/manifest.xml` directly — in fact only one now.
 Every AIDL service above installs its own VINTF fragment next to its binary, and
@@ -72,10 +79,14 @@ The composer is HIDL `@2.4`, not AIDL composer3, and that was verified rather th
 assumed: AOSP 14's drm_hwcomposer snapshot contains `hwc2_device/` and not one
 reference to composer3. HWC2 is reached through the HIDL passthrough service
 `android.hardware.graphics.composer@2.4-service`, which dlopens
-`hwcomposer.$(ro.hardware.hwcomposer).so` — here `hwcomposer.drm_minigbm`. If
-`check_vintf` rejects HIDL composer at FCM level 8, the options are to lower
-`target-level` or to write the composer3 service; lowering is defensible for an
-upgrade device at shipping API 29.
+`hwcomposer.$(ro.hardware.hwcomposer).so` — here `hwcomposer.drm_minigbm`.
+
+`check_vintf` did reject it at FCM level 8, which lists only `composer3` AIDL. Level
+7 lists `graphics.composer` HIDL 2.1-4, so `vintf/manifest.xml` targets level 7 —
+permitted for an upgrade device, and an honest description of a vendor image whose
+composer is HIDL. `STATUS.md` has the matrices and the reasoning. The alternative is
+to write the composer3 service, which means implementing `IComposerClient`'s 48
+methods against a drm_hwcomposer that has no composer3 code.
 
 GLES is Mesa's panfrost against `drivers/gpu/drm/panfrost`, and it is not optional:
 AOSP 14 packages no software GLES driver a real device can load, so SurfaceFlinger
