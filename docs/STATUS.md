@@ -422,6 +422,34 @@ which needs no label. The probe gained the matching gate, so this question is
 answered for every name at once rather than one per build, and the report no longer
 truncates the probe at 400 lines - which is what hid both of the last two answers.
 
+Then the same shape a third time, in VINTF:
+
+```
+assemble_vintf: Cannot override existing value 29.0 with BOARD_SEPOLICY_VERS
+(which is 202404).
+```
+
+`vintf/manifest.xml` carried `<sepolicy><version>29.0</version></sepolicy>`, set to
+match `PRODUCT_SHIPPING_API_LEVEL`. The build passes `BOARD_SEPOLICY_VERS` into
+`assemble_vintf` as an environment override and refuses to overwrite a value the
+input already has. 202404 is the right number and 29.0 was not: `core/config.mk`
+derives `BOARD_SEPOLICY_VERS` from `PLATFORM_SEPOLICY_VERSION`, the version the
+vendor policy is compiled against, which has nothing to do with the shipping API
+level. The field is left for the build to fill, the same way `BOARD_SEPOLICY_VERS`
+itself already was.
+
+Reading that file turned up something the build would never have reported. It
+declared HIDL `android.hardware.drm@4.0` with clearkey instances, while `device.mk`
+installs `android.hardware.drm-service.clearkey` - the AIDL service, which carries
+its own fragment. The HIDL 4.0 clearkey service does not exist in AOSP 14. A device
+manifest is a promise that the device provides a HAL, and nothing at build time
+checks it: `check_vintf` asks whether the *framework's* requirements are met, and
+`assemble_vintf` copies our entries through. It would have shown up as the media
+framework waiting on a hwbinder DRM HAL that never registers. `verify-tree.sh`
+check 4b now requires every manifest entry to have a package behind it, matched by
+format - a HIDL entry needs `<hal>@<version>...`, an AIDL one `<hal>-service...` or
+`<hal>-V<n>...`, because those are different binaries.
+
 The same run turned up a booby trap in the kernel fragment. `merge_config.sh`
 picks the symbols to merge with two `sed` patterns and then reads each value back
 with `grep -w $CFG`, so a comment that mentions a symbol the fragment also sets

@@ -55,29 +55,38 @@
     </hal>
 
     <!-- ===================================================================
-         DRM: clearkey only.
+         No DRM entry.
 
-         Widevine is not part of AOSP. drm@4.0-service.widevine lives in
-         vendor/widevine, which this overlay does not sync, so declaring widevine
-         instances here would promise a service that never starts.
+         This declared HIDL android.hardware.drm@4.0 with clearkey instances, and
+         that service is not what the tree installs: device.mk installs
+         android.hardware.drm-service.clearkey, the AIDL one, which ships its own
+         VINTF fragment and declares itself. The HIDL @4.0 clearkey service does
+         not exist in AOSP 14.
+
+         Nothing at build time catches a manifest entry for a service that was
+         never installed - check_vintf only asks whether the framework's
+         requirements are met, not whether our own promises are kept - so this
+         would have surfaced as the media framework looking for a hwbinder DRM HAL
+         that never registers. verify-tree.sh check 4b now cross-checks each entry
+         against PRODUCT_PACKAGES.
+
+         Widevine stays absent for the original reason: drm-service.widevine comes
+         from vendor/widevine, which this overlay does not sync.
          =================================================================== -->
-    <hal format="hidl">
-        <name>android.hardware.drm</name>
-        <transport>hwbinder</transport>
-        <version>4.0</version>
-        <interface>
-            <name>ICryptoFactory</name>
-            <instance>clearkey</instance>
-        </interface>
-        <interface>
-            <name>IDrmFactory</name>
-            <instance>clearkey</instance>
-        </interface>
-    </hal>
 
-    <!-- SELinux policy version vendor code is built against; matches
-         BOARD_SEPOLICY_VERS and PRODUCT_SHIPPING_API_LEVEL=29. -->
-    <sepolicy>
-        <version>29.0</version>
-    </sepolicy>
+    <!-- No <sepolicy> block. It said 29.0 here, to match
+         PRODUCT_SHIPPING_API_LEVEL, and assemble_vintf refused:
+
+           Cannot override existing value 29.0 with BOARD_SEPOLICY_VERS
+           (which is 202404).
+
+         The build passes BOARD_SEPOLICY_VERS into assemble_vintf as an
+         environment override and will not overwrite a value the input manifest
+         already carries. 202404 is right and 29.0 was not: core/config.mk derives
+         BOARD_SEPOLICY_VERS from PLATFORM_SEPOLICY_VERSION, which is the version
+         of the policy this vendor code is actually compiled against, not the
+         shipping API level. So the field is left for the build to fill, the same
+         way BOARD_SEPOLICY_VERS itself is (see BoardConfig.mk, where setting it by
+         hand was also removed).
+    -->
 </manifest>

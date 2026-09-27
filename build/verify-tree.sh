@@ -119,6 +119,53 @@ done < <(find "$DEV" -name '*.xml' -path '*vintf*' ! -name 'manifest.xml' \
 echo "  device manifest declares $(grep -c '<hal ' "$DEV/vintf/manifest.xml") HAL(s) directly"
 echo
 
+# --- 4b. VINTF: every manifest entry must be backed by an installed service ----
+#
+# A device manifest is a promise: this device provides this HAL at this version.
+# Nothing in the build checks it. check_vintf asks whether the framework's
+# requirements are met, not whether our own declarations are kept, and
+# assemble_vintf just copies the entries through - so an entry for a service that
+# was never installed reaches the image and surfaces as a client waiting on a HAL
+# that never registers.
+#
+# This tree shipped one: HIDL android.hardware.drm@4.0 with clearkey instances,
+# while device.mk installs android.hardware.drm-service.clearkey - the AIDL
+# service, which carries its own fragment. The HIDL @4.0 clearkey service does not
+# exist in AOSP 14 at all.
+#
+# The format matters as much as the name, which is why this does not just grep for
+# the HAL name: a HIDL entry needs a package named <hal>@<version>..., an AIDL one
+# needs <hal>-service... or <hal>-V<n>..., and those are different binaries.
+echo "[4b] VINTF: manifest entries vs installed packages"
+# Module names device.mk asks for, with continuations stripped so a name followed
+# by " \" still matches.
+pkgs=$(tr -d '\\' < "$DEV/device.mk" | grep -oE '^[[:space:]]*[A-Za-z0-9._@+-]+[[:space:]]*$' \
+       | tr -d '[:blank:]' | sort -u)
+unbacked=0
+while IFS='|' read -r name fmt ver; do
+    [[ -n "$name" ]] || continue
+    case "$fmt" in
+        hidl) want="${name}@${ver}" ;;
+        *)    want="${name}-service|${name}-V" ;;
+    esac
+    if grep -qE "^(${want})" <<< "$pkgs"; then
+        ok "$name ($fmt $ver) <- $(grep -E "^(${want})" <<< "$pkgs" | head -1)"
+    else
+        err "$name ($fmt $ver) is declared in vintf/manifest.xml but device.mk installs"
+        err "  no package matching '${want}'; the manifest promises a service that is not there"
+        unbacked=$((unbacked+1))
+    fi
+done < <(python3 - "$DEV/vintf/manifest.xml" <<'PYX'
+import sys, xml.etree.ElementTree as ET
+for hal in ET.parse(sys.argv[1]).getroot().findall("hal"):
+    fmt = hal.get("format", "hidl")
+    ver = hal.findtext("version") or (hal.findtext("fqname") or "").lstrip("@") or "-"
+    print("%s|%s|%s" % (hal.findtext("name"), fmt, ver))
+PYX
+)
+(( unbacked )) || ok "every manifest entry has a package behind it"
+echo
+
 # --- 5. Android 10 constructs Android 14 removed ------------------------------
 echo "[5] obsolete Android 10 constructs"
 declare -A obsolete=(
