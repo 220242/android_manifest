@@ -140,7 +140,39 @@ function Test-Done { param([string] $Name)
     $done = @((Get-State).completed)
     return ($done -contains $Name)
 }
+# A stage's inputs can change too, not just its outputs. The manifest overlay is
+# the one that matters: when it gains a project, drops one, or repoints the kernel
+# at a different revision, a Sync marked complete is simply wrong - and the run
+# after the move to a mainline kernel would have gone straight to building a kernel
+# that had never been fetched. Its hash is kept in the state file, and Sync and
+# Kernel are un-completed when it moves.
+function Invalidate-OnManifestChange {
+    $probe = 'sha256sum ~/android_khadas/android_manifest/manifests/khadas_edge_tv14.xml ' +
+             '2>/dev/null | cut -c1-16'
+    try { $hash = (Invoke-WslCapture -Command $probe).Trim() } catch { return }
+    if (-not $hash) { return }
+
+    $s = Get-State
+    $known = $s.manifestHash
+    if ($known -eq $hash) { return }
+
+    # An absent hash invalidates too, not just a different one. The first run after
+    # this check was added has nothing recorded and therefore no way to know that
+    # the synced tree matches the current manifest - and that first run is exactly
+    # the one that must not skip Sync, since it is the run that changed it.
+    if ($known) {
+        Write-Warn2 "the manifest overlay changed ($known -> $hash); Sync and Kernel will re-run"
+    } else {
+        Write-Warn2 "no manifest hash on record; Sync and Kernel will re-run once to establish one"
+    }
+    $s.completed = @(@($s.completed) | Where-Object { $_ -notin @('Sync', 'Kernel') })
+    $s | Add-Member -NotePropertyName manifestHash -NotePropertyValue $hash -Force
+    $s | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $script:StatePath -Encoding UTF8
+}
+
 function Set-Done { param([string] $Name)
+    # Reads the whole state and writes the whole state, so the manifest hash that
+    # now lives alongside 'completed' survives.
     $s = Get-State
     if ($s.completed -notcontains $Name) {
         $s.completed = @($s.completed) + $Name
@@ -850,6 +882,7 @@ try {
     if ($registered -contains $script:DistroName) {
         Write-Stage 'Updating the device tree inside the distro'
         Update-DistroRepo
+        Invalidate-OnManifestChange
     }
 } catch {
     Write-Warn2 "could not refresh the in-distro device tree: $($_.Exception.Message)"

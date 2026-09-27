@@ -64,10 +64,14 @@ Reach it from Explorer at `\\wsl.localhost\Edge1Build\home\builder\android_khada
 | `Provision` | Installs AOSP dependencies, clones the device tree, runs `preflight.sh` and `verify-tree.sh` |
 | `Sync` | Resolves the newest `android-14.0.0_r*` tag and syncs (100+ GiB) |
 | `Aidl` | Dumps the real AIDL method surface of all 22 declared HALs to `aidl-surface.txt` |
-| `Kernel` | Builds 4.19.111 with the Android 14 config delta |
-| `Build` | `lunch edge1_tv-trunk_staging-userdebug`, `m`, then Rockchip `update.img` packaging |
+| `Kernel` | Builds mainline 6.12 LTS with the Android 14 config delta, and stages the board dtb |
+| `Build` | `lunch edge1_tv-trunk_staging-userdebug`, `m`, then the flash pack (images plus a generated `flash-emmc.sh`) |
 
 Run one on its own with `-Stage Build`. Re-run a completed stage with `-Force`.
+`Sync` and `Kernel` are un-completed automatically when
+`manifests/khadas_edge_tv14.xml` changes - its hash is kept in the state file -
+because a tree synced against a different manifest is not synced.
+
 `Aidl` and `Probe` ignore the state file and always run: they are read-only
 verification passes whose output is the point, and gating them meant a changed
 check silently never ran again. Their output is now folded into the report, so
