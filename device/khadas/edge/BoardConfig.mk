@@ -32,10 +32,13 @@ TARGET_BOARD_PLATFORM := rk3399
 TARGET_BOARD_PLATFORM_GPU := mali-t860
 TARGET_BOARD_PLATFORM_PRODUCT := atv
 
-BOARD_USE_DRM := true
-BOARD_OPENGL_AEP := true
-ENABLE_CPUSETS := true
-ENABLE_SCHEDBOOST := true
+# Four variables were set here and are gone: BOARD_USE_DRM, BOARD_OPENGL_AEP,
+# ENABLE_CPUSETS and ENABLE_SCHEDBOOST. None of the four appears anywhere in
+# AOSP 14's build/make, and nothing in this tree reads them either. They were
+# read by device/rockchip/common and by system/core's rootdir in releases that
+# still had them; on 14 cpusets and schedboost are unconditional, the AEP
+# permission file is copied by device.mk outright, and DRM/KMS is not a board
+# switch any more. Setting them changed nothing while reading like configuration.
 
 # ---------------------------------------------------------------------------
 # Kernel.
@@ -47,11 +50,22 @@ ENABLE_SCHEDBOOST := true
 # kernel/khadas/edge, not "kernel": a project at path "kernel" would nest the
 # upstream kernel/configs, kernel/tests and 26 kernel/prebuilts/* projects, and
 # repo rejects overlapping paths. See manifests/khadas_edge_tv14.xml.
+# These four are documentation, not wiring: AOSP 14 does not build kernels, and
+# build/build-kernel.sh has the same values of its own. They are kept because
+# they are the four facts anyone touching the kernel needs, in the file they
+# would look in first. Change them here and in build-kernel.sh together.
 TARGET_KERNEL_SOURCE := kernel/khadas/edge
 TARGET_KERNEL_CONFIG := kedge_defconfig
 TARGET_KERNEL_DTS := rk3399-khadas-edge-android
 TARGET_KERNEL_ARCH := arm64
-TARGET_PREBUILT_KERNEL := kernel/khadas/edge/out/arch/arm64/boot/Image
+# TARGET_PREBUILT_KERNEL is not set here. The Android 10 tree used it, but the
+# string "PREBUILT_KERNEL" does not appear anywhere in AOSP 14's build/make:
+# core/Makefile:1018 sets INSTALLED_KERNEL_TARGET to $(PRODUCT_OUT)/kernel and
+# expects the device to install the file itself. device.mk copies it there.
+#
+# resource.img is Rockchip's RSCE container holding the DTB and the boot logos,
+# built by the kernel's own <dts>.img target. The legacy BSP pointed
+# BOARD_PREBUILT_DTBOIMAGE at it, which is how it reaches the dtbo partition.
 BOARD_PREBUILT_DTBOIMAGE := kernel/khadas/edge/resource.img
 
 BOARD_KERNEL_CMDLINE := \
@@ -98,8 +112,24 @@ BOARD_USES_FULL_RECOVERY_IMAGE := true
 # The Android 10 config had fixed BOARD_SYSTEMIMAGE_PARTITION_SIZE = 1.5GiB,
 # which is far below what an Android 14 system image needs.
 # ---------------------------------------------------------------------------
-PRODUCT_USE_DYNAMIC_PARTITIONS := true
+# PRODUCT_USE_DYNAMIC_PARTITIONS is NOT set here, although every other line in
+# this section is a board variable. It is a product variable, and Kati freezes
+# the product variables when product config finishes - which is before this file
+# is read:
+#
+#   device/khadas/edge/BoardConfig.mk:101: error: cannot assign to readonly
+#       variable: PRODUCT_USE_DYNAMIC_PARTITIONS
+#
+# It is set in edge1_tv.mk instead. board_config.mk reads it from there to decide
+# whether to build super_empty.img, so the ordering works out.
 BOARD_USES_METADATA_PARTITION := true
+
+# minigbm is the gralloc/hwcomposer backend, replacing the unported
+# libgralloc_rk3399. A convention flag rather than something AOSP's build reads:
+# the actual selection is the gralloc.minigbm / mapper.minigbm / hwcomposer.
+# drm_minigbm packages in device.mk plus ro.hardware.* . It was in device.mk,
+# which is a product makefile; BOARD_* belongs here.
+BOARD_USES_MINIGBM := true
 
 # 4608 MiB super. Leaves room on a 16GB eMMC for userdata.
 BOARD_SUPER_PARTITION_SIZE := 4831838208
@@ -130,7 +160,9 @@ BOARD_SYSTEM_EXTIMAGE_FILE_SYSTEM_TYPE := ext4
 BOARD_ODMIMAGE_FILE_SYSTEM_TYPE := ext4
 TARGET_USERIMAGES_USE_EXT4 := true
 TARGET_USERIMAGES_USE_F2FS := true
-BOARD_USE_SPARSE_SYSTEM_IMAGE := true
+# BOARD_USE_SPARSE_SYSTEM_IMAGE was set here. It is a Rockchip variable, absent
+# from AOSP 14; sparse images are controlled per filesystem type, and by
+# TARGET_USERIMAGES_SPARSE_EXT_DISABLED if they ever need turning off.
 
 # Userdata is formatted on first boot by init, not sized here.
 BOARD_USERDATAIMAGE_FILE_SYSTEM_TYPE := f2fs
@@ -161,9 +193,21 @@ TARGET_USERIMAGES_SPARSE_EXT_DISABLED := false
 # 14 tree.
 # ---------------------------------------------------------------------------
 BOARD_VENDOR_SEPOLICY_DIRS += device/khadas/edge/sepolicy/vendor
-# Board API level pins which public policy version vendor code is built
-# against. 29 matches PRODUCT_SHIPPING_API_LEVEL.
-BOARD_SEPOLICY_VERS := 29.0
+
+# BOARD_SEPOLICY_VERS := 29.0 was set here, to pin vendor policy to the shipping
+# API level the way the Android 10 tree did. On 14 the build owns that variable:
+#
+#   core/config.mk:876  PLATFORM_SEPOLICY_VERSION := $(BOARD_API_LEVEL)
+#   core/config.mk:877  BOARD_SEPOLICY_VERS := $(PLATFORM_SEPOLICY_VERSION)
+#   core/config.mk:878  .KATI_READONLY := PLATFORM_SEPOLICY_VERSION BOARD_SEPOLICY_VERS
+#
+# and BOARD_API_LEVEL itself comes from the release config, not from the board
+# (board_config.mk errors outright if a board sets it). Those lines run after
+# BoardConfig.mk, so the assignment here was not an error - it was silently
+# overwritten, which is worse. In this release the value lands on 202404, which is
+# why system/sepolicy/prebuilts/api holds 202404 alongside 29.0 through 34.0:
+# vendor policy builds against the platform version and the compatibility mapping
+# files cover the older ones.
 
 # ---------------------------------------------------------------------------
 # VINTF.
@@ -190,7 +234,10 @@ WIFI_DRIVER_FW_PATH_AP  := "/vendor/etc/firmware/fw_bcm4359c0_ag_apsta.bin"
 WIFI_DRIVER_FW_PATH_P2P := "/vendor/etc/firmware/fw_bcm4359c0_ag_p2p.bin"
 
 BOARD_HAVE_BLUETOOTH := true
-BOARD_HAVE_BLUETOOTH_BCM := true
+# BOARD_HAVE_BLUETOOTH_BCM was set here. system/bt read it until Android 11; the
+# Bluetooth stack is an APEX module on 14 and nothing reads it. The Broadcom
+# specifics that matter now are the firmware patchram stage in init.edge1.rc and
+# bluetooth/bt_vendor.conf.
 BOARD_BLUETOOTH_BDROID_BUILDCFG_INCLUDE_DIR := device/khadas/edge/bluetooth
 
 # ---------------------------------------------------------------------------

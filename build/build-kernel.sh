@@ -206,7 +206,18 @@ make "${MAKE_ARGS[@]}" -j"$JOBS" modules
 # single-DTS build has no use for it.
 echo "==> packing resource.img"
 echo "    inputs:"
-ls -l scripts/resource_tool logo.bmp logo_kernel.bmp 2>&1 | sed 's/^/      /' || true
+# Not 'ls -l a b c': a missing file makes ls print "No such file or directory",
+# which the report's error grep then surfaces as if something had failed. The
+# .img target below does not need scripts/resource_tool - it is absent in this
+# tree and resource.img is built all the same - so its absence is information,
+# not an error.
+for f in scripts/resource_tool logo.bmp logo_kernel.bmp; do
+    if [[ -e "$f" ]]; then
+        printf '      %-24s present (%s bytes)\n' "$f" "$(stat -c %s "$f")"
+    else
+        printf '      %-24s absent\n' "$f"
+    fi
+done
 
 if ! make "${MAKE_ARGS[@]}" -j"$JOBS" "${DTS}.img"; then
     echo "    the ${DTS}.img target failed" >&2

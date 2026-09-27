@@ -55,6 +55,14 @@ PRODUCT_CHARACTERISTICS := tv,nosdcard
 # ---------------------------------------------------------------------------
 PRODUCT_SHIPPING_API_LEVEL := 29
 
+# Dynamic partitions. This lives here rather than in BoardConfig.mk with the rest
+# of the partition layout because it is a product variable: product config
+# freezes those before BoardConfig.mk is read, and assigning it there failed with
+# "cannot assign to readonly variable". board_config.mk reads it from product
+# config to decide whether to build super_empty.img, and product_config.mk
+# derives PRODUCT_BUILD_SUPER_PARTITION from it.
+PRODUCT_USE_DYNAMIC_PARTITIONS := true
+
 # ART's userfaultfd GC, off. This is a kernel capability question, not a policy
 # one: Android 14's default is PRODUCT_ENABLE_UFFD_GC := default, which makes
 # post_process_props.py decide from the kernel version at build time, and the

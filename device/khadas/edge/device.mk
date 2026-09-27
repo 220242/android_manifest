@@ -27,6 +27,24 @@ EDGE1_ENABLE_INCOMPLETE_HALS ?= false
 
 
 # ---------------------------------------------------------------------------
+# The kernel image.
+#
+# AOSP 14 expects the kernel at $(PRODUCT_OUT)/kernel and provides no mechanism
+# to put it there: TARGET_PREBUILT_KERNEL, which the Android 10 tree relied on,
+# does not appear anywhere in build/make any more. core/Makefile:1018 defines
+# INSTALLED_KERNEL_TARGET as that path and leaves producing it to the device -
+# its own diagnostic says so, "installing the built kernel to
+# $(PRODUCT_OUT)/kernel". Without this copy, boot.img fails at the end of a long
+# build on a missing file with no rule to make it.
+#
+# The path is the out-of-tree build from build/build-kernel.sh, which runs before
+# the platform build. The dependency is not expressed to ninja, which is the
+# trade-off of building the kernel separately: rebuild the kernel, then rebuild.
+PRODUCT_COPY_FILES += \
+    kernel/khadas/edge/out/arch/arm64/boot/Image:kernel
+
+
+# ---------------------------------------------------------------------------
 # Treble / VINTF.
 # ---------------------------------------------------------------------------
 PRODUCT_PACKAGES += \
@@ -148,7 +166,10 @@ PRODUCT_PROPERTY_OVERRIDES += \
 
 endif
 
-BOARD_USES_MINIGBM := true
+# BOARD_USES_MINIGBM was set here, in a product makefile. It is a board variable
+# and now lives in BoardConfig.mk: product config runs first, so the value did
+# survive, but a BOARD_* variable assigned from the product side is the kind of
+# ordering dependency that breaks quietly when the build system moves.
 
 PRODUCT_PROPERTY_OVERRIDES += \
     ro.surface_flinger.max_frame_buffer_acquired_buffers=3 \

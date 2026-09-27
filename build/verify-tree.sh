@@ -255,6 +255,41 @@ else
 fi
 echo
 
+# --- 10. variable ownership --------------------------------------------------
+# Product config runs before BoardConfig.mk and freezes the product variables, so
+# a PRODUCT_* assignment in BoardConfig.mk is fatal:
+#
+#   BoardConfig.mk:101: error: cannot assign to readonly variable:
+#       PRODUCT_USE_DYNAMIC_PARTITIONS
+#
+# The mirror image is not fatal - a BOARD_* variable set from a product makefile
+# is evaluated early enough to survive - but it is an ordering dependency that
+# breaks quietly, so it warns.
+echo "[10] variable ownership"
+if [[ -f "$DEV/BoardConfig.mk" ]]; then
+    bad=$(grep -nE '^[[:space:]]*PRODUCT_[A-Z_0-9]+[[:space:]]*[:+?]?=' \
+          "$DEV/BoardConfig.mk" || true)
+    if [[ -n "$bad" ]]; then
+        while read -r l; do
+            err "BoardConfig.mk:$l is a product variable; product config already froze it"
+        done <<< "$bad"
+    else
+        ok "BoardConfig.mk assigns no product variables"
+    fi
+fi
+for pmk in "$DEV/edge1_tv.mk" "$DEV/device.mk"; do
+    [[ -f "$pmk" ]] || continue
+    bad=$(grep -nE '^[[:space:]]*(BOARD|TARGET)_[A-Z_0-9]+[[:space:]]*[:+?]?=' "$pmk" || true)
+    if [[ -n "$bad" ]]; then
+        while read -r l; do
+            warn "$(basename "$pmk"):$l is a board variable in a product makefile"
+        done <<< "$bad"
+    else
+        ok "$(basename "$pmk") assigns no board variables"
+    fi
+done
+echo
+
 echo "=========================================="
 echo "errors: $errors   warnings: $warns"
 (( errors )) && exit 1

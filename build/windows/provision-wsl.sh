@@ -429,20 +429,34 @@ PY_DEPS
                 echo "  --- level $lvl: HALs with optional=false ---"
                 python3 - "$f" <<'PY_VINTF' || true
 import sys, xml.etree.ElementTree as ET
-# optional is optional: a <hal> without the attribute is REQUIRED. Filtering on
-# optional=="false" reported "0 required" for a matrix full of required HALs,
-# which read as good news and was a parser bug.
+# Report the raw optional attribute rather than a verdict.
+#
+# Two guesses have now been wrong here. Filtering on optional=="false" printed
+# "0 required"; treating a missing attribute as required printed 86, including
+# the radio and automotive HALs, which no TV device provides - so that reading
+# cannot be right either. What the entries actually say is the only thing worth
+# printing until the semantics are confirmed against libvintf.
 root = ET.parse(sys.argv[1]).getroot()
-n = 0
+buckets = {'false': [], 'true': [], 'absent': []}
 for hal in root.findall('hal'):
-    if hal.get('optional', 'false') == 'true':
-        continue
+    key = hal.get('optional', 'absent')
+    if key not in buckets:
+        key = 'absent'
     name = hal.findtext('name', '?')
     vers = ','.join(v.text for v in hal.findall('version')) or \
            ','.join(v.text for v in hal.findall('fqname')) or '-'
-    print('    %-46s %-8s %s' % (name, hal.get('format', 'hidl'), vers))
-    n += 1
-print('    (%d required)' % n)
+    buckets[key].append('    %-46s %-8s %s' % (name, hal.get('format', 'hidl'), vers))
+print('    %d entries: optional=false %d, optional=true %d, no attribute %d'
+      % (sum(len(v) for v in buckets.values()), len(buckets['false']),
+         len(buckets['true']), len(buckets['absent'])))
+for key in ('false', 'absent'):
+    if not buckets[key]:
+        continue
+    print('    --- optional=%s ---' % key)
+    for line in buckets[key][:40]:
+        print(line)
+    if len(buckets[key]) > 40:
+        print('    ... and %d more' % (len(buckets[key]) - 40))
 PY_VINTF
             done
             echo "  --- level 8 kernel requirements (4.19.111 is what we have) ---"
