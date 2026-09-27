@@ -203,6 +203,58 @@ if [[ -f "$ROOT/build/build.sh" ]]; then
 fi
 echo
 
+# --- 9. sepolicy self-consistency -------------------------------------------
+# Until now none of this was compiled: the device tree was a symlink and Soong's
+# finder does not walk into those, so BOARD_VENDOR_SEPOLICY_DIRS pointed at
+# something it never read. Now that it does, a type referenced by a *_contexts
+# file and declared nowhere is a build failure, and a declared exec type that no
+# file_contexts line labels is a service that can never enter its domain - which
+# fails silently, as denials at runtime.
+echo "[9] sepolicy self-consistency"
+readonly SEDIR="$DEV/sepolicy/vendor"
+if [[ -d "$SEDIR" ]]; then
+    # Two ways a type gets declared, and missing the second one made this check
+    # report seven false positives on its first run: 'type foo, ...' and the
+    # property macros, which expand to a type declaration plus its attributes.
+    declared=$( { grep -h '^type ' "$SEDIR"/*.te 2>/dev/null \
+                    | sed -E 's/^type ([a-z0-9_]+).*/\1/'
+                  grep -hoE '^[a-z_]*_prop\([a-z0-9_]+' "$SEDIR"/*.te 2>/dev/null \
+                    | sed -E 's/.*\(//'
+                } | sort -u)
+    # Types this tree knowingly takes from AOSP's own policy. Listed rather than
+    # matched by pattern: if a release renames one, this is where it surfaces.
+    # The module probe checks the same list against the synced system/sepolicy,
+    # which is the only place the answer is authoritative.
+    aosp_types="gpu_device graphics_device hal_bluetooth_default_exec
+                vendor_firmware_file vendor_kernel_modules vendor_file
+                vendor_configs_file sysfs_type sysfs_devfreq sysfs_leds
+                sysfs_thermal sysfs_devices_system_cpu"
+    missing_types=0
+    while read -r t; do
+        [[ -n "$t" ]] || continue
+        grep -qx "$t" <<< "$declared" && continue
+        grep -qw "$t" <<< "$aosp_types" && continue
+        err "$SEDIR labels '$t', which is declared in no .te file here and is not"
+        err "  in the list of AOSP types this tree relies on"
+        missing_types=$((missing_types+1))
+    done < <(grep -hoE 'u:object_r:[a-z0-9_]+' "$SEDIR"/*_contexts 2>/dev/null \
+             | sed 's/u:object_r://' | sort -u)
+    (( missing_types )) || ok "every labelled type is declared or a known AOSP type"
+
+    # An exec type nothing labels means the domain transition never happens.
+    unused=0
+    while read -r t; do
+        [[ -n "$t" ]] || continue
+        grep -q "$t" "$SEDIR/file_contexts" 2>/dev/null && continue
+        err "$t is declared but no file_contexts line labels any binary with it"
+        unused=$((unused+1))
+    done < <(grep -x '.*_exec' <<< "$declared" || true)
+    (( unused )) || ok "every declared exec type labels a binary"
+else
+    warn "no sepolicy directory at $SEDIR"
+fi
+echo
+
 echo "=========================================="
 echo "errors: $errors   warnings: $warns"
 (( errors )) && exit 1

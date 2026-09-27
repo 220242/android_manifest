@@ -185,11 +185,10 @@ PRODUCT_PACKAGES += \
 # The audio.core shim opens the legacy device but has no stream I/O yet
 # (shims/audio/RkAudioModule.cpp). Without it there is no HDMI audio.
 #
-# Its blueprint is shims/audio/Android.bp.disabled, so this package does not
-# exist as a module yet: two of its AIDL dependency versions are unconfirmed, and
-# an unknown dependency name stops Soong for the whole tree, not just for the
-# module. Enabling EDGE1_ENABLE_INCOMPLETE_HALS therefore needs that file renamed
-# back to Android.bp first.
+# The blueprint is shims/audio/Android.bp and its dependency names are confirmed
+# against the tree's frozen aidl_api directories, so Soong analyses the module.
+# It is still gated out of PRODUCT_PACKAGES, so nothing compiles it until
+# createOutputStream exists.
 ifeq ($(EDGE1_ENABLE_INCOMPLETE_HALS),true)
 PRODUCT_PACKAGES += \
     android.hardware.audio.service.rk3399 \

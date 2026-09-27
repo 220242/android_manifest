@@ -1,20 +1,15 @@
-// NOT BUILT. The file is named Android.bp.disabled on purpose: Soong globs for
-// files named exactly "Android.bp", so this one is invisible to it.
+// This module is ANALYSED but never compiled: device.mk asks for it only behind
+// EDGE1_ENABLE_INCOMPLETE_HALS, because createOutputStream in RkAudioModule.cpp
+// is not implemented. Analysis is still worth having - it is what catches a
+// dependency name that does not exist.
 //
-// Soong resolves dependencies for every module it parses, whether or not the
-// module is installed, and an unknown name is a hard error that stops the whole
-// tree. Two of the names below are guesses:
-//
-//   android.hardware.audio.common-V?-ndk
-//   android.media.audio.common.types-V?-ndk
-//
-// The versioned suffix comes from the frozen aidl_api directory of each package,
-// and neither has been read off the tree yet - the module probe now dumps them.
-// android.hardware.audio.core-V2-ndk is confirmed (aidl_api/.../2 is frozen),
-// and libaudioserviceexampleimpl is confirmed to exist.
-//
-// Rename back to Android.bp once the two suffixes are filled in from the probe
-// and createOutputStream in RkAudioModule.cpp is implemented.
+// The file spent a round named Android.bp.disabled, out of Soong's glob, because
+// two of the versioned AIDL libraries below were written from memory and an
+// unknown dependency name stops the whole tree rather than just this module. The
+// probe has since read the frozen aidl_api directories off the tree:
+// audio.common is frozen at V1,2,3 and media.audio.common.types at V1,2,3, so
+// both -V2-ndk names resolve. audio.core-V2-ndk and libaudioserviceexampleimpl
+// were already confirmed.
 //
 // AIDL android.hardware.audio.core service for the Khadas Edge1.
 //

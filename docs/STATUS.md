@@ -218,17 +218,46 @@ Ordered by what blocks what.
    own validity. Turning enforcement on is the hardening step after first boot,
    and it is expected to fail on the kernel version first.
 6. **Confirm AIDL signatures** with `build/verify-aidl-surface.sh` before writing
-   any remaining shim. The module probe now also resolves every dependency in the
-   shim blueprints against the tree, which is what an unknown `-V<n>-ndk` suffix
-   needs: Soong resolves dependencies for modules it never builds, so one wrong
-   suffix stops the whole tree. `shims/audio/Android.bp.disabled` is renamed out
-   of Soong's glob until its two unconfirmed suffixes are filled in.
+   any remaining shim. The probe now resolves every dependency in the shim
+   blueprints against the tree and prints each package's frozen `aidl_api`
+   versions, which is what an unknown `-V<n>-ndk` suffix needs: Soong resolves
+   dependencies for modules it never builds, so one wrong suffix stops the whole
+   tree. Read off the tree so far: `graphics.composer3` V1,2,3;
+   `graphics.allocator` V1,2; `graphics.common` V1-5; `audio.core` V1,2;
+   `audio.common` V1,2,3; `media.audio.common.types` V1,2,3; `tv.input` V1,2;
+   `tv.hdmi.cec` V1; `tv.hdmi.connection` V1; `bluetooth` V1; `wifi` V1,2.
 7. ~~**Kernel config merge.**~~ The kernel builds: `Image`, the DTB and five
    modules, with the config delta merged and verified symbol by symbol. What is
    still open there is `resource.img`, which the Rockchip `<dts>.img` target
    produces and `BOARD_PREBUILT_DTBOIMAGE` needs.
 8. **Replace the invented codec performance numbers** in
    `media/media_codecs_performance.xml` with measurements from real hardware.
+
+## The symlink that made the device tree invisible
+
+`device/khadas/edge` was a symlink into this manifest repo - one place to edit,
+under version control, and it looked right. It is why the first platform build
+could not start:
+
+    build/make/core/product_config.mk:226: error: Cannot locate config makefile
+        for product "edge1_tv".
+
+AOSP does not glob for `AndroidProducts.mk` at make time. It reads
+`out/.module_paths/AndroidProducts.mk.list`, which Soong's finder writes by
+walking the source tree, and that walk does not descend into symlinked
+directories. The product existed, `lunch` parsed the combo, and the makefile
+naming the product was invisible.
+
+The same applies to everything else Soong globs, which is the part worth
+recording: no `Android.bp` under the device tree had ever been parsed, so the
+shim blueprints were not being analysed at all, and `BOARD_VENDOR_SEPOLICY_DIRS`
+pointed into a directory Soong could not see. The first build that gets past
+product config is therefore also the first one that will have an opinion about
+those files.
+
+`build/place-device.sh` now copies the device tree in as a real directory before
+every stage that reads it, and clears the finder cache when the content changed.
+The manifest repo stays the single source of truth; the copy is a build artefact.
 
 ## Decisions taken against the real build system
 

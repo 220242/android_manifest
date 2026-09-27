@@ -84,13 +84,17 @@ to exist in the synced tree, and since the module is not in `PRODUCT_PACKAGES`
 unless `EDGE1_ENABLE_INCOMPLETE_HALS` is set, Soong analyses it but never
 compiles it - which is the cheap half of the check, and worth keeping.
 
-`audio/Android.bp.disabled` is deliberately not named `Android.bp`. Soong globs
-for that exact filename, so the file is invisible to it. The reason is that Soong
-resolves dependencies for every module it parses, installed or not, and an
-unknown dependency name is an analysis error that stops the entire tree. Two of
-the versioned AIDL libraries that blueprint names
-(`android.hardware.audio.common-V?-ndk`,
-`android.media.audio.common.types-V?-ndk`) were written from memory, and the
-suffix must match the frozen `aidl_api` version directory exactly. The module
-probe now prints those directories; fill the numbers in, implement
-`createOutputStream`, then rename the file back.
+`audio/Android.bp` is live again. It spent a round as `Android.bp.disabled`,
+outside Soong's glob, because two of its versioned AIDL libraries were written
+from memory - and an unknown dependency name is an analysis error that stops the
+entire tree, not just the module that names it. The probe has since read the
+frozen `aidl_api` directories off the tree (`audio.common` V1,2,3 and
+`media.audio.common.types` V1,2,3), so both `-V2-ndk` names resolve. The module
+is still gated out of `PRODUCT_PACKAGES`, so Soong analyses it and never compiles
+it, which is exactly the half that is worth having while
+`createOutputStream` is unimplemented.
+
+Until this round none of this was actually being checked: `device/khadas/edge`
+was a symlink into the manifest repo, and Soong's finder does not walk into
+symlinked directories, so no `Android.bp` under it was ever parsed. See
+`build/place-device.sh`.

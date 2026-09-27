@@ -863,13 +863,34 @@ try {
 # build that costs hours, so they always run.
 $alwaysRun = @('Aidl', 'Probe')
 
+# A stage is complete only if what it produced is still there. Kernel was marked
+# done by a run in which the resource.img packing step had failed, so every run
+# after that skipped it - and the platform build went looking for a file nothing
+# had ever written. Cheap to check, and it is checked in the distro because that
+# is where the artefacts live.
+function Test-StageOutputs {
+    param([string] $Name)
+    if ($Name -ne 'Kernel') { return $true }
+    $probe = 'k=~/android_khadas/aosp-14-edge1/kernel/khadas/edge; ' +
+             'test -f $k/out/arch/arm64/boot/Image && test -f $k/resource.img ' +
+             '&& echo OUTPUTS_OK || echo OUTPUTS_MISSING'
+    try {
+        return ((Invoke-WslCapture -Command $probe) -match 'OUTPUTS_OK')
+    } catch {
+        return $false
+    }
+}
+
 $started = Get-Date
 try {
     foreach ($s in $order) {
         if ($Stage -ne 'All' -and $Stage -ne $s.Name) { continue }
         if ($Stage -eq 'All' -and ($alwaysRun -notcontains $s.Name) -and (Test-Done $s.Name)) {
-            Write-Host "  skipping $($s.Name) (already complete; -Force to redo)" -ForegroundColor DarkGray
-            continue
+            if (Test-StageOutputs $s.Name) {
+                Write-Host "  skipping $($s.Name) (already complete; -Force to redo)" -ForegroundColor DarkGray
+                continue
+            }
+            Write-Warn2 "$($s.Name) is marked complete but its output is missing; re-running it"
         }
         & $s.Fn
     }

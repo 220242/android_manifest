@@ -37,8 +37,16 @@ git ls-remote --tags https://android.googlesource.com/platform/manifest 'android
 ```
 
 This does `repo init` against **upstream AOSP**, then applies
-`manifests/khadas_edge_tv14.xml` as a `.repo/local_manifests/` overlay and
-symlinks `device/khadas/edge` into the tree.
+`manifests/khadas_edge_tv14.xml` as a `.repo/local_manifests/` overlay and copies
+`device/khadas/edge` into the tree with `build/place-device.sh`.
+
+A copy, not a symlink, and that is not a style choice: Soong's finder writes
+`out/.module_paths/AndroidProducts.mk.list` by walking the source tree and does
+not descend into symlinked directories, so with a symlink the product config,
+every `Android.bp` and the sepolicy directories were all invisible and `lunch`
+failed with `Cannot locate config makefile for product "edge1_tv"`. The copy is
+refreshed before every stage that reads it, so a `git pull` followed by a build
+compiles the files that were just pulled.
 
 Why an overlay rather than a forked manifest: the Android 10 manifest forked all
 737 AOSP projects into `github.com/khadas`. Carrying that forward means

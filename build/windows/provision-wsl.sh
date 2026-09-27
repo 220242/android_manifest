@@ -37,6 +37,16 @@ mkdir -p "$WORK" "$LOGS"
 
 log() { printf '\n=== [%s] %s ===\n' "$(date +%H:%M:%S)" "$*"; }
 
+# Every stage that reads the device tree calls this first. It is idempotent and
+# takes under a second, and it is what makes "git pull then build" compile the
+# files that were just pulled. It also replaces the old symlink layout, which
+# Soong's finder could not see - the reason the first platform build could not
+# locate the product.
+place_device() {
+    [[ -d "$TREE" ]] || return 0
+    "$MANIFEST/build/place-device.sh" "$TREE"
+}
+
 stage_deps() {
     log "installing AOSP build dependencies"
     export DEBIAN_FRONTEND=noninteractive
@@ -134,11 +144,13 @@ stage_sync() {
 }
 
 stage_kernel() {
+    place_device
     log "building the 4.19.111 kernel"
     "$MANIFEST/build/build-kernel.sh" "$TREE" 2>&1 | tee "$LOGS/kernel.log"
 }
 
 stage_build() {
+    place_device
     log "building the platform (expect many hours)"
     "$MANIFEST/build/build.sh" "$TREE" userdebug 2>&1 | tee "$LOGS/platform.log"
     local img="$TREE/out/target/product/edge/rockdev/update.img"
@@ -153,6 +165,7 @@ stage_build() {
 }
 
 stage_aidl() {
+    place_device
     log "dumping the real AIDL method surface for every declared HAL"
     # This is what unblocks the unwritten composer3 / tv.input / hdmi.cec shims:
     # their signatures could not be verified when the tree was authored, because
@@ -172,6 +185,7 @@ stage_probe() {
     # A wrong name fails the build at Kati with "module not found", one name per
     # attempt. Checking them all in a single pass turns a long fix-fail loop into
     # one answer.
+    place_device
     local out="$WORK/module-probe.txt"
     local dmk="$MANIFEST/device/khadas/edge/device.mk"
 
@@ -181,16 +195,52 @@ stage_probe() {
     log "probing the tree for the modules device.mk requests"
 
     local pats="$WORK/.probe-patterns"
+    # Two columns: the module name, and whether device.mk asks for it
+    # unconditionally or only behind EDGE1_ENABLE_INCOMPLETE_HALS. Without the
+    # second column the report cried wolf - it listed brcm_patchram_plus under
+    # "wrong name, must be fixed" when it is a vendor tool deliberately parked
+    # behind the gate.
     python3 - "$dmk" > "$pats" <<'PY_INNER'
 import re, sys
-s = open(sys.argv[1]).read()
-names = set()
-for m in re.finditer(r'PRODUCT_PACKAGES \+=((?:[^\n]*\\\n)*[^\n]*)', s):
-    for t in m.group(1).replace('\\', '').split():
-        if t and not t.startswith('$'):
-            names.add(t)
+GATE = 'EDGE1_ENABLE_INCOMPLETE_HALS'
+stack = []          # one entry per open conditional: True if it is the gate
+names = {}
+in_pkgs = False
+for raw in open(sys.argv[1]):
+    line = raw.split('#', 1)[0].rstrip('\n')
+    st = line.strip()
+    if re.match(r'if(eq|neq|def|ndef)\b', st):
+        stack.append(GATE in st)
+        in_pkgs = False
+        continue
+    if st.startswith('endif'):
+        if stack:
+            stack.pop()
+        in_pkgs = False
+        continue
+    if st.startswith('else'):
+        # The else of the gate is the default branch, not the gated one. An
+        # 'else ifeq' keeps one entry on the stack, which is what we want.
+        if stack:
+            stack[-1] = GATE in st
+        in_pkgs = False
+        continue
+    if re.match(r'PRODUCT_PACKAGES\s*\+?=', st):
+        st = st.split('=', 1)[1]
+        in_pkgs = True
+    elif not in_pkgs:
+        continue
+    cont = st.endswith('\\')
+    for tok in st.rstrip('\\').split():
+        if tok.startswith('$'):
+            continue
+        gated = 'gated' if any(stack) else 'always'
+        # A name asked for in both places is unconditional.
+        if names.get(tok) != 'always':
+            names[tok] = gated
+    in_pkgs = cont
 for n in sorted(names):
-    print(n)
+    print(n, names[n])
 PY_INNER
 
     {
@@ -211,31 +261,29 @@ PY_INNER
         echo "tree defines $(wc -l < "$found") module names"
         echo
 
-        # Two very different kinds of missing, so they are reported apart.
-        # A missing AOSP module means a name was written down wrong and must be
-        # corrected. A missing Rockchip module is expected: those are the vendor
-        # components still to be forward-ported, and device.mk keeps them behind
-        # EDGE1_ENABLE_INCOMPLETE_HALS for exactly that reason.
-        local miss_aosp=0 miss_vendor=0
-        local aosp_list="" vendor_list=""
-        while read -r n; do
+        # Only one of these two buckets can break a build. A name device.mk asks
+        # for unconditionally has to exist or Kati stops with "module not found";
+        # a name behind EDGE1_ENABLE_INCOMPLETE_HALS is a vendor component not yet
+        # forward-ported, and is expected to be absent.
+        local miss_hard=0 miss_gated=0
+        local hard_list="" gated_list=""
+        while read -r n gate; do
             [[ -n "$n" ]] || continue
             grep -qxF "$n" "$found" && continue
-            case "$n" in
-                *rk3399*|*_rk|libcodec2_rk|librockchip*|libvpu|libGLES_mali|vulkan.rk*)
-                    vendor_list+="  $n"$'\n'; miss_vendor=$((miss_vendor+1)) ;;
-                *)
-                    aosp_list+="  $n"$'\n'; miss_aosp=$((miss_aosp+1)) ;;
-            esac
+            if [[ "$gate" == gated ]]; then
+                gated_list+="  $n"$'\n'; miss_gated=$((miss_gated+1))
+            else
+                hard_list+="  $n"$'\n'; miss_hard=$((miss_hard+1))
+            fi
         done < "$pats"
 
-        echo "--- MISSING AOSP MODULES (wrong name - must be fixed) ---"
-        if (( miss_aosp )); then printf '%s' "$aosp_list"; else echo "  (none)"; fi
+        echo "--- MISSING AND REQUESTED UNCONDITIONALLY (breaks the build) ---"
+        if (( miss_hard )); then printf '%s' "$hard_list"; else echo "  (none)"; fi
         echo
-        echo "--- MISSING VENDOR MODULES (expected: not yet ported) ---"
-        if (( miss_vendor )); then printf '%s' "$vendor_list"; else echo "  (none)"; fi
+        echo "--- MISSING BEHIND EDGE1_ENABLE_INCOMPLETE_HALS (expected) ---"
+        if (( miss_gated )); then printf '%s' "$gated_list"; else echo "  (none)"; fi
         echo
-        echo "missing: $miss_aosp AOSP, $miss_vendor vendor"
+        echo "missing: $miss_hard unconditional, $miss_gated gated"
         echo
 
         echo "##### drm_hwcomposer (generic DRM composer3) #####"
@@ -380,16 +428,20 @@ PY_DEPS
                 [[ -f "$f" ]] || continue
                 echo "  --- level $lvl: HALs with optional=false ---"
                 python3 - "$f" <<'PY_VINTF' || true
-import re, sys, xml.etree.ElementTree as ET
+import sys, xml.etree.ElementTree as ET
+# optional is optional: a <hal> without the attribute is REQUIRED. Filtering on
+# optional=="false" reported "0 required" for a matrix full of required HALs,
+# which read as good news and was a parser bug.
 root = ET.parse(sys.argv[1]).getroot()
 n = 0
 for hal in root.findall('hal'):
-    if hal.get('optional') == 'false':
-        name = hal.findtext('name', '?')
-        vers = ','.join(v.text for v in hal.findall('version')) or \
-               ','.join(v.text for v in hal.findall('fqname'))
-        print('    %-46s %-8s %s' % (name, hal.get('format', '?'), vers))
-        n += 1
+    if hal.get('optional', 'false') == 'true':
+        continue
+    name = hal.findtext('name', '?')
+    vers = ','.join(v.text for v in hal.findall('version')) or \
+           ','.join(v.text for v in hal.findall('fqname')) or '-'
+    print('    %-46s %-8s %s' % (name, hal.get('format', 'hidl'), vers))
+    n += 1
 print('    (%d required)' % n)
 PY_VINTF
             done
@@ -432,6 +484,53 @@ PY_KERNEL
             echo "  ABSENT at $TREE/system/sepolicy/prebuilts/api"
         fi
         echo "  ours: $(grep -h BOARD_SEPOLICY_VERS "$MANIFEST/device/khadas/edge/BoardConfig.mk" || true)"
+        echo
+
+        echo "##### sepolicy types our *_contexts files rely on #####"
+        # verify-tree.sh keeps a hand-maintained list of the AOSP types this tree
+        # labels files with. This is where that list is checked against reality:
+        # a type AOSP renamed or dropped fails the policy build, and until this
+        # round none of the device sepolicy was compiled at all (the device tree
+        # was a symlink, invisible to Soong's finder).
+        if [[ -d "$TREE/system/sepolicy" ]]; then
+            python3 - "$TREE" "$MANIFEST/device/khadas/edge/sepolicy/vendor" <<'PY_SEPOL'
+import os, re, sys
+tree, sedir = sys.argv[1], sys.argv[2]
+def types_in(root):
+    found = set()
+    for base, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs if d not in ('.git', 'prebuilts')]
+        for fn in files:
+            if not fn.endswith('.te'):
+                continue
+            try:
+                body = open(os.path.join(base, fn), errors='replace').read()
+            except OSError:
+                continue
+            found |= set(re.findall(r'^type\s+([a-z0-9_]+)', body, re.M))
+            found |= set(re.findall(r'^[a-z_]*_prop\(([a-z0-9_]+)', body, re.M))
+    return found
+plat = types_in(os.path.join(tree, 'system', 'sepolicy'))
+ours = types_in(sedir)
+refs = set()
+for fn in ('file_contexts', 'genfs_contexts', 'property_contexts'):
+    path = os.path.join(sedir, fn)
+    if os.path.exists(path):
+        refs |= set(re.findall(r'u:object_r:([a-z0-9_]+)', open(path).read()))
+print('  system/sepolicy declares %d types; this device declares %d' % (len(plat), len(ours)))
+unknown = sorted(t for t in refs if t not in plat and t not in ours)
+borrowed = sorted(t for t in refs if t in plat and t not in ours)
+print('  borrowed from AOSP (%d): %s' % (len(borrowed), ' '.join(borrowed)))
+if unknown:
+    print('  !! UNKNOWN (%d) - these fail the policy build:' % len(unknown))
+    for t in unknown:
+        print('       %s' % t)
+else:
+    print('  every labelled type resolves')
+PY_SEPOL
+        else
+            echo "  ABSENT at $TREE/system/sepolicy"
+        fi
         echo
 
         echo "##### release config (lunch needs it) #####"

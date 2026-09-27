@@ -77,13 +77,12 @@ for attempt in 1 2 3 4; do
 done
 
 # The device tree lives in this manifest repo rather than in a repo of its own,
-# so it is linked into place rather than synced. A symlink (not a copy) keeps
-# edits in one place and under version control.
-mkdir -p "$TREE/device/khadas"
-if [[ ! -e "$TREE/device/khadas/edge" ]]; then
-    ln -s "$MANIFEST_REPO_DIR/device/khadas/edge" "$TREE/device/khadas/edge"
-    echo "linked device/khadas/edge -> $MANIFEST_REPO_DIR/device/khadas/edge"
-fi
+# so it is placed into the tree rather than synced. This was a symlink, which is
+# exactly why the first build could not find the product: Soong's finder writes
+# out/.module_paths/AndroidProducts.mk.list by walking the tree and does not
+# descend into symlinked directories, so nothing in the device tree was visible
+# to it. See build/place-device.sh.
+"$MANIFEST_REPO_DIR/build/place-device.sh" "$TREE"
 
 # device/google/atv carries atv_base.mk and is what makes this an Android TV
 # build. edge1_tv.mk errors out without it, so check now rather than at lunch.
