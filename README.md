@@ -3,9 +3,11 @@
 A port of the Khadas Edge1 from its Android 10 (`khadas-edge-Qt`) configuration to
 Android TV 14, on a mainline kernel and with no proprietary blobs.
 
-The build compiles and is currently in image assembly — `recovery.img` and
-`system.img` are being produced. Nothing has been flashed to the board yet.
-[`docs/STATUS.md`](docs/STATUS.md) has the current state in detail.
+**The build completes.** Every image the flash layout names is produced, and
+`build/build.sh` assembles them into `out/target/product/edge/edge1-flash/` with a
+generated `flash-emmc.sh`. Nothing has been written to the board yet, so nothing here
+is claimed to boot — that is the next step.
+[`docs/STATUS.md`](docs/STATUS.md) has the state in detail.
 
 ## The shape of the port
 

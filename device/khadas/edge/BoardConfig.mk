@@ -223,6 +223,22 @@ BOARD_GPU_DRIVERS := panfrost kmsro
 
 # 4608 MiB super. Leaves room on a 16GB eMMC for userdata.
 BOARD_SUPER_PARTITION_SIZE := 4831838208
+
+# super.img is built by the default target because of this line, and without it the
+# build succeeds without producing one. core/Makefile:7307-7315 makes super.img a
+# dependency of droidcore-unbundled only when this is true; otherwise it is built
+# only by an explicit "m superimage" or for a dist build. What droid does build
+# unconditionally is super_empty.img, which carries the partition metadata and no
+# contents - fastboot writes it and then flashes the logical partitions
+# individually.
+#
+# That is the normal path for a device flashed with fastboot, and it is not this
+# one. flash-emmc.sh dds super.img into the super partition, so the board needs the
+# full image - which is exactly the case the flag exists for ("devices that use
+# super image directly", same comment). The first build to get all the way through
+# ended with "expected .../super.img was not produced" for this reason, after
+# reporting success: m had done everything it was asked to.
+BOARD_BUILD_SUPER_IMAGE_BY_DEFAULT := true
 BOARD_SUPER_PARTITION_GROUPS := rockchip_dynamic_partitions
 BOARD_ROCKCHIP_DYNAMIC_PARTITIONS_SIZE := 4827643904
 BOARD_ROCKCHIP_DYNAMIC_PARTITIONS_PARTITION_LIST := \

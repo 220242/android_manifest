@@ -104,6 +104,7 @@ if [[ -f "$TSV" ]]; then
             vendor_boot) var=BOARD_VENDOR_BOOTIMAGE_PARTITION_SIZE ;;
             init_boot)   var=BOARD_INIT_BOOT_IMAGE_PARTITION_SIZE ;;
             dtbo)        var=BOARD_DTBOIMG_PARTITION_SIZE ;;
+            super)       var=BOARD_SUPER_PARTITION_SIZE ;;
             *)           var= ;;
         esac
         [[ -n "$var" ]] || continue
@@ -125,6 +126,22 @@ if [[ -f "$TSV" ]]; then
             ok "$name ${mib}MiB >= $var ($(( board / 1024 / 1024 ))MiB)"
         fi
     done < "$TSV"
+    # super.img is the one image in the layout that the default build target does
+    # not produce on its own. core/Makefile:7311 hangs it off droidcore-unbundled
+    # only when BOARD_BUILD_SUPER_IMAGE_BY_DEFAULT is true; otherwise droid builds
+    # super_empty.img - metadata, no contents - and a build that flashes super.img
+    # with dd finds nothing there. The first successful build ended that way.
+    if grep -qE '^super\s' "$TSV" && grep -qE '[^-]\.img' <<< "$(grep -E '^super\s' "$TSV")"; then
+        if sed 's/#.*//' "$DEV/BoardConfig.mk" \
+           | grep -qE '^[[:space:]]*BOARD_BUILD_SUPER_IMAGE_BY_DEFAULT[[:space:]]*:?=[[:space:]]*true'; then
+            ok "super.img is in the layout and BOARD_BUILD_SUPER_IMAGE_BY_DEFAULT is true"
+        else
+            err "partitions.tsv flashes super.img but BoardConfig.mk does not set"
+            err "  BOARD_BUILD_SUPER_IMAGE_BY_DEFAULT := true, so the default build target"
+            err "  produces super_empty.img instead and the file will not exist"
+            layout_bad=$((layout_bad+1))
+        fi
+    fi
     (( layout_bad )) || ok "every sized partition matches the size the build enforces"
 else
     err "missing $TSV"

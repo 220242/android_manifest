@@ -4,10 +4,13 @@ Where the port is, what is still open, and the decisions worth not re-deriving.
 
 ## Where the build is
 
-The platform build runs. It has been through product configuration, Soong, Kati,
-the full compile, sepolicy, VINTF assembly and `build.prop`, and is now in image
-assembly: `recovery.img` builds, `system.img` is being produced. **No image has been
-written to the board yet**, so nothing here is claimed to boot.
+**`m` completes.** `#### build completed successfully ####`, 5311 of 5311 targets on
+the incremental run that got there, after 167136 on the first. Every image the flash
+layout names now builds, and the last thing in the way was `super.img`, which the
+default target does not produce unless asked — see below.
+
+**No image has been written to the board yet**, so nothing here is claimed to boot.
+That is the next step and the one that matters.
 
 | Stage | State |
 |---|---|
@@ -17,12 +20,33 @@ written to the board yet**, so nothing here is claimed to boot.
 | Soong (100% of `Android.bp`), Kati (all `.mk`) | works |
 | Compile — 167136 targets on the first run | works |
 | sepolicy: vendor policy, `precompiled_sepolicy`, `treble_sepolicy_tests` 29.0–34.0 | passes |
-| VINTF: `vendor_manifest.xml` | assembles |
+| VINTF: `vendor_manifest.xml`, `check_vintf_all` | passes at `target-level="7"`, no VNDK requirement, kernel-version check disabled |
 | `vendor/build.prop`, `system/build.prop` | generated |
-| `recovery.img` | builds |
-| `check_vintf_all` | HAL levels pass at `target-level="7"`, VNDK requirement removed, kernel-version check disabled |
-| `system.img`, `super.img`, `boot.img`, `vbmeta.img` | in progress |
-| Flash pack (`edge1-flash/` + generated `flash-emmc.sh`) | written, never run |
+| `boot.img`, `recovery.img`, `dtb.img`, `vbmeta.img` | build |
+| `system.img`, `vendor.img`, `product.img`, `system_ext.img`, `odm.img` | build |
+| `super.img` | needs `BOARD_BUILD_SUPER_IMAGE_BY_DEFAULT := true` |
+| Flash pack (`edge1-flash/` + generated `flash-emmc.sh`) | assembled, never run |
+
+### The last one: super.img is opt-in
+
+The first build to get all the way through reported success and then
+`build.sh` said:
+
+```
+expected .../out/target/product/edge/super.img was not produced
+```
+
+Both statements were true. `core/Makefile:7307-7315` hangs `super.img` off
+`droidcore-unbundled` **only** when `BOARD_BUILD_SUPER_IMAGE_BY_DEFAULT` is true;
+otherwise it is built by an explicit `m superimage` or for a dist build. What `droid`
+builds unconditionally is `super_empty.img` — the partition metadata with no contents
+— because the normal path is fastboot writing that and then flashing each logical
+partition individually.
+
+This device is not on that path: `flash-emmc.sh` `dd`s `super.img` into the super
+partition, which is exactly the case the flag exists for. `verify-tree.sh` check 3b
+now requires the two to agree — if `partitions.tsv` names `super.img`, BoardConfig
+has to build one.
 
 ## The approach
 
