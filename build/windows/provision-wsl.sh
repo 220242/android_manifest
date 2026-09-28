@@ -189,6 +189,17 @@ stage_images() {
             moved=$((moved+1))
         fi
     done
+    # The SPI bootloader too. CONFIG_ROCKCHIP_SPI_IMAGE=y is already in the Edge-V
+    # defconfig, so binman produces it alongside the card/eMMC one at no cost - and on
+    # this board it matters: the BootROM was measured to prefer the eMMC over the SD
+    # card, the 16MB SPI NOR is empty, and writing our U-Boot there is the one way to
+    # take over the boot without touching the eMMC's existing install at all.
+    # docs/HARDWARE.md has the readings.
+    local spi="$TREE/bootloader/u-boot/u-boot-rockchip-spi.bin"
+    if [[ -f "$spi" ]]; then
+        cp -f "$spi" "$WORK/output/"
+        log "u-boot-rockchip-spi.bin -> $WORK/output/ ($(du -h "$spi" | cut -f1))"
+    fi
     if (( moved == 0 )); then
         echo "no images produced; see $LOGS/images.log" >&2
         return 1
