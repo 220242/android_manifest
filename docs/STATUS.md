@@ -133,6 +133,30 @@ anywhere in the sources this tree is verified against.
 all turned out to be in the Edge-V defconfig already, so the third medium and the
 `ums 0 mmc 0` escape hatch cost no configuration at all.
 
+### The 9.6MB bootloader, and why seek=64
+
+`u-boot-rockchip.bin` is about 9.6MB, not the ~1MB the two stages in it add up to, and
+that is correct. It is one blob with idbloader (the rksd header, TPL and SPL) at offset
+0 and `u-boot.itb` at `CONFIG_SPL_PAD_TO` — `arch/arm/dts/rockchip-u-boot.dtsi:166-195`,
+the `simple-bin` image node. Most of the file is the pad between the two.
+
+The numbers close exactly, which is the whole reason `seek=64` is the documented value:
+
+| | |
+|---|---|
+| `CONFIG_SPL_PAD_TO` | `0x7f8000` = 16320 sectors (`common/spl/Kconfig:91`, the ARCH_ROCKCHIP default) |
+| written at | sector 64 |
+| so the FIT lands at | 64 + 16320 = **16384** |
+| `CONFIG_SYS_MMCSD_RAW_MODE_U_BOOT_SECTOR` | `0x4000` = **16384** (`common/spl/Kconfig:590`) |
+
+Nothing in the build makes those agree, so `build-uboot.sh` now does the arithmetic and
+refuses on a mismatch. If either default ever moves, the image builder would write a
+bootloader whose second stage is some sectors off, SPL would find no FIT, and the board
+would stop before there is any console to say so — and the blob would still be present
+and the right size. `verify-tree` check 3e keeps the 64 the same in all three files that
+name it, `build-uboot.sh` included, since verifying against one number while writing at
+another would pass and still not boot.
+
 ### Why the installer rather than the eMMC and NVMe images
 
 Neither the eMMC nor the SSD is removable, so only something already running on the
@@ -544,9 +568,21 @@ table of (file, state key, stages):
 | `manifests/khadas_edge_tv14.xml` | `Sync`, `Kernel` |
 | `build/windows/apt-packages.txt` | `Provision` |
 | `device/khadas/edge/**` | `Build` |
+| `build/build-kernel.sh` | `Kernel` |
+| `build/build-uboot.sh` | `Uboot` |
+| `build/build.sh` | `Build` |
 
-The third row is the same lesson applied to the expensive stage, and it is the one that
-would have saved the `super.img` cycle: a `BoardConfig.mk` change that makes the build
+The last three rows are the same lesson again, and the third time it cost a cycle:
+**a stage's own script is an input to it.** `build-uboot.sh` was rewritten to try the
+card, then the eMMC, then the NVMe; the next run printed `skipping Uboot (already
+complete)` and built all three images around a bootloader that still only knew about the
+card. Nothing about the artefact showed it — `u-boot-rockchip.bin` was present and the
+right size. The report now reads the bootcmd out of the built `.config` and prints which
+media it actually knows, for the same reason: what is on disk is the truth, not what the
+script says.
+
+The device-tree row is the same lesson applied to the expensive stage, and it is the one
+that would have saved the `super.img` cycle: a `BoardConfig.mk` change that makes the build
 emit a raw image does nothing while `Build` is still marked complete. Any edit under the
 device tree now un-completes it, and re-running `Build` with `out/` intact is an
 incremental rebuild.

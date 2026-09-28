@@ -220,6 +220,55 @@ if (( missing )); then
 fi
 echo "  bootcmd tries, in order: SD card (mmc 1), eMMC (mmc 0), NVMe (nvme 0)"
 
+# ---------------------------------------------------------------------------
+# u-boot.itb has to land on the sector SPL reads it from.
+#
+# u-boot-rockchip.bin is one blob with two stages in it: idbloader (the rksd
+# header, TPL and SPL) at offset 0, and u-boot.itb at CONFIG_SPL_PAD_TO
+# (arch/arm/dts/rockchip-u-boot.dtsi:166-195 - the simple-bin image node). Written
+# at sector 64, the itb therefore lands at 64 + SPL_PAD_TO/512. SPL looks for it at
+# CONFIG_SYS_MMCSD_RAW_MODE_U_BOOT_SECTOR, and nothing makes those two agree.
+#
+# Today they do, exactly: SPL_PAD_TO defaults to 0x7f8000 for ARCH_ROCKCHIP
+# (common/spl/Kconfig:91) which is 16320 sectors, the sector defaults to 0x4000
+# (common/spl/Kconfig:590) which is 16384, and 64 + 16320 = 16384. That is why
+# doc/board/rockchip/rockchip.rst says seek=64 and why the blob is ~9.6MB rather
+# than ~1MB - most of it is the pad between the two stages.
+#
+# It is checked because the failure is silent and expensive: if either default ever
+# moves, the image builder writes a bootloader whose second stage is some sectors
+# off, SPL finds no FIT, and the board stops before there is any console to say so.
+# ---------------------------------------------------------------------------
+# The same 64 build-images.sh and the on-device installer use. verify-tree check 3e
+# requires all three to agree.
+readonly UBOOT_SEEK_SECTORS=64
+pad_hex="$(sed -n 's/^CONFIG_SPL_PAD_TO=//p' .config)"
+sec_hex="$(sed -n 's/^CONFIG_SYS_MMCSD_RAW_MODE_U_BOOT_SECTOR=//p' .config)"
+if [[ -n "$pad_hex" && -n "$sec_hex" ]]; then
+    pad_sectors=$(( pad_hex / 512 ))
+    want=$(( UBOOT_SEEK_SECTORS + pad_sectors ))
+    if (( want == sec_hex )); then
+        printf '  u-boot.itb: sector %d at seek=%d (SPL reads sector %d) - agree\n' \
+               "$want" "$UBOOT_SEEK_SECTORS" "$(( sec_hex ))"
+    else
+        echo "==> u-boot.itb would land on the wrong sector." >&2
+        echo "    CONFIG_SPL_PAD_TO=$pad_hex is $pad_sectors sectors, so written at" >&2
+        echo "    seek=$UBOOT_SEEK_SECTORS the FIT lands at sector $want - but SPL reads it from" >&2
+        echo "    sector $(( sec_hex )) (CONFIG_SYS_MMCSD_RAW_MODE_U_BOOT_SECTOR=$sec_hex)." >&2
+        echo "    SPL would find no FIT and the board would stop before any console." >&2
+        echo "    Change UBOOT_SEEK_SECTORS in build-images.sh, the installer and here" >&2
+        echo "    to $(( sec_hex - pad_sectors )), or pin CONFIG_SPL_PAD_TO." >&2
+        exit 1
+    fi
+elif ! grep -qx 'CONFIG_SYS_MMCSD_RAW_MODE_U_BOOT_USE_SECTOR=y' .config; then
+    echo "  note: SPL does not load u-boot.itb from a raw sector in this config, so the" >&2
+    echo "        seek=64 packaging could not be checked. If the board stops at SPL, this" >&2
+    echo "        is the first thing to look at." >&2
+else
+    echo "  note: CONFIG_SPL_PAD_TO or CONFIG_SYS_MMCSD_RAW_MODE_U_BOOT_SECTOR is not in" >&2
+    echo "        .config, so where u-boot.itb lands could not be verified." >&2
+fi
+
 echo "==> building ($(nproc) jobs)"
 make "CROSS_COMPILE=$CROSS" "BL31=$BL31" -j"$(nproc)"
 

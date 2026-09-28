@@ -166,11 +166,20 @@ function Test-Done { param([string] $Name)
 #     later, after an eight-hour platform build. Adding a package now re-runs
 #     Provision by itself; apt on an already-provisioned distro takes seconds.
 #   device/khadas/edge/** -> Build
-#     The third one, and the one that would have saved this cycle: changing
-#     BoardConfig.mk to make super.img raw does not make a completed Build stage
-#     produce a raw super.img. A device tree edit means the images in out/ are stale,
-#     and re-running Build on a warm ccache and an intact out/ is an incremental
-#     rebuild, not a fresh one.
+#     The third one: changing BoardConfig.mk to make super.img raw does not make a
+#     completed Build stage produce a raw super.img. A device tree edit means the
+#     images in out/ are stale, and re-running Build on a warm ccache and an intact
+#     out/ is an incremental rebuild, not a fresh one.
+#   build/build-kernel.sh -> Kernel
+#   build/build-uboot.sh  -> Uboot
+#   build/build.sh        -> Build
+#     A stage's own script is an input to it, and this is the third time that has
+#     cost a cycle. build-uboot.sh was rewritten to try the card, then the eMMC, then
+#     the NVMe; the next run printed "skipping Uboot (already complete)" and the
+#     images were built around a bootloader that still only knew about the card.
+#     Nothing about the artefact showed it: u-boot-rockchip.bin was there and the
+#     right size. These three hashes close the class - every stage that runs a script
+#     of ours now re-runs when that script changes.
 #
 # An entry names its own Probe when a plain sha256sum will not do - the device tree is
 # a directory, so its hash is the sorted hash of every file in it.
@@ -183,6 +192,12 @@ $script:TrackedInputs = @(
        Stages=@('Build'); Label='the device tree';
        Probe=('find ~/android_khadas/android_manifest/device/khadas/edge -type f -print0 ' +
               '2>/dev/null | sort -z | xargs -0 sha256sum 2>/dev/null | sha256sum | cut -c1-16') }
+    @{ Key='kernelScriptHash'; Path='build/build-kernel.sh';
+       Stages=@('Kernel'); Label="the kernel build script" }
+    @{ Key='ubootScriptHash';  Path='build/build-uboot.sh';
+       Stages=@('Uboot'); Label="the U-Boot build script" }
+    @{ Key='buildScriptHash';  Path='build/build.sh';
+       Stages=@('Build'); Label="the platform build script" }
 )
 
 function Invalidate-OnInputChange {

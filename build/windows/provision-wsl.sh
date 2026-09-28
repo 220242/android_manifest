@@ -1309,8 +1309,39 @@ stage_report() {
                 printf '  %-14s %-16s MISSING\n' "$pname" "$pimg"
             fi
         done < "$tsv"
-        echo "  u-boot:        $([[ -f $TREE/bootloader/u-boot/u-boot-rockchip.bin ]] \
-            && du -h "$TREE/bootloader/u-boot/u-boot-rockchip.bin" | cut -f1 || echo 'not built')"
+        # The bootloader, and the one thing about it that cannot be seen from its size:
+    # which media its bootcmd knows about. It is read out of the built blob rather
+    # than out of the script, because a stage marked complete can leave an old
+    # bootloader in place while the script says something else - which is exactly
+    # what happened once.
+    if [[ -f $TREE/bootloader/u-boot/u-boot-rockchip.bin ]]; then
+        echo "  u-boot:        $(du -h "$TREE/bootloader/u-boot/u-boot-rockchip.bin" | cut -f1)"
+        if [[ -f $TREE/bootloader/u-boot/.config ]]; then
+            local bc; bc="$(sed -n 's/^CONFIG_BOOTCOMMAND="\(.*\)"$/\1/p' "$TREE/bootloader/u-boot/.config")"
+            local media=""
+            [[ "$bc" == *"mmc dev 1"* ]]     && media="$media card"
+            [[ "$bc" == *"mmc dev 0"* ]]     && media="$media eMMC"
+            [[ "$bc" == *"nvme device 0"* ]] && media="$media NVMe"
+            echo "  its bootcmd:  ${media:- NONE OF card/eMMC/NVMe - this is an old build}"
+            grep -qx 'CONFIG_HUSH_PARSER=y' "$TREE/bootloader/u-boot/.config" \
+                && echo "  hush parser:   yes (the fallback between media works)" \
+                || echo "  hush parser:   NO - no && or ||, so there is no fallback"
+        fi
+    else
+        echo "  u-boot:        not built"
+    fi
+    # sgdisk is what the on-device installer writes the GPT with. It comes from
+    # external/gptfdisk via PRODUCT_PACKAGES, and a module name that resolves is not
+    # the same as a binary in the image, so this looks for the file.
+    local sg=""
+    for c in "$pout/system/bin/sgdisk" "$pout/vendor/bin/sgdisk" "$pout/system/xbin/sgdisk"; do
+        [[ -f "$c" ]] && { sg="${c#$pout/}"; break; }
+    done
+    echo "  sgdisk:        ${sg:-NOT IN THE IMAGE - the installer cannot write a GPT}"
+    echo "  installer:     $([[ -f $pout/vendor/bin/edge1-install-internal.sh ]] \
+        && echo 'vendor/bin/edge1-install-internal.sh' || echo 'NOT IN THE IMAGE')"
+    echo "  its layout:    $([[ -f $pout/vendor/etc/edge1-partitions.tsv ]] \
+        && echo 'vendor/etc/edge1-partitions.tsv' || echo 'NOT IN THE IMAGE')"
         echo "  sdcard image:  $([[ -f $pout/edge1-sdcard.img ]] \
             && echo "$(du -h --apparent-size "$pout/edge1-sdcard.img" | cut -f1) apparent, $(du -h "$pout/edge1-sdcard.img" | cut -f1) on disk" \
             || echo 'not assembled')"

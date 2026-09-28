@@ -285,13 +285,20 @@ if [[ -f "$INSTALLER" ]]; then
         err "  installer=${ins_first:-?} build.sh=${gen_first:-?}"
         consumers_bad=$((consumers_bad+1))
     fi
-    # sector 64, in the two that write a bootloader.
+    # sector 64, in the two that write a bootloader and in the one that checks where
+    # u-boot.itb lands. build-uboot.sh needs the same number because the blob's second
+    # stage sits at a fixed offset inside it: written at seek N the FIT lands at
+    # N + CONFIG_SPL_PAD_TO/512, and SPL reads it from a fixed sector. If build-uboot.sh
+    # verified that against 64 while build-images.sh wrote at something else, the check
+    # would pass and the board would still stop at SPL.
     img_seek=$(grep -oE '^readonly UBOOT_SEEK_SECTORS=[0-9]+' "$ROOT/build/build-images.sh" | grep -oE '[0-9]+$')
     ins_seek=$(grep -oE '^UBOOT_SEEK_SECTORS=[0-9]+' "$INSTALLER" | grep -oE '[0-9]+$')
-    if [[ -n "$img_seek" && "$img_seek" == "$ins_seek" ]]; then
-        ok "bootloader at sector $img_seek in both writers that place one"
+    ub_seek=$(grep -oE '^readonly UBOOT_SEEK_SECTORS=[0-9]+' "$ROOT/build/build-uboot.sh" | grep -oE '[0-9]+$')
+    if [[ -n "$img_seek" && "$img_seek" == "$ins_seek" && "$img_seek" == "$ub_seek" ]]; then
+        ok "bootloader at sector $img_seek in all three files that name it"
     else
-        err "the bootloader sector differs: build-images.sh=${img_seek:-?} installer=${ins_seek:-?}"
+        err "the bootloader sector differs: build-images.sh=${img_seek:-?}"
+        err "  installer=${ins_seek:-?} build-uboot.sh=${ub_seek:-?}"
         consumers_bad=$((consumers_bad+1))
     fi
     # The installer's layout path must be the one device.mk installs.
