@@ -327,6 +327,52 @@ else
 fi
 echo
 
+# --- 3f. the card must be able to win against the eMMC --------------------------
+#
+# Two lines in build-uboot.sh decide whether the U-Boot we build is the one that
+# actually runs, and both of them were missing on the first three cards. The
+# symptom was the same each time and said nothing: the board booted the Armbian
+# that lives on the eMMC, from a card whose ID block, GPT and partitions were all
+# correct.
+#
+#   the SPL boot order    SPL loads u-boot.itb by itself, from the first device in
+#                         /chosen/u-boot,spl-boot-order that resolves. Upstream
+#                         lists &sdhci (eMMC) before &sdmmc (card), and the eMMC
+#                         holds another valid u-boot.itb at the same sector 16384 -
+#                         Armbian writes it there too. So SPL loads Armbian's
+#                         bootloader and ours never runs.
+#
+#   the environment       CONFIG_ENV_IS_IN_MMC with device index 0 reads the
+#                         environment off the eMMC, and a stored environment
+#                         replaces bootcmd and preboot entirely rather than
+#                         merging - so the eMMC would decide what the card boots.
+#
+# Neither is visible in any log, on any screen, or in the image. Both are cheap to
+# assert, so they are asserted here rather than trusted to stay.
+echo "[3f] the card's bootloader cannot be displaced by the eMMC"
+uboot_sh="$ROOT/build/build-uboot.sh"
+if [[ -f "$uboot_sh" ]]; then
+    card_bad=0
+    if grep -q 'u-boot,spl-boot-order' "$uboot_sh"; then
+        ok "build-uboot.sh sets SPL's boot order (card before eMMC)"
+    else
+        err "build-uboot.sh no longer touches u-boot,spl-boot-order, so SPL would use"
+        err "  upstream's order and load u-boot.itb from the eMMC"
+        card_bad=$((card_bad+1))
+    fi
+    if grep -q '^# CONFIG_ENV_IS_IN_MMC is not set$' "$uboot_sh"; then
+        ok "the environment is compiled in, not read from the eMMC"
+    else
+        err "build-uboot.sh no longer disables CONFIG_ENV_IS_IN_MMC; a stored"
+        err "  environment on the eMMC would replace bootcmd and preboot"
+        card_bad=$((card_bad+1))
+    fi
+    (( card_bad )) || ok "nothing on the internal storage can take the boot over"
+else
+    err "missing $uboot_sh"
+fi
+echo
+
 # --- 4. VINTF: fragments must NOT duplicate the device manifest ----------------
 #
 # This check used to assert the opposite - that every HAL in a fragment also

@@ -58,27 +58,21 @@ readonly UBOOT_REV="${EDGE1_UBOOT_REV:-}"
 #   EDGE1_ROCKCHIP_TPL=1 build/build-uboot.sh ~/aosp-14-edge1
 #   EDGE1_IMAGE_TAG=rkddr build/build-images.sh ~/aosp-14-edge1 sdcard
 #
-# This is the A/B that the first hardware attempt actually calls for, and it is one
-# variable rather than a different tree.
+# This was the A/B for "our TPL cannot bring up this board's LPDDR4". It has been run,
+# on hardware, one card each way - and both cards behaved identically, so DDR init is
+# NOT the fault. docs/HARDWARE.md records what was: SPL was loading u-boot.itb off the
+# eMMC, which happens after DRAM is already up and is therefore invisible to this A/B.
 #
-# What the board did: a card whose ID block at sector 64 verifies (rk-idb-check.py
-# says so), and the board boots the eMMC anyway. The owner has a counter-example
-# that settles the boot order - an OpenWrt card on this same board always won over
-# the eMMC - so the BootROM does read the card first. It read our ID block and then
-# fell through, which means the block is fine and the *payload it points at* failed.
+# Kept because it stays useful and costs one variable. binman supports the
+# substitution directly: arch/arm/dts/rockchip-u-boot.dtsi:170-184 puts `rockchip-tpl`
+# into idbloader.img instead of `u-boot-tpl` when CONFIG_ROCKCHIP_EXTERNAL_TPL is set,
+# so the output is the same u-boot-rockchip.bin, the same single blob, at the same
+# sector 64. Nothing else about the image changes, which is what makes it a clean
+# comparison - and the next DRAM question gets answered without a new tree.
 #
-# The first thing that payload does is bring up DRAM, and that is the one part of
-# the chain this tree has no second opinion on: CONFIG_TPL=y with
-# CONFIG_RAM_ROCKCHIP_LPDDR4=y, so U-Boot's own TPL does it. If that does not work
-# on this board's particular LPDDR4 part, DDR init fails, and a BootROM that cannot
-# get a first stage running falls through to the next device - exactly what was
-# seen.
-#
-# Rockchip's DDR blob is the other opinion. binman already supports substituting it:
-# arch/arm/dts/rockchip-u-boot.dtsi:170-184 puts `rockchip-tpl` in idbloader.img
-# instead of `u-boot-tpl` when CONFIG_ROCKCHIP_EXTERNAL_TPL is set, so the output is
-# the same u-boot-rockchip.bin, the same single blob, at the same sector 64. Nothing
-# else about the image changes, which is what makes it a clean comparison.
+# Armbian's own Edge scenario is tpl-spl-blob, which passes BL31= alone and no
+# ROCKCHIP_TPL, so upstream Armbian relies on U-Boot's TPL on this board too -
+# consistent with what the A/B measured.
 #
 # CONFIG_TPL is deliberately left on. binman's #ifdef prefers the external blob when
 # EXTERNAL_TPL is set, so U-Boot's TPL is still built and simply not packaged - a few
@@ -168,6 +162,14 @@ else
 fi
 
 cd "$UB"
+
+# The one file in this tree that this script edits (SPL's boot order, below). Reset it
+# first, every time: leaving the edit in place would make a later checkout of a
+# different revision refuse to switch, and it is the difference between an edit that is
+# idempotent and one that happens to be.
+readonly ORDER_DTSI=arch/arm/dts/rk3399-u-boot.dtsi
+git checkout -q -- "$ORDER_DTSI" 2>/dev/null || true
+
 if [[ -n "$UBOOT_REV" ]]; then
     echo "==> EDGE1_UBOOT_REV=$UBOOT_REV: checking out a different U-Boot"
     git fetch --depth 1 origin "refs/tags/$UBOOT_REV:refs/tags/$UBOOT_REV" 2>/dev/null \
@@ -182,6 +184,87 @@ if [[ -n "$UBOOT_REV" ]]; then
     echo "  HEAD is now $(git describe --tags --always)"
 fi
 echo "==> U-Boot $(make -s ubootversion 2>/dev/null || echo '(version unknown)')"
+
+# ---------------------------------------------------------------------------
+# Make SPL look at the SD card before the eMMC.
+#
+# This is the first of the two faults the first three cards died of - the other is
+# the environment, further down - and it is worth writing out in full because nothing
+# about it is visible without a serial console.
+#
+# u-boot-rockchip.bin has two stages in it. The BootROM loads the first
+# (TPL+SPL) from sector 64 of whatever it booted from - the card. SPL then loads
+# the second (u-boot.itb) *by itself*, from a device it chooses, and the choice
+# comes from /chosen/u-boot,spl-boot-order in the SPL device tree. Upstream's
+# rk3399-u-boot.dtsi:16 says
+#
+#   u-boot,spl-boot-order = "same-as-spl", &sdhci, &sdmmc;
+#
+# and on rk3399 &sdhci is the eMMC (mmc@fe330000) while &sdmmc is the SD card
+# (mmc@fe320000) - arch/arm/mach-rockchip/rk3399/rk3399.c:27-31. So after
+# "same-as-spl", the eMMC is tried BEFORE the card.
+#
+# "same-as-spl" should have made that harmless: board_spl_was_booted_from()
+# reads the BootROM's boot-source id from CFG_IRAM_BASE+0x10 and maps 5 (SD) to
+# "/mmc@fe320000". But it is allowed to fail, and arch/arm/mach-rockchip/
+# spl-boot-order.c:140-144 does not treat failure as an error - it just
+# `continue`s to the next entry, which is the eMMC. Anything that loses that id
+# (a TPL that overwrites it, a BootROM revision that does not set it) silently
+# turns the card boot into an eMMC boot.
+#
+# And an eMMC boot here is not a dead board, which is what made this so hard to
+# see: this board's eMMC has Armbian on it, written the same way ours is -
+# Armbian's own rockchip64 family writes idbloader.img to sector 64 and
+# u-boot.itb to sector 16384 (config/sources/families/include/rockchip64_common.inc,
+# write_uboot_platform). Sector 16384 is exactly where our SPL looks. So SPL
+# finds a perfectly valid FIT there, loads Armbian's U-Boot 2022.07, and the
+# board boots Armbian - from a card that is entirely correct. That matches every
+# symptom: no banner from our U-Boot, Armbian every time, and no difference
+# between the two DDR variants, because the divergence happens after DDR is up.
+#
+# Putting &sdmmc first makes the card win whether or not "same-as-spl" resolves.
+# It is not an invention: Armbian ships exactly this for the other rk3399 board
+# it boots from removable media - patch/u-boot/v2026.07/board_helios64/dt_uboot/
+# rk3399-kobol-helios64-u-boot.dtsi:17 reads
+#
+#   u-boot,spl-boot-order = "same-as-spl", &spiflash, &sdmmc, &sdhci;
+#
+# The eMMC stays in the list, after the card, so an eMMC install still boots on
+# its own with no card in the slot.
+#
+# Done as an edit here rather than as a patch file because repo owns
+# bootloader/u-boot and resets it on every sync - so the edit has to be
+# re-applied by the thing that builds, not by the thing that fetches. That is
+# also why the manifest hash invalidates the Uboot stage in Start-EdgeBuild.ps1:
+# a sync throws this away and the card must not be built from the old blob.
+# ---------------------------------------------------------------------------
+[[ -f "$ORDER_DTSI" ]] || {
+    echo "$ORDER_DTSI is not in this U-Boot, so SPL's boot order cannot be set." >&2
+    echo "Without it SPL may load u-boot.itb from the eMMC instead of the card." >&2
+    exit 1; }
+grep -q 'u-boot,spl-boot-order' "$ORDER_DTSI" || {
+    echo "$ORDER_DTSI has no u-boot,spl-boot-order property." >&2
+    echo "SPL would fall back to spl_boot_device(), which is BOOT_DEVICE_MMC1 -" >&2
+    echo "the eMMC. Find where the order moved to before building a card." >&2
+    exit 1; }
+# Only reorders the two entries; it does not add, remove or rename any. Applying
+# it twice is a no-op, which matters because this runs on every build.
+sed -i 's/\(u-boot,spl-boot-order = .*\)&sdhci, &sdmmc;/\1\&sdmmc, \&sdhci;/' "$ORDER_DTSI"
+order_value="$(sed -n 's/.*u-boot,spl-boot-order = \(.*\);.*/\1/p' "$ORDER_DTSI" | head -1)"
+case "$order_value" in
+    *'&sdmmc'*'&sdhci'*)
+        echo "==> SPL boot order: $order_value"
+        echo "    (the SD card before the eMMC, so the card's own u-boot.itb wins)" ;;
+    *)
+        echo "==> SPL's boot order could not be set to card-first." >&2
+        echo "    $ORDER_DTSI now says:" >&2
+        echo "      u-boot,spl-boot-order = ${order_value:-<not found>};" >&2
+        echo "    Expected &sdmmc to come before &sdhci. If upstream has rewritten" >&2
+        echo "    this property, the sed above needs updating - do not build a card" >&2
+        echo "    until it does, because SPL would load u-boot.itb from the eMMC." >&2
+        exit 1 ;;
+esac
+
 echo "==> base config: $DEFCONFIG"
 make "CROSS_COMPILE=$CROSS" "$DEFCONFIG"
 
@@ -326,6 +409,39 @@ readonly FRAGMENT=.config-android-fragment
 # Same shape as the kernel's DWMAC_ROCKCHIP staying m behind a tristate parent: a
 # default is not a guarantee, so anything this build depends on is stated.
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Do not read the environment off the internal eMMC.
+#
+# khadas-edge-v-rk3399_defconfig has CONFIG_ENV_IS_IN_MMC=y and
+# CONFIG_ENV_OFFSET=0x3F8000, and CONFIG_ENV_MMC_DEVICE_INDEX defaults to 0 -
+# which on rk3399 is &sdhci, the eMMC. So a U-Boot booted from the SD card reads
+# its environment from the board's internal storage, at sector 8128.
+#
+# Everything that makes this U-Boot ours lives in that environment. bootcmd is
+# the three-target Android sequence built above; preboot is what moves the
+# console onto HDMI. Both are *defaults*, and env_load() replaces the whole
+# default set with the stored one the moment it finds a valid CRC - it is not a
+# merge. So one saved environment on the eMMC silently discards our bootcmd and
+# our preboot, and U-Boot boots whatever that environment says instead, with no
+# output on the screen because preboot never ran.
+#
+# On this board that is not hypothetical. The eMMC has Armbian on it, built from
+# this same defconfig, so its U-Boot keeps its environment at exactly this
+# offset on exactly this device.
+#
+# Turning ENV_IS_IN_MMC off leaves no ENV_IS_IN_* at all, and env/Kconfig:71-79
+# then selects ENV_IS_NOWHERE through ENV_IS_DEFAULT: the compiled-in
+# environment is used on every boot, from every medium, and nothing on the
+# internal storage can change what the card does. For an appliance whose boot
+# sequence is fixed at build time that is what is wanted - there is nothing here
+# a user is meant to edit and keep.
+#
+# It also removes a way to brick the card. ENV_OFFSET 0x3F8000 is sector 8128,
+# which is inside the region sector 64 .. 16383 that u-boot-rockchip.bin
+# occupies - so had the environment been moved to the card instead, a saveenv
+# would have written 32KB into the middle of our own bootloader.
+# ---------------------------------------------------------------------------
 readonly STDOUT_BOTH='setenv stdout serial,vidconsole; setenv stderr serial,vidconsole'
 
 cat > "$FRAGMENT" <<EOF
@@ -343,6 +459,7 @@ CONFIG_USE_PREBOOT=y
 CONFIG_PREBOOT="$STDOUT_BOTH"
 CONFIG_USE_BOOTCOMMAND=y
 CONFIG_BOOTCOMMAND="$BOOTCMD"
+# CONFIG_ENV_IS_IN_MMC is not set
 EOF
 if [[ -n "$RKTPL" ]]; then
     echo 'CONFIG_ROCKCHIP_EXTERNAL_TPL=y' >> "$FRAGMENT"
@@ -370,7 +487,21 @@ missing=0
 # nothing had asked for. Now every line of the fragment is checked and nothing else
 # can drift.
 while IFS= read -r line; do
-    case "$line" in ''|\#*) continue ;; esac
+    case "$line" in
+        '') continue ;;
+        # A symbol turned OFF is a contract too. merge_config.sh understands
+        # "# CONFIG_X is not set" (scripts/kconfig/merge_config.sh:106), and
+        # this loop used to skip every line starting with # - which would have
+        # let the one line here that actually fixes the boot pass unchecked.
+        '# CONFIG_'*' is not set')
+            sym="${line#\# }"; sym="${sym% is not set}"
+            if grep -q "^${sym}=" .config; then
+                echo "  STILL SET: $(grep "^${sym}=" .config)" >&2
+                missing=$((missing+1))
+            fi
+            continue ;;
+        \#*) continue ;;
+    esac
     sym="${line%%=*}"; val="${line#*=}"
     case "$val" in
         # A string value: only presence can be checked generically. The two strings
@@ -387,7 +518,13 @@ done < "$FRAGMENT"
 # third boot target exist at all, and without CONFIG_CMD_USB_MASS_STORAGE the
 # documented "ums 0 mmc 0" escape hatch is not there. Asserted, not assumed - but
 # they have been observed to take, unlike the two now in the fragment.
-for sym in CONFIG_CMD_NVME CONFIG_PCI CONFIG_CMD_USB_MASS_STORAGE; do
+#
+# CONFIG_ENV_IS_NOWHERE is the other half of turning ENV_IS_IN_MMC off: nothing
+# sets it directly, env/Kconfig:71-79 selects it through ENV_IS_DEFAULT once no
+# ENV_IS_IN_* is left. Asserted because the negative line alone does not prove it
+# - some other ENV_IS_IN_* becoming the default would satisfy that line and put
+# the environment back on a storage device.
+for sym in CONFIG_CMD_NVME CONFIG_PCI CONFIG_CMD_USB_MASS_STORAGE CONFIG_ENV_IS_NOWHERE; do
     grep -qx "${sym}=y" .config || { echo "  NOT SET: $sym" >&2; missing=$((missing+1)); }
 done
 # The console has to end up on both, or the screen stays blank and this was for
@@ -414,6 +551,8 @@ if (( missing )); then
 fi
 echo "  bootcmd tries, in order: SD card (mmc 1), eMMC (mmc 0), NVMe (nvme 0)"
 echo "  console:  serial (ttyS2, 1500000) and HDMI"
+echo "  environment: compiled in (ENV_IS_NOWHERE), so nothing on the eMMC can"
+echo "               replace the bootcmd or the preboot above"
 if [[ -n "$RKTPL" ]]; then
     grep -qx 'CONFIG_ROCKCHIP_EXTERNAL_TPL=y' .config \
         && echo "  DDR init: rkbin blob $(basename "$RKTPL")" \

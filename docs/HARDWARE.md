@@ -16,7 +16,7 @@ wrong. Each row says what it confirms or corrects.
 | RAM | `MemTotal: 3945072 kB` → a 4GB board | confirms what `edge1_tv.mk` sizes for; the Edge also ships in 2GB |
 | kernel in use | `6.12.47-current-rockchip64` | we build `6.12.111` — same series |
 
-## The boot order, and a conclusion that was wrong
+## The boot order, and two conclusions that were wrong
 
 Measured with `build/rk-idb-check.py`:
 
@@ -35,32 +35,29 @@ and the counter-evidence is stronger than the inference:** on this same board, a
 OpenWrt SD card always won over the eMMC — it never reached Armbian. So the BootROM
 *does* read the card first.
 
-Which relocates the fault entirely, and for the better:
+That relocated the fault, but not to where I then put it. The next inference was:
 
 > The BootROM read our card's ID block — it verifies — and then **fell through to the
 > eMMC**. A BootROM falls through when it cannot get a first stage running. So the
-> header is fine and the **payload it points at** is what failed.
+> header is fine and the payload it points at is what failed — and the first thing
+> that payload does is bring up DRAM.
 
-The first thing that payload does is bring up DRAM, and DDR init is the one link in
-this chain with no second opinion behind it: `CONFIG_TPL=y` with
-`CONFIG_RAM_ROCKCHIP_LPDDR4=y`, so U-Boot's own TPL does it. If that does not work on
-this board's particular LPDDR4 part, the BootROM gets nothing runnable and moves to the
-next device — exactly the observed behaviour.
+**That was also wrong, and this time the test settled it.** DDR init was the one link
+with no second opinion behind it (`CONFIG_TPL=y` with `CONFIG_RAM_ROCKCHIP_LPDDR4=y`,
+so U-Boot's own TPL does it), and `EDGE1_ROCKCHIP_TPL=1` substitutes Rockchip's blob as
+a single variable: binman packages `rockchip-tpl` instead of `u-boot-tpl` into the same
+`idbloader.img` (`arch/arm/dts/rockchip-u-boot.dtsi:170-184`), same
+`u-boot-rockchip.bin`, same sector 64, nothing else changed. Two cards were written,
+one each way, and **both boot Armbian**. DRAM is therefore not the fault.
 
-Rockchip's DDR blob is the other opinion, and substituting it is one variable:
-`EDGE1_ROCKCHIP_TPL=1 build/build-uboot.sh`. binman then packages `rockchip-tpl`
-instead of `u-boot-tpl` into the same `idbloader.img`
-(`arch/arm/dts/rockchip-u-boot.dtsi:170-184`), so the output is the same
-`u-boot-rockchip.bin` at the same sector 64 and nothing else about the image changes.
-Armbian picks `rk3399_ddr_933MHz_v1.25.bin` for rk3399; the script searches for it
-rather than hardcoding a version.
+What the inference got wrong was "falls through": the BootROM never had to. Our TPL and
+SPL run from the card perfectly well — and then SPL, which loads the *second* stage on
+its own, picks the eMMC. See the next section.
 
-Worth keeping in mind about Armbian's own choice here: its Edge scenario is
-`tpl-spl-blob`, which passes `BL31=` alone and **no** `ROCKCHIP_TPL` — so Armbian
-relies on U-Boot's TPL on this board too. That is either a point in favour of U-Boot's
-TPL working, or a sign that Armbian's Edge support (`.csc`,
-`BOARD_MAINTAINER=""`) is not exercised on 4GB LPDDR4 parts. The A/B is what tells the
-two apart.
+Armbian's own choice is worth keeping on record now that it is no longer in question:
+its Edge scenario is `tpl-spl-blob`, which passes `BL31=` alone and **no**
+`ROCKCHIP_TPL`, so Armbian relies on U-Boot's TPL on this board too — consistent with
+what the A/B measured.
 
 ### The ID blocks, decoded and compared
 
@@ -93,41 +90,124 @@ So Armbian's 2022.07 built its `idbloader.img` from one concatenated file and go
 placeholder; ours uses binman's `multiple-data-files` (TPL and SPL separately) and gets
 the real size. Ours is the more precise of the two.
 
-## So where the fault has to be
+## Why the card lost to the eMMC, and the two fixes
 
-`chosen/u-boot,version` reading `2022.07-armbian` says precisely one thing: the U-Boot
-that handed off to the kernel was **Armbian's**, not the `2026.07` this tree builds.
-Combined with everything above, two chains survive:
+Both DDR variants were tested — U-Boot's own TPL and rkbin's 933MHz blob, one card
+each — and **both boot Armbian from the eMMC**. That eliminates chain (A), DDR init:
+if DRAM were the problem, the rkbin blob would have changed the outcome, and it
+changed nothing. Two defects remain, and they sit one after the other in the same
+boot. Each one alone is enough to give exactly what the board does.
 
-**(A) Our TPL fails to bring up DRAM.** The BootROM cannot get a first stage running off
-the card and falls through to the eMMC, where Armbian's TPL, SPL and U-Boot all run.
-This is the hypothesis `EDGE1_ROCKCHIP_TPL=1` tests, and DDR init is the only link in
-our chain with no second opinion behind it.
+### 1. SPL loads `u-boot.itb` from the eMMC
 
-**(B) Our TPL and SPL run, but SPL loads `u-boot.itb` from the eMMC.** The search order
-is `u-boot,spl-boot-order = "same-as-spl", &sdhci, &sdmmc`
-(`arch/arm/dts/rk3399-u-boot.dtsi:16`) — and `&sdhci` is the **eMMC**, ahead of the card.
-`same-as-spl` should resolve to the card: rk3399 implements
-`board_spl_was_booted_from()` (`arch/arm/mach-rockchip/spl.c:51`), which reads the
-BootROM's boot-source ID from `CFG_IRAM_BASE + 0x10` and maps `BROM_BOOTSOURCE_SD` to
-`/mmc@fe320000` (`rk3399/rk3399.c:27-31`). But if that value does not survive to SPL,
-`same-as-spl` yields NULL, the loop `continue`s, and the next entry is the eMMC — whose
-`u-boot.itb` at sector 16384 is Armbian's.
+`u-boot-rockchip.bin` is two stages in one blob. The BootROM loads the first —
+TPL + SPL — from sector 64 of the device it booted from, which the card's valid ID
+block proves it does. SPL then loads the second, `u-boot.itb`, **by itself**, from
+the first device in `/chosen/u-boot,spl-boot-order` that resolves. Upstream says:
 
-A third chain is ruled out: our U-Boot proper running and its `bootcmd` failing would
-leave it at a prompt, and even if `CONFIG_ENV_IS_IN_MMC` pulled Armbian's saved
-environment and its `bootcmd`, the handoff would still be done by 2026.07. The version
-string says otherwise.
+```
+u-boot,spl-boot-order = "same-as-spl", &sdhci, &sdmmc;   arch/arm/dts/rk3399-u-boot.dtsi:16
+```
 
-### Which to test first, and why in this order
+On rk3399 `&sdhci` is the eMMC (`mmc@fe330000`) and `&sdmmc` is the card
+(`mmc@fe320000`) — `arch/arm/mach-rockchip/rk3399/rk3399.c:27-31`. So after
+`same-as-spl`, **the eMMC is tried before the card**.
 
-1. **`EDGE1_ROCKCHIP_TPL=1`, one card write, nothing destructive.** If (A), this fixes
-   it outright. It is also the only test here that risks nothing.
-2. **Only if that fails, (B).** The fix is to stop the eMMC offering a competing
-   `u-boot.itb` — back up the eMMC's first 16MiB, then clear the region at sector 16384.
-   In *both* chains that makes some SPL fall through to the card and load ours, so it
-   fixes as well as diagnoses; the cost is that Armbian stops booting until the backup
-   is restored.
+`same-as-spl` is supposed to make that harmless: `board_spl_was_booted_from()`
+(`arch/arm/mach-rockchip/spl.c:51`) reads the BootROM's boot-source ID from
+`CFG_IRAM_BASE + 0x10` and maps `BROM_BOOTSOURCE_SD` (5) to `/mmc@fe320000`. But it is
+allowed to fail, and `arch/arm/mach-rockchip/spl-boot-order.c:140-144` does not treat
+failure as an error — it `continue`s to the next entry, the eMMC.
+
+And this eMMC is not empty at sector 16384. Armbian's rockchip64 family writes
+`idbloader.img` to sector 64 and `u-boot.itb` to sector 16384
+(`config/sources/families/include/rockchip64_common.inc`, `write_uboot_platform`) —
+byte-for-byte the same layout this tree uses. So SPL finds a perfectly valid FIT
+there, loads Armbian's U-Boot 2022.07, and the board boots Armbian from a card that
+is entirely correct. That matches every observation: no banner from our U-Boot even
+with video enabled, `chosen/u-boot,version` reading `2022.07-armbian`, and no
+difference between the two DDR variants, because the divergence happens *after* DRAM
+is up.
+
+**The fix**, applied by `build/build-uboot.sh` on every build, is to put `&sdmmc`
+first:
+
+```
+u-boot,spl-boot-order = "same-as-spl", &sdmmc, &sdhci;
+```
+
+The card then wins whether or not `same-as-spl` resolves, and the eMMC stays in the
+list behind it so an eMMC install still boots with no card in the slot. This is not
+an invention: Armbian ships exactly this ordering for the other rk3399 board it boots
+from removable media —
+`patch/u-boot/v2026.07/board_helios64/dt_uboot/rk3399-kobol-helios64-u-boot.dtsi:17`
+reads `"same-as-spl", &spiflash, &sdmmc, &sdhci`.
+
+It is done as an edit in the build script rather than as a patch file because `repo`
+owns `bootloader/u-boot` and resets it on every sync, so the edit has to be re-applied
+by the thing that builds. The manifest hash therefore invalidates the `Uboot` stage in
+`Start-EdgeBuild.ps1`.
+
+### 2. Our U-Boot reads its environment off the eMMC
+
+This one would have taken over the moment the first was fixed. Measured against the
+real defconfig rather than inferred — `make khadas-edge-v-rk3399_defconfig` and read
+the result:
+
+```
+CONFIG_ENV_IS_IN_MMC=y
+CONFIG_ENV_MMC_DEVICE_INDEX=0     # mmc 0 on rk3399 is &sdhci, the eMMC
+CONFIG_ENV_OFFSET=0x3F8000        # sector 8128
+```
+
+Everything that makes this U-Boot ours lives in the environment: `bootcmd` is the
+three-target Android sequence, `preboot` is what moves the console onto HDMI. Both are
+*defaults*, and `env_load()` replaces the entire default set with a stored one the
+moment it finds a valid CRC — it is not a merge. One saved environment on the eMMC
+therefore discards our `bootcmd` and our `preboot`, and U-Boot boots whatever that
+environment says, with a blank screen because `preboot` never ran. On this board that
+is not hypothetical: the eMMC runs Armbian built from *this same defconfig*, so its
+U-Boot keeps its environment at exactly that offset on exactly that device.
+
+It also explains the one observation nothing else did — **Ethernet coming up and DHCP
+handing the board an address before Armbian loads**. Our `bootcmd` never touches the
+network. Armbian's distro `boot_targets` includes `dhcp`.
+
+**The fix** is one line in the config fragment:
+
+```
+# CONFIG_ENV_IS_IN_MMC is not set
+```
+
+With no `ENV_IS_IN_*` left, `env/Kconfig:71-79` selects `ENV_IS_NOWHERE` through
+`ENV_IS_DEFAULT`: the compiled-in environment is used on every boot, from every
+medium, and nothing on the internal storage can change what the card does. For an
+appliance whose boot sequence is fixed at build time that is what is wanted.
+
+It removes a way to brick the card, too. `ENV_OFFSET 0x3F8000` is sector 8128, inside
+the sectors 64–16383 that `u-boot-rockchip.bin` occupies — so had the environment
+merely been moved to the card, a `saveenv` would have written 32KB into the middle of
+our own bootloader.
+
+### What both fixes leave untouched
+
+The eMMC. Nothing here writes to it, nothing here stops Armbian booting when the card
+is out, and pulling the card still puts the board back exactly as it was. The
+destructive option — backing up the eMMC's first 16MiB and clearing sector 16384 so
+it offers no competing `u-boot.itb` — is no longer needed and has not been done.
+
+### What to look for next
+
+`U-Boot 2026.07` on the HDMI console. If the screen is still blank and Armbian still
+boots, the one measurement that separates "our SPL still chose the eMMC" from
+"our U-Boot ran and something else went wrong" is to read, **with the card inserted**:
+
+```sh
+cat /proc/device-tree/chosen/u-boot,version
+```
+
+`2026.07` means our U-Boot proper ran and the remaining fault is in `bootcmd`.
+`2022.07-armbian` means SPL is still loading the eMMC's `u-boot.itb`.
 
 ## Storage, by controller address
 

@@ -184,8 +184,13 @@ function Test-Done { param([string] $Name)
 # An entry names its own Probe when a plain sha256sum will not do - the device tree is
 # a directory, so its hash is the sorted hash of every file in it.
 $script:TrackedInputs = @(
+    # Uboot is in this list because build-uboot.sh edits the U-Boot tree that repo
+    # owns (the SPL boot order in rk3399-u-boot.dtsi), and a sync throws that edit
+    # away. Nothing else would notice: the built u-boot-rockchip.bin is still
+    # sitting there, so the stage would stay complete and the card would be written
+    # from a blob whose provenance no longer matches the tree.
     @{ Key='manifestHash'; Path='manifests/khadas_edge_tv14.xml';
-       Stages=@('Sync', 'Kernel'); Label='the manifest overlay' }
+       Stages=@('Sync', 'Kernel', 'Uboot'); Label='the manifest overlay' }
     @{ Key='aptHash';      Path='build/windows/apt-packages.txt';
        Stages=@('Provision'); Label='the host package list' }
     @{ Key='deviceHash';   Path='device/khadas/edge';

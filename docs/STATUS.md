@@ -35,7 +35,7 @@ eMMC. The diagnosis below is what that one observation does and does not establi
 | On-device installer (card → eMMC or NVMe) | new; offsets verified against the layout, never run on hardware |
 | Flash pack (`edge1-flash/` + `flash-emmc.sh`, for eMMC) | superseded by the installer, never run |
 
-### The first attempt on hardware: the card's bootloader never ran
+### Three cards on hardware: the card's U-Boot proper never ran
 
 Symptom: HDMI signal shortly after power-on, about ten seconds, then the board boots
 Armbian off the eMMC.
@@ -44,8 +44,8 @@ One fact settles most of it. `khadas-edge-v-rk3399_defconfig` enables **no displ
 support at all** — no `CONFIG_VIDEO`, no `CONFIG_DM_VIDEO`, no `CONFIG_VIDEO_ROCKCHIP`
 (`CONFIG_DISPLAY_BOARDINFO_LATE` prints to serial, not to a screen). So the U-Boot this
 tree builds **cannot put anything on HDMI**. The signal is not ours, and since the board
-ends up in Armbian, what ran is Armbian's bootloader off the eMMC. The card's U-Boot was
-never reached.
+ends up in Armbian, what ran is Armbian's bootloader off the eMMC. The card's U-Boot
+proper was never reached — its TPL and SPL, it turned out, were.
 
 That is consistent with the ten seconds, too: Armbian's `boot_targets` is
 `"mmc1 mmc0 nvme scsi usb pxe dhcp spi"`, so its U-Boot scans the SD card **first**,
@@ -63,10 +63,32 @@ anything is written:
    NOR is erased, both the eMMC and the card carry a valid ID block at sector 64, and
    the board boots the eMMC. I first read that as the BootROM preferring eMMC; the
    board's owner has the counter-example that settles it — an OpenWrt card on this
-   same board always won over the eMMC. So the card *is* read first, its header *is*
-   accepted, and what fails is the payload the header points at. The first thing that
-   payload does is DDR init, which is the one link here with no second opinion behind
-   it. [`HARDWARE.md`](HARDWARE.md) has the readings and the A/B that separates them.
+   same board always won over the eMMC. So the card *is* read first and its header
+   *is* accepted. I then read "falls through" as DDR init failing, which the A/B
+   disproved: `EDGE1_ROCKCHIP_TPL=1` substitutes Rockchip's DDR blob as a single
+   variable, and both cards — U-Boot's TPL and the blob — boot Armbian identically.
+
+**Resolved: the BootROM never fell through at all.** Our TPL and SPL run from the card;
+SPL then loads the *second* stage on its own, and it picks the eMMC. Two defects, one
+after the other in the same boot, each sufficient on its own:
+
+- `u-boot,spl-boot-order` lists `&sdhci` (eMMC) before `&sdmmc` (card), and
+  `same-as-spl` is allowed to fail silently (`spl-boot-order.c:140-144`). The eMMC has
+  a valid `u-boot.itb` at sector 16384 because Armbian writes it there too — the same
+  layout this tree uses — so SPL loads Armbian's U-Boot 2022.07 from a card that is
+  entirely correct. `build-uboot.sh` now reorders the property to card-first, which is
+  what Armbian itself ships for the rk3399 board it boots from removable media.
+- `CONFIG_ENV_IS_IN_MMC=y` with `CONFIG_ENV_MMC_DEVICE_INDEX=0` reads the environment
+  off the **eMMC**, and `env_load()` replaces the compiled-in `bootcmd` and `preboot`
+  wholesale rather than merging. That would have taken over the moment the first was
+  fixed. The fragment now turns it off, which selects `ENV_IS_NOWHERE`. It also
+  explains the one observation nothing else did: Ethernet and DHCP running before
+  Armbian loads, which our `bootcmd` never does and Armbian's `boot_targets` always
+  does.
+
+Neither fix touches the eMMC; the destructive option of clearing its sector 16384 is
+no longer needed. [`HARDWARE.md`](HARDWARE.md) has the readings, the measured config
+values and the citations.
 
 **The card itself is proven correct**, which the first check nearly got wrong. From the
 board: the GPT is exactly the seven partitions at exactly the right sectors, and

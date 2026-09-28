@@ -1337,6 +1337,26 @@ stage_report() {
             grep -qx 'CONFIG_HUSH_PARSER=y' "$TREE/bootloader/u-boot/.config" \
                 && echo "  hush parser:   yes (the fallback between media works)" \
                 || echo "  hush parser:   NO - no && or ||, so there is no fallback"
+            # The two things that decide whether OUR U-Boot is the one that runs.
+            #
+            # ENV_IS_IN_MMC reads the environment off mmc 0 - the eMMC - and a stored
+            # environment replaces bootcmd and preboot wholesale, so the card would
+            # boot whatever the internal storage says. Read from .config for the same
+            # reason as the bootcmd above: an old blob outlives a changed script.
+            grep -qx 'CONFIG_ENV_IS_NOWHERE=y' "$TREE/bootloader/u-boot/.config" \
+                && echo "  environment:   compiled in (nothing is read from the eMMC)" \
+                || echo "  environment:   READ FROM THE eMMC - a stored env there replaces bootcmd"
+        fi
+        # And the one that decides where SPL loads u-boot.itb from. The eMMC has
+        # another valid one at the same sector 16384, so getting this backwards boots
+        # the eMMC's bootloader from a card that is otherwise perfect.
+        local odt="$TREE/bootloader/u-boot/arch/arm/dts/rk3399-u-boot.dtsi"
+        if [[ -f "$odt" ]]; then
+            local ov; ov="$(sed -n 's/.*u-boot,spl-boot-order = \(.*\);.*/\1/p' "$odt" | head -1)"
+            case "$ov" in
+                *'&sdmmc'*'&sdhci'*) echo "  spl order:     card before eMMC  ($ov)" ;;
+                *) echo "  spl order:     eMMC BEFORE CARD - SPL would load the eMMC's u-boot.itb  ($ov)" ;;
+            esac
         fi
     else
         echo "  u-boot:        not built"
