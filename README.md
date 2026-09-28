@@ -8,7 +8,8 @@ included and in raw rather than sparse form, so it can actually be written. The 
 stage assembles those into three whole-disk images — one per medium — and has not yet
 run to the end: the bootloader it needs has still to build. Nothing has been booted, so
 nothing here is claimed to work. [`docs/STATUS.md`](docs/STATUS.md) has the state in
-detail.
+detail, and [`docs/HARDWARE.md`](docs/HARDWARE.md) has what has been measured on the
+real board rather than assumed.
 
 **Three media, one layout.**
 

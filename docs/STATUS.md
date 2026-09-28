@@ -59,10 +59,12 @@ anything is written:
 1. **U-Boot in SPI NOR.** Armbian's board file has `BOOT_SUPPORT_SPI=yes`. The BootROM
    reads SPI NOR as one of its boot sources, and if a bootloader is there it wins over
    both eMMC and SD. `cat /proc/mtd` from the running Armbian answers this.
-2. **The BootROM prefers the eMMC to the SD card on this board.** This tree deliberately
-   never asserted an order — `bootrom.h:47-59` lists the sources but not the priority,
-   and no source reachable from here states it. This observation is the first evidence,
-   and it points at eMMC-first.
+2. **The BootROM prefers the eMMC to the SD card on this board — now measured, not
+   guessed.** SPI NOR is erased (`mtd0`, all `0xff`), and both the eMMC and the card
+   carry a valid ID block at sector 64, and the board boots the eMMC. This tree
+   deliberately never asserted an order, because `bootrom.h:47-59` lists the sources
+   without a priority and no source reachable from here states one. Now there is
+   evidence, and it says eMMC-first. [`HARDWARE.md`](HARDWARE.md) has the readings.
 
 **The card itself is proven correct**, which the first check nearly got wrong. From the
 board: the GPT is exactly the seven partitions at exactly the right sectors, and
@@ -403,12 +405,12 @@ Rockchip's own gralloc did.
    beside it. Until then the software codecs carry playback: 1080p yes, 4K no.
    6.12's rkvdec is H.264 only in any case (`rkvdec-h264.c` and nothing else), so
    HEVC and VP9 stay in software regardless.
-4. **Bluetooth is unresolved.** uart0 carries the BCM4359 and the DTS has a
-   `brcm,bcm43438-bt` node. The kernel's `hci_bcm` would claim the port and do the
-   firmware patch itself; Android's Bluetooth HAL expects to open the tty and patch
-   from userspace with a vendor tool this tree no longer carries. The kernel
-   transport is left out of the config so `/dev/ttyS0` stays free until that is
-   decided. See `KERNEL.md`.
+4. **Bluetooth is unresolved, and the framing was wrong.** This was written as the
+   kernel's `hci_bcm` and Android's HAL both wanting `/dev/ttyS0`. Measured on the
+   board: **there is no `/dev/ttyS0`** — `ttyS1` through `ttyS7` exist and uart0 is
+   not presented as a tty at all. What is now known is the firmware name,
+   `BCM4359C0.hcd`, which this tree does not ship. See
+   [`HARDWARE.md`](HARDWARE.md).
 5. **The device targets FCM level 7, not 8.** That was forced rather than chosen —
    see below — and it is worth knowing when reading anything that says this is an
    Android 14 device: the vendor image's HAL surface is Android-13-era.
@@ -421,10 +423,18 @@ Rockchip's own gralloc did.
    matters, and it would fail inside ART during zygote startup. Flip
    `PRODUCT_ENABLE_UFFD_GC` to `true` once the device boots; it is a memory win on a
    4GB board, not a requirement.
-8. **`kmsro` in `BOARD_GPU_DRIVERS` is confirmed valid but unproven useful.** It is
-   in the driver-name list `external/mesa3d/Android.mk` accepts
-   (`kmsro.HAVE_GALLIUM_KMSRO`); whether panfrost on this board needs it is a
-   question for the first boot.
+8. **`kmsro` in `BOARD_GPU_DRIVERS` is confirmed valid, and now known to be the right
+   shape.** It is in the driver-name list `external/mesa3d/Android.mk` accepts
+   (`kmsro.HAVE_GALLIUM_KMSRO`), and the board confirms the split it exists for:
+   `card0` is the display controller (`display-subsystem`, with `card0-HDMI-A-1`) and
+   `card1`/`renderD128` are panfrost at `ff9a0000.gpu`. Two devices, which is exactly
+   what kmsro bridges.
+9. **`/dev/dri/card1` is not labelled by our `file_contexts`.** Measured: card1 is
+   panfrost's primary node. AOSP is believed to carry a generic `/dev/dri/card[0-9]*`
+   spec that would cover it, but that is not measured, and the probe should settle it.
+   See [`HARDWARE.md`](HARDWARE.md).
+10. **The M.2 slot is empty**, so `edge1-nvme.img` and the installer's `nvme` target
+    cannot be tested at all yet. Everything about them is reasoned from the silicon.
 
 ## Honest expectation
 

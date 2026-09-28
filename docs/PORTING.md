@@ -313,9 +313,10 @@ build/
   build.sh                       the platform build and the eMMC flash pack
   build-images.sh                the three whole-disk images
   verify-aidl-surface.sh         dumps the real method list of declared HALs
+  rk-idb-check.py                verifies a Rockchip ID block (RC4, so not by eye)
   windows/                       the WSL2 orchestrator and the in-distro driver
     apt-packages.txt             host packages, hashed so a change re-provisions
-docs/                            STATUS, KERNEL, HAL_MIGRATION, WINDOWS, this file
+docs/                            STATUS, HARDWARE, KERNEL, HAL_MIGRATION, WINDOWS, this file
 ```
 
 `default.xml` is the original Android 10 manifest, left untouched for reference.
