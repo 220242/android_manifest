@@ -224,11 +224,54 @@ readonly FRAGMENT=.config-android-fragment
 # u-boot-rockchip.bin is exactly this number, so it is half of the seek=64
 # arithmetic checked below; pinning it means the check can only ever fail because
 # the OTHER half moved.
+# ---------------------------------------------------------------------------
+# Put U-Boot on the HDMI port.
+#
+# khadas-edge-v-rk3399_defconfig enables no display support at all, so this
+# U-Boot's only output is the serial console. On a board being brought up without
+# a UART adapter that makes the whole bootloader invisible: the first attempt on
+# real hardware produced ten seconds of HDMI signal and a reboot, and the single
+# most useful thing that could be said about it was that the signal could NOT have
+# come from this U-Boot, because it has no way to produce one.
+#
+# Four symbols fix that, and they are not novel: 18 of the 28 rk3399 defconfigs
+# upstream carry them. rockpro64-rk3399_defconfig and nanopc-t4-rk3399_defconfig
+# are the closest analogues - HDMI-only rk3399 boards - and they carry exactly
+# these four. CONFIG_DISPLAY_ROCKCHIP_HDMI selects VIDEO_DW_HDMI and depends on
+# VIDEO_ROCKCHIP (drivers/video/rockchip/Kconfig:58-63), and
+# CONFIG_VIDEO_ROCKCHIP_MAX_YRES defaults to 2160 once HDMI is on, so there is
+# nothing else to set.
+#
+# The fifth and sixth lines are the part that is easy to miss. Enabling video gives
+# a framebuffer but does not move the console onto it: with
+# CONFIG_SYS_CONSOLE_IS_IN_ENV unset, common/console.c:1219-1235 walks the stdio
+# devices and *prefers the current serial device*, so stdout stays serial-only and
+# the screen stays blank. Boards with a video console do it through
+# ROCKCHIP_DEVICE_SETTINGS in their own config header - see
+# include/configs/rockpro64_rk3399.h:9-12 - and there is no
+# include/configs/khadas_edge_rk3399.h to put it in, so rk3399_common.h's empty
+# fallback applies.
+#
+# PREBOOT reaches the same end from a defconfig alone, which is what we have.
+# CONFIG_CONSOLE_MUX is "default y if VIDEO" (common/Kconfig:260-262), and with it
+# a runtime change to stdout takes effect immediately through the environment
+# callback at common/console.c:73. If the HDMI probe found no display, iomux_doenv
+# fails, on_console rejects the assignment, and stdout stays serial - so the worst
+# case is the behaviour we have today.
+# ---------------------------------------------------------------------------
+readonly STDOUT_BOTH='setenv stdout serial,vidconsole; setenv stderr serial,vidconsole'
+
 cat > "$FRAGMENT" <<EOF
 CONFIG_ANDROID_BOOT_IMAGE=y
 CONFIG_CMD_ABOOTIMG=y
 CONFIG_HUSH_PARSER=y
 CONFIG_SPL_PAD_TO=0x7f8000
+CONFIG_VIDEO=y
+CONFIG_DISPLAY=y
+CONFIG_VIDEO_ROCKCHIP=y
+CONFIG_DISPLAY_ROCKCHIP_HDMI=y
+CONFIG_USE_PREBOOT=y
+CONFIG_PREBOOT="$STDOUT_BOTH"
 CONFIG_USE_BOOTCOMMAND=y
 CONFIG_BOOTCOMMAND="$BOOTCMD"
 EOF
@@ -256,12 +299,20 @@ missing=0
 # CONFIG_CMD_USB_MASS_STORAGE the documented "ums 0 mmc 0" escape hatch is not there.
 for sym in CONFIG_ANDROID_BOOT_IMAGE CONFIG_CMD_ABOOTIMG CONFIG_HUSH_PARSER \
            CONFIG_USE_BOOTCOMMAND CONFIG_CMD_NVME CONFIG_PCI \
-           CONFIG_CMD_USB_MASS_STORAGE; do
+           CONFIG_CMD_USB_MASS_STORAGE CONFIG_VIDEO CONFIG_DISPLAY \
+           CONFIG_VIDEO_ROCKCHIP CONFIG_DISPLAY_ROCKCHIP_HDMI \
+           CONFIG_USE_PREBOOT CONFIG_CONSOLE_MUX; do
     grep -qx "${sym}=y" .config || { echo "  NOT SET: $sym" >&2; missing=$((missing+1)); }
 done
-if ! grep -q '^CONFIG_BOOTCOMMAND=' .config; then
-    echo "  NOT SET: CONFIG_BOOTCOMMAND" >&2; missing=$((missing+1))
-fi
+for str in CONFIG_BOOTCOMMAND CONFIG_PREBOOT; do
+    grep -q "^${str}=" .config || { echo "  NOT SET: $str" >&2; missing=$((missing+1)); }
+done
+# The console has to end up on both, or the screen stays blank and this was for
+# nothing. Checked as a string rather than assumed from CONFIG_VIDEO being on.
+case "$(sed -n 's/^CONFIG_PREBOOT="\(.*\)"$/\1/p' .config)" in
+    *vidconsole*) ;;
+    *) echo "  PREBOOT does not put the console on vidconsole" >&2; missing=$((missing+1)) ;;
+esac
 # The three attempts have to survive into .config intact. A truncated bootcmd
 # would still build, still boot the card, and silently not fall through to the
 # eMMC or the SSD - which is precisely the case that cannot be tested without
@@ -279,6 +330,7 @@ if (( missing )); then
     exit 1
 fi
 echo "  bootcmd tries, in order: SD card (mmc 1), eMMC (mmc 0), NVMe (nvme 0)"
+echo "  console:  serial (ttyS2, 1500000) and HDMI"
 
 # And this list is what the build EXPECTS: symbols we do not set, whose defaults
 # should give us what we want. They are reported, never fatal - failing a working

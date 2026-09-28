@@ -13,8 +13,9 @@ invisible from the build's own output: `super.img` was not produced at all until
 for, and once produced it was in Android's sparse format, which cannot be written into
 a partition. Both are below.
 
-**No image has been written to the board yet**, so nothing here is claimed to boot.
-That is the next step and the one that matters.
+**The card has been written and booted once, and it did not run.** HDMI gets a signal
+for about ten seconds and then the board comes up on the Armbian that is installed on the
+eMMC. The diagnosis below is what that one observation does and does not establish.
 
 | Stage | State |
 |---|---|
@@ -33,6 +34,45 @@ That is the next step and the one that matters.
 | Images: `edge1-sdcard.img`, `edge1-emmc.img`, `edge1-nvme.img` | **build**, around a real bootloader; none written to hardware |
 | On-device installer (card → eMMC or NVMe) | new; offsets verified against the layout, never run on hardware |
 | Flash pack (`edge1-flash/` + `flash-emmc.sh`, for eMMC) | superseded by the installer, never run |
+
+### The first attempt on hardware: the card's bootloader never ran
+
+Symptom: HDMI signal shortly after power-on, about ten seconds, then the board boots
+Armbian off the eMMC.
+
+One fact settles most of it. `khadas-edge-v-rk3399_defconfig` enables **no display
+support at all** — no `CONFIG_VIDEO`, no `CONFIG_DM_VIDEO`, no `CONFIG_VIDEO_ROCKCHIP`
+(`CONFIG_DISPLAY_BOARDINFO_LATE` prints to serial, not to a screen). So the U-Boot this
+tree builds **cannot put anything on HDMI**. The signal is not ours, and since the board
+ends up in Armbian, what ran is Armbian's bootloader off the eMMC. The card's U-Boot was
+never reached.
+
+That is consistent with the ten seconds, too: Armbian's `boot_targets` is
+`"mmc1 mmc0 nvme scsi usb pxe dhcp spi"`, so its U-Boot scans the SD card **first**,
+finds no filesystem it recognises on our raw Android partitions, and falls through to
+the eMMC. What looks like a reboot is the display re-syncing when the kernel takes the
+HDMI port.
+
+Two candidate causes, and they need different fixes, so they are worth separating before
+anything is written:
+
+1. **U-Boot in SPI NOR.** Armbian's board file has `BOOT_SUPPORT_SPI=yes`. The BootROM
+   reads SPI NOR as one of its boot sources, and if a bootloader is there it wins over
+   both eMMC and SD. `cat /proc/mtd` from the running Armbian answers this.
+2. **The BootROM prefers the eMMC to the SD card on this board.** This tree deliberately
+   never asserted an order — `bootrom.h:47-59` lists the sources but not the priority,
+   and no source reachable from here states it. This observation is the first evidence,
+   and it points at eMMC-first.
+
+What this does **not** establish: whether the card is written correctly. That is checked
+directly, not inferred — the Rockchip ID block signature at sector 64 is `0x0ff0aa55`,
+so `dd ... skip=64 count=1 | hexdump -C` shows `55 aa f0 0f` in the first four bytes if
+the write landed.
+
+**The change this produced: U-Boot now outputs on HDMI.** Being invisible on a board with
+no UART adapter is what made ten seconds of signal worth so little, and it is fixed in
+the fragment rather than left to the serial console the board may never get. See
+`build-uboot.sh` for the six symbols and why four of them are not enough on their own.
 
 ### super.img, twice
 
