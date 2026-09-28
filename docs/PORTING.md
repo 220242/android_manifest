@@ -15,10 +15,12 @@ build/verify-tree.sh
 
 Needs no AOSP tree, which is the point: it is the one check available before a
 120GiB sync. It validates XML well-formedness, every file reference in `device.mk`
-and `BoardConfig.mk`, the flash layout against `BOARD_*_PARTITION_SIZE`, VINTF
-entries against `PRODUCT_PACKAGES`, the kernel config fragment, shell syntax,
-sepolicy self-consistency, and the properties the build derives for itself. Every
-check in it exists because something it now catches once reached a build.
+and `BoardConfig.mk`, the flash layout against `BOARD_*_PARTITION_SIZE`, that no image
+can reach a partition in Android's sparse format, the boot image's ramdisk offset
+against the kernel it has to clear, VINTF entries against `PRODUCT_PACKAGES`, the
+kernel config fragment, shell syntax, sepolicy self-consistency, and the properties the
+build derives for itself. Every check in it exists because something it now catches
+once reached a build.
 
 ## 1. Host requirements
 
@@ -30,6 +32,19 @@ Needs ~250GiB free (350 recommended), at least 16GiB RAM (64 recommended), 8+
 cores, an `aarch64-linux-gnu-` cross toolchain, and git read access to
 `android.googlesource.com` and `github.com/gregkh`. It exits 1 and names each unmet
 requirement rather than letting the build fail hours in.
+
+The packages themselves are in [`build/windows/apt-packages.txt`](../build/windows/apt-packages.txt),
+one per line — the AOSP list plus what the kernel, U-Boot and the SD image need. On a
+Linux host:
+
+```sh
+sed 's/#.*//' build/windows/apt-packages.txt | xargs sudo apt-get install -y
+```
+
+It is a file rather than a list inside the provisioning script so that the Windows
+orchestrator can hash it and re-run its Provision stage when it changes. Adding a
+package to a script that a completed stage no longer runs is how `swig` came to be
+"added" and never installed; `STATUS.md` has that one.
 
 ## 2. Sync
 
@@ -103,7 +118,11 @@ build/build-uboot.sh ~/aosp-14-edge1
 ```
 
 Mainline U-Boot, `khadas-edge-v-rk3399_defconfig`, plus a four-symbol fragment that
-teaches it to read an Android boot image. rk3399 needs only `BL31` out of `rkbin` —
+teaches it to read an Android boot image. It checks its four host requirements first —
+`swig`, setuptools, pyelftools and `Python.h`, all of which go into building the SWIG
+extension binman needs — and names the package for each, because the failure otherwise
+arrives 400 lines in as `command 'swig' failed: No such file or directory` and names
+neither. rk3399 needs only `BL31` out of `rkbin` —
 U-Boot's own TPL does DDR init on this SoC — and the script finds it rather than
 hardcoding a version. Output is `u-boot-rockchip.bin`, one blob containing TPL, SPL
 and `u-boot.itb`.
@@ -139,6 +158,14 @@ The script refuses rather than producing something misleading: no bootloader, an
 image too big for its partition, a layout that does not fit the requested size, or a
 `userdata` too small for Android to format. It also checks that the bootloader fits
 between sector 64 and the first partition at 16MiB.
+
+It reads the first four bytes of every image, too. An Android sparse image is a
+container rather than a filesystem, so writing one into a partition produces a card
+that looks correct and cannot mount anything; the board config makes the build emit raw
+images, and this is where that is verified rather than assumed. A sparse image is
+expanded with `simg2img` before it is written, and the size check measures what will be
+written rather than the file on disk — a 12KB sparse file can expand past its
+partition.
 
 ### The other way in, which is not the default
 
@@ -179,6 +206,7 @@ build/
   build-sdimage.sh               one whole-disk image for Etcher
   verify-aidl-surface.sh         dumps the real method list of declared HALs
   windows/                       the WSL2 orchestrator and the in-distro driver
+    apt-packages.txt             host packages, hashed so a change re-provisions
 docs/                            STATUS, KERNEL, HAL_MIGRATION, WINDOWS, this file
 ```
 

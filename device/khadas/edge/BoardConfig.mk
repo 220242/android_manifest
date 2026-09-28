@@ -301,9 +301,48 @@ BOARD_SYSTEM_EXTIMAGE_FILE_SYSTEM_TYPE := ext4
 BOARD_ODMIMAGE_FILE_SYSTEM_TYPE := ext4
 TARGET_USERIMAGES_USE_EXT4 := true
 TARGET_USERIMAGES_USE_F2FS := true
-# BOARD_USE_SPARSE_SYSTEM_IMAGE was set here. It is a Rockchip variable, absent
-# from AOSP 14; sparse images are controlled per filesystem type, and by
-# TARGET_USERIMAGES_SPARSE_EXT_DISABLED if they ever need turning off.
+
+# Raw images, not Android-sparse ones. This is what makes super.img writable with
+# dd, and it is the last thing that stood between a successful build and a card
+# that boots.
+#
+# The build was producing a sparse super.img - visible in the log as
+#
+#   lpmake --metadata-size 65536 --super-name super ... --sparse
+#          --output out/target/product/edge/super.img
+#
+# and that --sparse comes from tools/releasetools/build_super_image.py:136-137:
+#
+#   if info_dict.get("build_non_sparse_super_partition") != "true":
+#     cmd.append("--sparse")
+#
+# An Android sparse image is a container - a 28-byte header and then chunks that
+# each say where in the output they belong - so it is not the partition's contents
+# and cannot be written into a partition. dd would have copied the container
+# verbatim; the board would have found no ext4 superblock and no super metadata,
+# and first-stage init would have failed to mount /system with nothing in the log
+# to say why. Both writers here would have done it: build-sdimage.sh dds into the
+# disk image, and the generated flash-emmc.sh dds into the eMMC partition.
+#
+# core/Makefile:6145-6148 is the only thing that sets build_non_sparse_super_partition,
+# and it takes it from whichever of the two per-filesystem switches is set. So the
+# switch for the filesystem the logical partitions use is the one that turns super
+# raw. It also turns system/vendor/product/system_ext/odm raw on the way in, which
+# is not a side effect worth avoiding: they are lpmake's inputs and they end up
+# inside super either way. The cost is apparent size in out/, and since mke2fs
+# leaves the unused blocks unwritten the files stay sparse on the host filesystem.
+#
+# This was TARGET_USERIMAGES_SPARSE_EXT_DISABLED := false, in the fstab section,
+# carried over from the Android 10 config. That is the default, so it read as a
+# decision while changing nothing.
+#
+# Not an unusual configuration: target/board/BoardConfigGsiCommon.mk:19 sets the
+# same line, so it is the path AOSP's own GSI builds take.
+TARGET_USERIMAGES_SPARSE_EXT_DISABLED := true
+# The f2fs switch is deliberately not set. Nothing here builds an f2fs image -
+# userdata is the only f2fs filesystem and init formats it on first boot - so this
+# would be a line with no effect. It matters only that one of the two is set:
+# core/Makefile treats either as "super must be raw".
 
 # Userdata is formatted on first boot by init, not sized here.
 BOARD_USERDATAIMAGE_FILE_SYSTEM_TYPE := f2fs
@@ -347,7 +386,6 @@ BOARD_AVB_RECOVERY_ROLLBACK_INDEX_LOCATION := 1
 TARGET_RECOVERY_FSTAB := device/khadas/edge/fstab.edge1
 TARGET_RECOVERY_PIXEL_FORMAT := RGBX_8888
 TARGET_RECOVERY_DEFAULT_ROTATION := ROTATION_NONE
-TARGET_USERIMAGES_SPARSE_EXT_DISABLED := false
 
 # ---------------------------------------------------------------------------
 # SELinux.

@@ -51,16 +51,22 @@ stage_deps() {
     log "installing AOSP build dependencies"
     export DEBIAN_FRONTEND=noninteractive
     sudo -E apt-get update -qq
-    # The canonical AOSP list, plus repo's own needs. python-is-python3 matters:
-    # several AOSP scripts still invoke bare `python`.
-    sudo -E apt-get install -y -qq \
-        git-core git-lfs gnupg flex bison build-essential zip curl zlib1g-dev \
-        libc6-dev-i386 x11proto-dev libx11-dev lib32z1-dev libgl1-mesa-dev \
-        libxml2-utils xsltproc unzip fontconfig python3 python3-pip \
-        python-is-python3 rsync ccache bc lz4 libssl-dev \
-        device-tree-compiler openjdk-17-jdk-headless \
-        gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu libelf-dev \
-        gdisk pigz swig python3-setuptools python3-pyelftools
+    # The list lives in apt-packages.txt, not here. Start-EdgeBuild.ps1 hashes
+    # that file and un-completes this stage when it changes; with the list inlined,
+    # adding a package did nothing, because Provision was already marked complete.
+    # swig was added and never installed for exactly that reason, and the U-Boot
+    # stage failed on it a whole cycle later.
+    local pkglist="$(dirname "$0")/apt-packages.txt"
+    [[ -f "$pkglist" ]] || { echo "no package list at $pkglist" >&2; return 1; }
+    local -a pkgs=()
+    while read -r line; do
+        line="${line%%#*}"
+        line="${line// /}"
+        [[ -n "$line" ]] && pkgs+=("$line")
+    done < "$pkglist"
+    (( ${#pkgs[@]} )) || { echo "$pkglist lists no packages" >&2; return 1; }
+    echo "    ${#pkgs[@]} packages from $(basename "$pkglist")"
+    sudo -E apt-get install -y -qq "${pkgs[@]}"
     # repo init is run with --git-lfs, and several AOSP projects (notably the
     # Pixel *-kernel prebuilts) store their binaries in LFS. Without the git-lfs
     # binary those projects fetch fine and then fail at checkout, deterministically
@@ -1188,10 +1194,27 @@ stage_report() {
     # failure said so.
     # ninja and soong come from the tree's own prebuilts, so a host ninja is not
     # part of this list - it read as "ninja MISSING" and looked like a problem.
+    # swig is in this list because its absence cost a cycle: U-Boot needs it to build
+    # the SWIG extension binman runs on, and the failure named neither swig the
+    # package nor what wanted it.
     for t in git git-lfs repo python3 java make ccache aarch64-linux-gnu-gcc \
-             sgdisk pigz dtc; do
+             sgdisk pigz dtc swig; do
         printf '%-8s %s\n' "$t" "$(command -v $t 2>/dev/null || echo MISSING)"
     done
+    # The two Python modules U-Boot's build imports, and the header it compiles
+    # against. All three come from packages, not from pip, and none of them shows up
+    # in a "command -v" list.
+    for m in setuptools elftools; do
+        printf '%-8s %s\n' "py:$m" \
+            "$(python3 -c "import $m; print(getattr($m, '__file__', 'ok'))" 2>/dev/null || echo MISSING)"
+    done
+    printf '%-8s %s\n' "Python.h" \
+        "$(pyi=$(python3 -c 'import sysconfig; print(sysconfig.get_paths()["include"])' 2>/dev/null); \
+           [[ -n "$pyi" && -f "$pyi/Python.h" ]] && echo "$pyi/Python.h" || echo MISSING)"
+    echo "simg2img:   $([[ -x $TREE/out/host/linux-x86/bin/simg2img ]] \
+        && echo "$TREE/out/host/linux-x86/bin/simg2img" || echo 'not built')"
+    echo "apt list:   $(sed 's/#.*//' "$MANIFEST/build/windows/apt-packages.txt" 2>/dev/null \
+        | grep -c '[^[:space:]]' ) packages, sha $(sha256sum "$MANIFEST/build/windows/apt-packages.txt" 2>/dev/null | cut -c1-16)"
     echo "ninja:      $([[ -x $TREE/prebuilts/build-tools/linux-x86/bin/ninja ]] \
         && echo 'tree prebuilt (the one the build uses)' || echo 'tree prebuilt MISSING')"
     echo "git-lfs:    $(git lfs version 2>&1 | head -1)"
@@ -1232,6 +1255,37 @@ stage_report() {
     # Both of these used to be files the user had to find and send separately,
     # which is why a round went by with a stale probe and no one noticed. The
     # report is the one thing that gets sent, so the answers belong in it.
+    echo "--- images the flash layout names ---"
+    # Existence, size, and format. The format is the one that cost a card: an
+    # Android sparse image (magic 0xed26ff3a, on disk 3a ff 26 ed) is a container
+    # rather than a filesystem, so dd'ing one leaves the partition unmountable and
+    # nothing in any log says why. build-sdimage.sh refuses to write one, but this is
+    # where it can be seen without running a stage.
+    local pout="$TREE/out/target/product/edge"
+    local tsv="$TREE/device/khadas/edge/flash/partitions.tsv"
+    if [[ -d "$pout" && -f "$tsv" ]]; then
+        while IFS=$'\t' read -r pname psize pimg; do
+            case "$pname" in ''|\#*) continue ;; esac
+            [[ "$pimg" == "-" ]] && continue
+            if [[ -f "$pout/$pimg" ]]; then
+                local fmt=raw
+                [[ "$(od -An -tx1 -N4 -- "$pout/$pimg" | tr -d ' \n')" == "3aff26ed" ]] \
+                    && fmt='ANDROID-SPARSE (cannot be written to a partition)'
+                printf '  %-14s %-16s %8s / %sMiB  %s\n' "$pname" "$pimg" \
+                       "$(du -h --apparent-size "$pout/$pimg" | cut -f1)" "$psize" "$fmt"
+            else
+                printf '  %-14s %-16s MISSING\n' "$pname" "$pimg"
+            fi
+        done < "$tsv"
+        echo "  u-boot:        $([[ -f $TREE/bootloader/u-boot/u-boot-rockchip.bin ]] \
+            && du -h "$TREE/bootloader/u-boot/u-boot-rockchip.bin" | cut -f1 || echo 'not built')"
+        echo "  sdcard image:  $([[ -f $pout/edge1-sdcard.img ]] \
+            && echo "$(du -h --apparent-size "$pout/edge1-sdcard.img" | cut -f1) apparent, $(du -h "$pout/edge1-sdcard.img" | cut -f1) on disk" \
+            || echo 'not assembled')"
+    else
+        echo "  (no product output yet)"
+    fi
+    echo
     echo "##### MODULE PROBE #####"
     if [[ -f "$WORK/module-probe.txt" ]]; then
         # 400 used to be the cap, and the sections that gate the run - the sepolicy

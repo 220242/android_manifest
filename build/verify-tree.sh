@@ -202,6 +202,56 @@ else
 fi
 echo
 
+# --- 3d. nothing in the layout may be an Android sparse image -------------------
+#
+# The build's default is to write Android-sparse filesystem images, and a sparse
+# image cannot be dd'd into a partition: it is a container - a 28-byte header with
+# magic 0xed26ff3a, then chunks that each say which output blocks they hold - not
+# the partition's contents. Written verbatim the partition has no ext4 superblock
+# and super has no metadata, and the board fails to mount /system with nothing in
+# any log to say why. It is the only failure in this layout that a card cannot be
+# inspected for after the fact.
+#
+# This happened: a build that reported success, with every image present and within
+# its partition, produced a sparse super.img, and both writers would have copied it
+# through untouched.
+#
+# tools/releasetools/build_super_image.py:136-137 adds --sparse unless
+# build_non_sparse_super_partition is set, and core/Makefile:6145-6148 sets that
+# from TARGET_USERIMAGES_SPARSE_EXT_DISABLED or its f2fs twin - so those two
+# switches are the only thing that makes super.img raw.
+echo "[3d] images are written raw, not Android-sparse"
+if [[ -f "$TSV" ]]; then
+    sparse_bad=0
+    # Anything in the layout with an image that is a filesystem the build sparses.
+    # boot/recovery/vbmeta are never sparse - mkbootimg and avbtool write raw.
+    if grep -qE '^super[[:space:]].*\.img' "$TSV"; then
+        if sed 's/#.*//' "$DEV/BoardConfig.mk" | grep -qE \
+           '^[[:space:]]*TARGET_USERIMAGES_SPARSE_(EXT|F2FS)_DISABLED[[:space:]]*:?=[[:space:]]*true'; then
+            ok "super.img is flashed and the board disables sparse ext/f2fs images"
+        else
+            err "partitions.tsv flashes super.img but BoardConfig.mk does not set"
+            err "  TARGET_USERIMAGES_SPARSE_EXT_DISABLED := true, so lpmake is given"
+            err "  --sparse and super.img comes out as a sparse container that cannot be"
+            err "  written into a partition"
+            sparse_bad=$((sparse_bad+1))
+        fi
+    fi
+    # And the guard in both writers, which is what catches it if the setting is ever
+    # lost. The magic is the on-disk byte order of 0xed26ff3a.
+    for w in build/build-sdimage.sh build/build.sh; do
+        if grep -q '3aff26ed' "$ROOT/$w"; then
+            ok "${w#build/} checks the sparse magic before writing"
+        else
+            err "$w writes partition images but no longer checks for the sparse magic"
+            err "  (3aff26ed). Without it a sparse image is copied through silently."
+            sparse_bad=$((sparse_bad+1))
+        fi
+    done
+    (( sparse_bad )) || ok "nothing in the layout can reach a partition sparse"
+fi
+echo
+
 # --- 4. VINTF: fragments must NOT duplicate the device manifest ----------------
 #
 # This check used to assert the opposite - that every HAL in a fragment also

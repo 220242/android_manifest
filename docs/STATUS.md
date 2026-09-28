@@ -4,10 +4,14 @@ Where the port is, what is still open, and the decisions worth not re-deriving.
 
 ## Where the build is
 
-**`m` completes.** `#### build completed successfully ####`, 5311 of 5311 targets on
-the incremental run that got there, after 167136 on the first. Every image the flash
-layout names now builds, and the last thing in the way was `super.img`, which the
-default target does not produce unless asked — see below.
+**`m` completes.** `#### build completed successfully ####`, 153 of 153 targets on the
+incremental run that got there, after 167136 on the first. Every image the flash layout
+names now builds, `super.img` included.
+
+Two things then stood between a successful build and a card that boots, and both were
+invisible from the build's own output: `super.img` was not produced at all until asked
+for, and once produced it was in Android's sparse format, which cannot be written into
+a partition. Both are below.
 
 **No image has been written to the board yet**, so nothing here is claimed to boot.
 That is the next step and the one that matters.
@@ -24,14 +28,14 @@ That is the next step and the one that matters.
 | `vendor/build.prop`, `system/build.prop` | generated |
 | `boot.img`, `recovery.img`, `dtb.img`, `vbmeta.img` | build |
 | `system.img`, `vendor.img`, `product.img`, `system_ext.img`, `odm.img` | build |
-| `super.img` | needs `BOARD_BUILD_SUPER_IMAGE_BY_DEFAULT := true` |
-| U-Boot (mainline v2026.07 + Android boot image support) | new, never built |
+| `super.img` | builds, and raw rather than sparse, so it can be written |
+| U-Boot (mainline v2026.07 + Android boot image support) | configured and verified; the build needs host packages the pipeline was not installing |
 | SD card image (`edge1-sdcard.img`, for Etcher) | new, never written |
 | Flash pack (`edge1-flash/` + `flash-emmc.sh`, for eMMC) | assembled, never run |
 
-### The last one: super.img is opt-in
+### super.img, twice
 
-The first build to get all the way through reported success and then
+**It is opt-in.** The first build to get all the way through reported success and then
 `build.sh` said:
 
 ```
@@ -45,10 +49,52 @@ builds unconditionally is `super_empty.img` — the partition metadata with no c
 — because the normal path is fastboot writing that and then flashing each logical
 partition individually.
 
-This device is not on that path: `flash-emmc.sh` `dd`s `super.img` into the super
+This device is not on that path: both writers here `dd` `super.img` into the super
 partition, which is exactly the case the flag exists for. `verify-tree.sh` check 3b
 now requires the two to agree — if `partitions.tsv` names `super.img`, BoardConfig
 has to build one.
+
+**And then it was sparse, which is worse.** With the flag set the next build produced
+one, and the log showed how:
+
+```
+lpmake --metadata-size 65536 --super-name super ... --sparse
+       --output out/target/product/edge/super.img
+```
+
+An Android sparse image is a container, not a filesystem: a 28-byte header with magic
+`0xed26ff3a`, then chunks that each say which output blocks they hold.
+`tools/releasetools/build_super_image.py:136-137` adds `--sparse` unless
+`build_non_sparse_super_partition` is set, and it was not.
+
+Written into a partition verbatim, it is 4.6GiB of the wrong bytes. There is no ext4
+superblock where the kernel looks for one and no super metadata where `libdm` looks,
+so first-stage init fails to mount `/system` and says nothing about why. Every check
+that could have caught it passed: the build succeeded, the file existed, and it was
+well under its partition size — it is a fraction of the size of what it expands to,
+which is the same fact from the other side.
+
+`core/Makefile:6145-6148` is the only place that sets
+`build_non_sparse_super_partition`, and it takes it from
+`TARGET_USERIMAGES_SPARSE_EXT_DISABLED` or its f2fs twin. So the fix is one line in
+`BoardConfig.mk`, and it is the line AOSP's own GSI targets carry
+(`target/board/BoardConfigGsiCommon.mk:19`). It turns the logical partitions' images
+raw on the way in too, which costs apparent size in `out/` and nothing else — they are
+`lpmake`'s inputs and end up inside super either way.
+
+Three things now hold it:
+
+* `build-sdimage.sh` reads the first four bytes of every image it writes and expands a
+  sparse one with `simg2img` rather than copying it through. `build.sh` names
+  `simg2img` as a build target for this, because it is otherwise built only as part of
+  `otatools` (`core/Makefile:5561`).
+* The generated `flash-emmc.sh` carries the same check.
+* `verify-tree.sh` check 3d requires the BoardConfig setting *and* the guard in both
+  writers, so losing either is a static error.
+
+The size check moved too. It used to measure the file in `out/`; it now measures what
+will actually be written, which is the expanded image. A 12KB sparse file that expands
+to 2GiB passed the old check and is rejected by the new one.
 
 ## The approach
 
@@ -98,9 +144,11 @@ Rockchip's own gralloc did.
 2. **U-Boot and the SD image builder are new and unexercised.** Both are written
    against the real sources — the boot sequence is U-Boot's own from
    `doc/android/boot-image.rst`, the Khadas Edge-V defconfig is upstream, and
-   `build-sdimage.sh` was tested end to end against fabricated images with every
-   partition's contents verified at its sector — but no U-Boot has been compiled and
-   no card has been written.
+   `build-sdimage.sh` is tested end to end against fabricated images, with every
+   partition's contents verified at its sector and the sparse path exercised with a
+   real sparse image and a reference decoder. But no U-Boot has been compiled all the
+   way through yet — the first attempt stopped on missing host packages — and no card
+   has been written.
 3. **Hardware video decode is not wired up.** `CONFIG_VIDEO_ROCKCHIP_VDEC` is in the
    kernel and `external/v4l2_codec2` is in the tree, with
    `android.hardware.media.c2@1.2-service-v4l2` available — but it is not in
@@ -162,6 +210,8 @@ survive in a diff.
 | `libGLES_mesa` and `libglapi`, not the six packages dragonboard lists | Nothing in the tree defines `libEGL_mesa`, `libGLESv1_CM_mesa`, `libGLESv2_mesa` or `libgallium_dri`; those names come from the newer meson-based packaging. The EGL loader takes `libGLES_<name>.so` as a complete driver and only falls back to the triplet when it is absent. |
 | Four `PRODUCT_*` variables deleted | `PRODUCT_BUILD_PROP_OVERRIDES`, `PRODUCT_HAS_CAMERA`, `PRODUCT_HAVE_OPTEE`, `PRODUCT_TARGET_VNDK_VERSION` appear nowhere in AOSP 14. They were read by `device/rockchip/common`, which this tree does not have, so they were decoration that read like configuration. |
 | No `ro.product.first_api_level`, `ro.product.board`, `ro.board.platform` or `ro.sf.lcd_density` set by hand | `core/main.mk:284,332-341` emits all four from product and board variables. Setting one as well produces two assignments in the same `build.prop`, which `post_process_props.py` rejects unless the values happen to be identical. |
+| `TARGET_USERIMAGES_SPARSE_EXT_DISABLED := true` | The only switch that makes `lpmake` drop `--sparse` (`core/Makefile:6145-6148` → `build_super_image.py:136`). A sparse `super.img` is a container, not a filesystem, and `dd`ing one leaves a partition with no superblock and no log. |
+| `m droid simg2img` rather than `m` | `simg2img` is built only as part of `otatools` (`core/Makefile:5561`), and `build-sdimage.sh` needs it if an image is ever sparse again. An unknown target fails at the end of the ninja parse, in seconds. |
 | `CCACHE_DIR=$TREE/out/ccache` | 14 runs ninja with everything outside `$OUT_DIR` bind-mounted read-only, so ccache's default `$HOME/.cache/ccache` is on the wrong side and the first real compile died at target 151 of 167136. The build's own error text names the fix: generate into `out/`. |
 
 Also checked and found clean: none of the 69 `KATI_obsolete_var` names are used
@@ -175,9 +225,13 @@ platform does not agree with, and the tool that objects reports one instance per
 Each now has a gate in the module probe (`build/windows/provision-wsl.sh`, `stage_probe`),
 which runs before the build and takes about a minute.
 
+The two rows that say *nothing* are a different and worse shape: there is no error to
+gate on, so the only defence is a static check that knows what the build will not say.
+
 | What | The build says | When |
 |---|---|---|
 | Module in `PRODUCT_PACKAGES` does not exist | nothing — it is dropped silently, unless `PRODUCT_ENFORCE_PACKAGES_EXIST` is set (`core/main.mk:1341`) | never |
+| `super.img` in Android sparse format | nothing — the build's job is to produce the image, not to know how it is written | never |
 | sepolicy type declared here and in `system/sepolicy` | `checkpolicy`: `Duplicate declaration of type` | ~6 min |
 | `file_contexts` specification declared twice | `checkfc`: `Multiple same specifications for ...` | ~9 min |
 | Property the build derives from a variable | `post_process_props.py`: `found duplicate sysprop assignments` | ~9 min |
@@ -371,7 +425,7 @@ of these was checked against `rk3399-base.dtsi`, `rk3399-khadas-edge.dtsi` and
 | `init.edge1.usb.rc`: `/sys/class/android_usb/android0/...` | `sys.usb.controller=fe800000.usb` | `android_usb` is the pre-configfs gadget. The dts gives `usbdrd_dwc3_0` (`usb@fe800000`) `dr_mode = "otg"`, so that is the UDC. |
 | fragment: `CONFIG_DWMAC_ROCKCHIP=y` alone | `+ CONFIG_STMMAC_PLATFORM=y` | `DWMAC_ROCKCHIP` is inside `if STMMAC_PLATFORM`, a tristate. While the parent was `m` the child could not be `y`, so `olddefconfig` demoted it — no Ethernet, on a board whose dts enables `&gmac`. |
 
-## Two traps in the tooling itself
+## Three traps in the tooling itself
 
 **The device tree cannot be a symlink.** It was one — one place to edit, under
 version control — and that is why the first platform build could not start:
@@ -400,6 +454,39 @@ becomes unreadable — and `# CONFIG_X is deliberately absent` is four words fro
 matching the second pattern, `# CONFIG_X is not set`, and turning the symbol off.
 Comments name symbols without the `CONFIG_` prefix now, and `verify-tree.sh` check 7
 enforces both halves.
+
+**A completed stage is only as good as its inputs.** `swig` was added to the WSL
+dependency list, pushed, and never installed. The next run printed
+`skipping Provision (already complete; -Force to redo)`, built the platform for eight
+hours, and then failed the U-Boot stage on
+
+```
+error: command 'swig' failed: No such file or directory
+make[2]: *** [scripts/dtc/pylibfdt/Makefile:33: rebuild] Error 1
+```
+
+The state file records which stages finished. It said Provision had, which was true of
+the Provision that ran — against a shorter package list. An input that changes has to
+un-complete the stage that consumes it, and the orchestrator already did exactly that
+for one input: the manifest overlay is hashed, and `Sync` and `Kernel` are un-completed
+when it moves. The dependency list was not hashed because it was not a file; it was a
+list inside `provision-wsl.sh`, and hashing that whole script would re-run Provision on
+every unrelated edit.
+
+So the list became `build/windows/apt-packages.txt`, and the invalidation became a
+table of (file, state key, stages):
+
+| Input | Un-completes |
+|---|---|
+| `manifests/khadas_edge_tv14.xml` | `Sync`, `Kernel` |
+| `build/windows/apt-packages.txt` | `Provision` |
+
+Adding a package now re-runs Provision by itself, and apt on an already-provisioned
+distro takes seconds. `build-uboot.sh` also checks its four host requirements up front
+— `swig`, setuptools, pyelftools and `Python.h` — and names the package for each,
+because the error the build gives names neither the package nor what wanted it. U-Boot
+builds a SWIG Python extension (`scripts/dtc/pylibfdt`) before it can run binman, and
+binman is what packs `u-boot-rockchip.bin`.
 
 ## How this tree got here
 

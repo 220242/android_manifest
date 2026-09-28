@@ -60,7 +60,7 @@ Reach it from Explorer at `\\wsl.localhost\Edge1Build\home\builder\android_khada
 | `Wsl` | Installs the WSL2 platform with `--no-distribution` (keeps Store Ubuntu off C:) |
 | `Distro` | Resolves and downloads the Ubuntu 22.04 WSL rootfs (checksum-verified), imports it onto the target drive, creates the `builder` user |
 | `Tune` | Writes `%USERPROFILE%\.wslconfig` sized to your RAM, plus a 32 GB swap file on the target drive |
-| `Provision` | Installs AOSP dependencies, clones the device tree, runs `preflight.sh` and `verify-tree.sh` |
+| `Provision` | Installs the packages in `build/windows/apt-packages.txt`, clones the device tree, runs `preflight.sh` and `verify-tree.sh` |
 | `Sync` | Resolves the newest `android-14.0.0_r*` tag and syncs (100+ GiB) |
 | `Aidl` | Dumps the real AIDL method surface of every HAL this board speaks to `aidl-surface.txt` |
 | `Probe` | Checks the device tree against the synced tree and **stops the run** on anything it can answer in a minute that the build would take hours to reach |
@@ -70,9 +70,21 @@ Reach it from Explorer at `\\wsl.localhost\Edge1Build\home\builder\android_khada
 | `SdImage` | Assembles one whole-disk image for Balena Etcher and copies it to `android_khadas\output` |
 
 Run one on its own with `-Stage Build`. Re-run a completed stage with `-Force`.
-`Sync` and `Kernel` are un-completed automatically when
-`manifests/khadas_edge_tv14.xml` changes - its hash is kept in the state file -
-because a tree synced against a different manifest is not synced.
+
+Two inputs are hashed into the state file, and a stage whose input moved is
+un-completed by itself:
+
+| Input | Un-completes | Because |
+|---|---|---|
+| `manifests/khadas_edge_tv14.xml` | `Sync`, `Kernel` | a tree synced against a different manifest is not synced |
+| `build/windows/apt-packages.txt` | `Provision` | a distro provisioned against a shorter package list is missing packages |
+
+The second one exists because `swig` was added to the dependency list and never
+installed: `Provision` was already marked complete, so apt never ran again, and the
+`Uboot` stage failed on the missing package after an eight-hour platform build. The
+package list is a file rather than a list inside `provision-wsl.sh` so that it can be
+hashed on its own - hashing the whole script would re-run `Provision` on every
+unrelated edit.
 
 `Aidl` and `Probe` ignore the state file and always run: they are verification
 passes whose output is the point, and gating them meant a changed check silently
@@ -211,5 +223,5 @@ was written on a Linux host with no PowerShell available. That is no longer true
 has driven every build in `STATUS.md`. What is still worth knowing is that it is
 `Set-StrictMode -Version Latest`, so a property that does not exist is an error
 rather than `$null`, and one of the bugs that cost a round was exactly that: a
-missing `manifestHash` in the state file surfaced as a device-tree warning instead of
-the state-file problem it was.
+missing hash in the state file surfaced as a device-tree warning instead of the
+state-file problem it was.

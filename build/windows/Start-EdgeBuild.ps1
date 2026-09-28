@@ -145,45 +145,68 @@ function Test-Done { param([string] $Name)
     $done = @((Get-State).completed)
     return ($done -contains $Name)
 }
-# A stage's inputs can change too, not just its outputs. The manifest overlay is
-# the one that matters: when it gains a project, drops one, or repoints the kernel
-# at a different revision, a Sync marked complete is simply wrong - and the run
-# after the move to a mainline kernel would have gone straight to building a kernel
-# that had never been fetched. Its hash is kept in the state file, and Sync and
-# Kernel are un-completed when it moves.
-function Invalidate-OnManifestChange {
-    $probe = 'sha256sum ~/android_khadas/android_manifest/manifests/khadas_edge_tv14.xml ' +
-             '2>/dev/null | cut -c1-16'
-    try { $hash = (Invoke-WslCapture -Command $probe).Trim() } catch { return }
-    if (-not $hash) { return }
+# A stage's inputs can change too, not just its outputs, and a stage marked
+# complete against an input that has since moved is simply wrong.
+#
+# Two inputs are tracked, each with the stages it invalidates:
+#
+#   manifests/khadas_edge_tv14.xml -> Sync, Kernel
+#     When the overlay gains a project, drops one, or repoints the kernel at a
+#     different revision, a completed Sync is stale. The run after the move to a
+#     mainline kernel would otherwise have gone straight to building a kernel that
+#     had never been fetched.
+#   build/windows/apt-packages.txt -> Provision
+#     The second half of the same lesson, learned the expensive way. swig was added
+#     to the dependency list and never installed, because Provision was already
+#     marked complete - and the U-Boot stage failed on a missing swig a whole cycle
+#     later, after an eight-hour platform build. Adding a package now re-runs
+#     Provision by itself; apt on an already-provisioned distro takes seconds.
+$script:TrackedInputs = @(
+    @{ Key='manifestHash'; Path='manifests/khadas_edge_tv14.xml';
+       Stages=@('Sync', 'Kernel'); Label='the manifest overlay' }
+    @{ Key='aptHash';      Path='build/windows/apt-packages.txt';
+       Stages=@('Provision'); Label='the host package list' }
+)
 
+function Invalidate-OnInputChange {
     $s = Get-State
-    # Set-StrictMode -Version Latest makes reading a property that does not exist a
-    # terminating error, and on the first run there is no manifestHash yet. That is
-    # what "The property 'manifestHash' cannot be found on this object" was, and
-    # because the call sat inside the try/catch around Update-DistroRepo it surfaced
-    # as a warning about the device tree and the invalidation silently did not
-    # happen - so Sync stayed complete and the Kernel stage ran against a kernel
-    # that had never been fetched.
-    $known = if ($s.PSObject.Properties.Name -contains 'manifestHash') {
-        $s.manifestHash
-    } else {
-        $null
-    }
-    if ($known -eq $hash) { return }
+    $dirty = $false
+    foreach ($tracked in $script:TrackedInputs) {
+        $probe = "sha256sum ~/android_khadas/android_manifest/$($tracked.Path) " +
+                 '2>/dev/null | cut -c1-16'
+        try { $hash = (Invoke-WslCapture -Command $probe).Trim() } catch { continue }
+        if (-not $hash) { continue }
+        # Set-StrictMode -Version Latest makes reading a property that does not
+        # exist a terminating error, and on the first run none of these keys is
+        # there yet. That is what "The property 'manifestHash' cannot be found on
+        # this object" was, and because the call sat inside the try/catch around
+        # Update-DistroRepo it surfaced as a warning about the device tree while the
+        # invalidation silently did not happen - so Sync stayed complete and the
+        # Kernel stage ran against a kernel that had never been fetched.
+        $known = if ($s.PSObject.Properties.Name -contains $tracked.Key) {
+            $s.($tracked.Key)
+        } else {
+            $null
+        }
+        if ($known -eq $hash) { continue }
 
-    # An absent hash invalidates too, not just a different one. The first run after
-    # this check was added has nothing recorded and therefore no way to know that
-    # the synced tree matches the current manifest - and that first run is exactly
-    # the one that must not skip Sync, since it is the run that changed it.
-    if ($known) {
-        Write-Warn2 "the manifest overlay changed ($known -> $hash); Sync and Kernel will re-run"
-    } else {
-        Write-Warn2 "no manifest hash on record; Sync and Kernel will re-run once to establish one"
+        # An absent hash invalidates too, not just a different one. The first run
+        # after a new input is tracked has nothing recorded and therefore no way to
+        # know that what is on disk matches it - and that first run is exactly the
+        # one that must not skip the stage, since it is the run that changed it.
+        $stages = $tracked.Stages -join ', '
+        if ($known) {
+            Write-Warn2 "$($tracked.Label) changed ($known -> $hash); $stages will re-run"
+        } else {
+            Write-Warn2 "no hash on record for $($tracked.Label); $stages will re-run once to establish one"
+        }
+        $s.completed = @(@($s.completed) | Where-Object { $_ -notin $tracked.Stages })
+        $s | Add-Member -NotePropertyName $tracked.Key -NotePropertyValue $hash -Force
+        $dirty = $true
     }
-    $s.completed = @(@($s.completed) | Where-Object { $_ -notin @('Sync', 'Kernel') })
-    $s | Add-Member -NotePropertyName manifestHash -NotePropertyValue $hash -Force
-    $s | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $script:StatePath -Encoding UTF8
+    if ($dirty) {
+        $s | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $script:StatePath -Encoding UTF8
+    }
 }
 
 function Set-Done { param([string] $Name)
@@ -518,7 +541,7 @@ function Collect-Report {
 #region stages ----------------------------------------------------------------
 
 function Stage-Check {
-    Write-Stage 'Stage 1/10  Host checks'
+    Write-Stage 'Stage 1/12  Host checks'
 
     $os = Get-CimInstance Win32_OperatingSystem
     $build = [int] (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion').CurrentBuildNumber
@@ -573,7 +596,7 @@ function Stage-Check {
 }
 
 function Stage-Wsl {
-    Write-Stage 'Stage 2/10  WSL2 platform'
+    Write-Stage 'Stage 2/12  WSL2 platform'
 
     $installed = $false
     try {
@@ -601,7 +624,7 @@ function Stage-Wsl {
 }
 
 function Stage-Distro {
-    Write-Stage 'Stage 3/10  Ubuntu 22.04 on the target drive'
+    Write-Stage 'Stage 3/12  Ubuntu 22.04 on the target drive'
 
     $existing = (& wsl.exe --list --quiet) -split "`r?`n" | ForEach-Object { $_.Trim() }
     if ($existing -contains $script:DistroName) {
@@ -683,7 +706,7 @@ function Stage-Distro {
 }
 
 function Stage-Tune {
-    Write-Stage 'Stage 4/10  WSL resource limits'
+    Write-Stage 'Stage 4/12  WSL resource limits'
 
     $cs = Get-CimInstance Win32_ComputerSystem
     $ramGiB = [math]::Floor($cs.TotalPhysicalMemory / 1GB)
@@ -767,7 +790,7 @@ sparseVhd=true
 }
 
 function Stage-Provision {
-    Write-Stage 'Stage 5/10  Dependencies and device tree'
+    Write-Stage 'Stage 5/12  Dependencies and device tree'
 
     # Bootstrap: git first, then the repo, then hand off to provision-wsl.sh
     # which lives in that repo and does everything else.
@@ -785,7 +808,7 @@ function Stage-Provision {
 }
 
 function Stage-Sync {
-    Write-Stage 'Stage 6/10  Sync AOSP 14 (100+ GiB, hours)'
+    Write-Stage 'Stage 6/12  Sync AOSP 14 (100+ GiB, hours)'
     Write-Warn2 'Do not let the machine sleep during this. To be safe:'
     Write-Warn2 '  powercfg /change standby-timeout-ac 0'
     Invoke-InDistro -Command '~/android_khadas/android_manifest/build/windows/provision-wsl.sh sync'
@@ -845,7 +868,7 @@ function Stage-Build {
 #region main ------------------------------------------------------------------
 
 function Stage-Aidl {
-    Write-Stage 'Stage 7/10  AIDL interface surface'
+    Write-Stage 'Stage 7/12  AIDL interface surface'
     Write-Info 'dumping the real method list for every declared AIDL HAL'
     Invoke-InDistro -Command '~/android_khadas/android_manifest/build/windows/provision-wsl.sh aidl'
     Write-Good 'written to the distro home as aidl-surface.txt'
@@ -854,7 +877,7 @@ function Stage-Aidl {
 }
 
 function Stage-Probe {
-    Write-Stage 'Stage 8/10  Module probe'
+    Write-Stage 'Stage 8/12  Module probe'
     Write-Info 'checking every module device.mk requests against the synced tree'
     # This stage stops the run when a requested module does not exist. The build
     # would not: AOSP only checks PRODUCT_PACKAGES names when a product opts in
@@ -935,10 +958,11 @@ try {
 # was not what had gone wrong and sent the next hour in the wrong direction.
 if ($script:DistroReady) {
     try {
-        Invalidate-OnManifestChange
+        Invalidate-OnInputChange
     } catch {
-        Write-Warn2 ("could not check whether the manifest changed: " +
-                     "$($_.Exception.Message). Run -Stage Sync by hand if it did.")
+        Write-Warn2 ("could not check whether a stage's inputs changed: " +
+                     "$($_.Exception.Message). Run -Stage Sync or -Stage Provision " +
+                     "by hand if the manifest or the package list moved.")
     }
 }
 

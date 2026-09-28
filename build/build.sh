@@ -98,8 +98,14 @@ if [ "$lunch_rc" -ne 0 ]; then
     exit 1
 fi
 
+# droid plus one host tool. simg2img is built only as part of otatools
+# (core/Makefile:5561), so a plain "m" does not produce it - and it is what
+# build-sdimage.sh needs if an image ever comes out Android-sparse again. Naming it
+# here costs a few seconds of host compile and means the SD image stage can never be
+# blocked on a tool that has to be built from inside a lunched shell. An unknown
+# target fails at the end of the ninja parse, in seconds, not hours in.
 echo "==> building $TARGET"
-m -j"$jobs" 2>&1 | tee "$TREE/build-${VARIANT}.log"
+m -j"$jobs" droid simg2img 2>&1 | tee "$TREE/build-${VARIANT}.log"
 build_rc=${PIPESTATUS[0]}
 if [ "$build_rc" -ne 0 ]; then
     echo "m failed (exit $build_rc); the errors are in $TREE/build-${VARIANT}.log" >&2
@@ -183,6 +189,25 @@ done < "$LAYOUT"
     done < "$LAYOUT"
     echo 'partprobe "$DEV" 2>/dev/null || blockdev --rereadpt "$DEV" 2>/dev/null || true'
     echo 'sleep 2'
+    # Nothing Android-sparse may be dd'd into a partition. The images here are
+    # raw because BoardConfig.mk sets TARGET_USERIMAGES_SPARSE_EXT_DISABLED, but
+    # that is checked rather than trusted: a sparse image is a container (28-byte
+    # header, magic 0xed26ff3a, then chunks saying where each belongs), so writing
+    # one verbatim leaves the partition with no filesystem in it and the board
+    # fails to mount with nothing in any log. build-sdimage.sh carries the same
+    # guard, and the same magic, for the same reason.
+    echo 'sparse_check() {'
+    echo '  [ "$(od -An -tx1 -N4 -- "$1" | tr -d " \n")" = "3aff26ed" ] || return 0'
+    echo '  echo "$1 is an Android sparse image and cannot be written raw." >&2'
+    echo '  if command -v simg2img >/dev/null 2>&1; then'
+    echo '    echo "  expanding it with simg2img" >&2'
+    echo '    simg2img "$1" "$1.raw" && mv -f "$1.raw" "$1" && return 0'
+    echo '  fi'
+    echo '  echo "  no simg2img here to expand it (Debian: android-sdk-libsparse-utils)." >&2'
+    echo '  echo "  Rebuild with TARGET_USERIMAGES_SPARSE_EXT_DISABLED := true, or expand" >&2'
+    echo '  echo "  it on the build host before copying this pack over." >&2'
+    echo '  exit 1'
+    echo '}'
     # The partition number is known here, at generation time, because this script
     # wrote the table two lines up. Resolving it at run time by parsing sgdisk
     # output was the first version of this and there is no reason to.
@@ -192,6 +217,7 @@ done < "$LAYOUT"
         if [[ "$image" != "-" ]]; then
             echo "echo '  writing $name -> \${DEV}p$n'"
             echo "[ -b \"\${DEV}p$n\" ] || { echo \"\${DEV}p$n does not exist\" >&2; exit 1; }"
+            echo "sparse_check $image"
             echo "dd if=$image of=\"\${DEV}p$n\" bs=4M conv=fsync"
         fi
         n=$(( n + 1 ))

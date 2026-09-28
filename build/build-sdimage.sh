@@ -39,7 +39,7 @@ readonly SIZE_MIB="${EDGE1_SD_SIZE_MIB:-7000}"
 readonly UBOOT_SEEK_SECTORS=64
 readonly FIRST_PART_MIB=16
 
-for t in sgdisk dd; do
+for t in sgdisk dd od; do
     command -v "$t" >/dev/null 2>&1 || { echo "$t not found (apt-get install gdisk)" >&2; exit 1; }
 done
 [[ -f "$LAYOUT" ]] || { echo "no layout at $LAYOUT" >&2; exit 1; }
@@ -98,6 +98,85 @@ for i in "${!NAMES[@]}"; do
 done
 (( missing == 0 )) || { echo "$missing image(s) missing; run build.sh first" >&2; exit 1; }
 
+# ---------------------------------------------------------------------------
+# Nothing Android-sparse may be dd'd.
+#
+# An Android sparse image is a container, not a filesystem: a 28-byte header
+# (magic 0xed26ff3a) followed by chunks that each say which output blocks they
+# hold. Written verbatim into a partition it is 4GiB of the wrong bytes - no ext4
+# superblock, no super metadata - and the board fails to mount /system with
+# nothing in any log to say why. It is the one failure here that cannot be seen by
+# looking at the card.
+#
+# BoardConfig.mk sets TARGET_USERIMAGES_SPARSE_EXT_DISABLED so super.img comes out
+# raw, which is the real fix. This is the check that the real fix is in force,
+# because it went wrong once in the other direction: the build reported success,
+# every image was present and the right size, and super.img was a sparse container.
+# So the format is read from the file rather than assumed from the config, and if
+# it is sparse it gets converted rather than written.
+# ---------------------------------------------------------------------------
+readonly SPARSE_MAGIC=3aff26ed   # 0xed26ff3a, little-endian, as the first 4 bytes
+is_sparse() {
+    [[ "$(od -An -tx1 -N4 -- "$1" | tr -d ' \n')" == "$SPARSE_MAGIC" ]]
+}
+
+readonly TMP="$OUT/sdimage-tmp"
+rm -rf "$TMP"
+cleanup() { rm -rf "$TMP"; }
+trap cleanup EXIT
+
+find_simg2img() {
+    # The build produces it only as part of otatools (core/Makefile:5561), and
+    # build.sh asks for it by name for this reason.
+    local candidates=(
+        "$TREE/out/host/linux-x86/bin/simg2img"
+        "$TREE/out/soong/host/linux-x86/bin/simg2img"
+    )
+    local c
+    for c in "${candidates[@]}"; do
+        [[ -x "$c" ]] && { printf '%s' "$c"; return 0; }
+    done
+    command -v simg2img 2>/dev/null && return 0
+    return 1
+}
+
+declare -a RAW=()
+for i in "${!NAMES[@]}"; do
+    img="${IMAGES[$i]}"
+    if [[ "$img" == "-" ]]; then RAW+=("-"); continue; fi
+    if ! is_sparse "$OUT/$img"; then RAW+=("$OUT/$img"); continue; fi
+
+    echo "==> $img is Android-sparse and has to be expanded before it can be written"
+    simg2img="$(find_simg2img)" || {
+        echo "  no simg2img to expand it with." >&2
+        echo >&2
+        echo "  This should not happen: device/khadas/edge/BoardConfig.mk sets" >&2
+        echo "  TARGET_USERIMAGES_SPARSE_EXT_DISABLED := true so the build writes raw" >&2
+        echo "  images. If $img is sparse, that setting is not reaching the build -" >&2
+        echo "  check that place-device.sh has copied the current BoardConfig.mk into" >&2
+        echo "  the tree, then rebuild." >&2
+        echo >&2
+        echo "  To expand it instead, build the tool and re-run this script:" >&2
+        echo "    cd $TREE && source build/envsetup.sh && lunch edge1_tv-trunk_staging-userdebug && m simg2img" >&2
+        exit 1; }
+    mkdir -p "$TMP"
+    echo "    $simg2img -> $TMP/$img"
+    "$simg2img" "$OUT/$img" "$TMP/$img"
+    RAW+=("$TMP/$img")
+done
+
+# Sizes are checked against the raw image, which is the one that gets written. The
+# sparse file is a fraction of the size of what it expands to, so checking the
+# file in $OUT would have passed an image that does not fit.
+for i in "${!NAMES[@]}"; do
+    [[ "${RAW[$i]}" == "-" ]] && continue
+    bytes=$(stat -c %s "${RAW[$i]}")
+    if (( bytes > SIZES[i] * 1024 * 1024 )); then
+        echo "${IMAGES[$i]} is $bytes bytes and does not fit ${NAMES[$i]} (${SIZES[$i]}MiB)" >&2
+        exit 1
+    fi
+done
+
 # The bootloader has to fit between sector 64 and the first partition, or writing
 # the partitions would overwrite it.
 ub_bytes=$(stat -c %s "$UBOOT")
@@ -146,14 +225,14 @@ start=$FIRST_PART_MIB
 for i in "${!NAMES[@]}"; do
     name="${NAMES[$i]}"; size="${SIZES[$i]}"; image="${IMAGES[$i]}"
     if [[ "$image" != "-" ]]; then
-        # seek in MiB blocks so the arithmetic matches the table exactly, and
-        # notrunc so each write lands inside the file rather than truncating it.
-        bytes=$(stat -c %s "$OUT/$image")
-        if (( bytes > size * 1024 * 1024 )); then
-            echo "  $image is $bytes bytes and does not fit ${name} (${size}MiB)" >&2
-            exit 1
-        fi
-        dd if="$OUT/$image" of="$IMG" bs=1M seek="$start" conv=notrunc,fsync status=none
+        # seek in MiB blocks so the arithmetic matches the table exactly; notrunc so
+        # each write lands inside the file rather than truncating it; sparse so a
+        # raw 4.6GiB super.img whose free blocks are zeros does not turn a 7GiB
+        # sparse file into 7GiB on disk. sparse is only safe because the file was
+        # just created by truncate and every byte of it is already zero.
+        bytes=$(stat -c %s "${RAW[$i]}")
+        dd if="${RAW[$i]}" of="$IMG" bs=1M seek="$start" \
+           conv=notrunc,sparse,fsync status=none
         printf '    %-12s <- %-16s %s\n' "$name" "$image" \
                "$(numfmt --to=iec --suffix=B "$bytes" 2>/dev/null || echo "${bytes}B")"
     fi

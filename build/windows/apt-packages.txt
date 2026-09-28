@@ -1,0 +1,76 @@
+# Host packages, one per line, '#' comments and blank lines ignored.
+#
+# This is a file rather than a list inside provision-wsl.sh for one reason:
+# Start-EdgeBuild.ps1 hashes it and un-completes the Provision stage when it
+# moves. With the list inlined in the script, adding a package changed nothing -
+# Provision was already marked complete, so apt never ran again and the new
+# package was simply absent. That is how the U-Boot build came to fail on
+#
+#   error: command 'swig' failed: No such file or directory
+#
+# a full cycle after swig had been added. The package list is an input to a
+# stage, and an input that changes has to invalidate it.
+
+# ---- the canonical AOSP list ----
+git-core
+git-lfs
+gnupg
+flex
+bison
+build-essential
+zip
+curl
+zlib1g-dev
+libc6-dev-i386
+x11proto-dev
+libx11-dev
+lib32z1-dev
+libgl1-mesa-dev
+libxml2-utils
+xsltproc
+unzip
+fontconfig
+rsync
+bc
+lz4
+libssl-dev
+openjdk-17-jdk-headless
+
+# ---- python, and the name AOSP's own scripts still use ----
+#
+# python-is-python3 matters: several AOSP scripts invoke bare `python`.
+python3
+python3-pip
+python-is-python3
+
+# ---- ccache, which build.sh points at the tree's out/ ----
+ccache
+
+# ---- the kernel build ----
+device-tree-compiler
+gcc-aarch64-linux-gnu
+binutils-aarch64-linux-gnu
+libelf-dev
+
+# ---- U-Boot: binman and pylibfdt ----
+#
+# U-Boot builds a SWIG Python extension (scripts/dtc/pylibfdt) before it can run
+# binman, and binman is what produces u-boot-rockchip.bin. That needs swig, the
+# Python headers and setuptools; binman itself imports pyelftools to write SPL
+# symbols. doc/build/gcc.rst is where this list comes from - it is upstream's own,
+# minus the packages only the test suite and the docs need.
+swig
+libpython3-dev
+python3-setuptools
+python3-pkg-resources
+python3-pyelftools
+uuid-dev
+pkg-config
+libgnutls28-dev
+
+# ---- the SD card image ----
+#
+# gdisk for sgdisk, which writes the GPT into the image; pigz because gzipping
+# 7GiB single-threaded is minutes of wall clock for no reason.
+gdisk
+pigz

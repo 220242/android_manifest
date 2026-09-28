@@ -30,6 +30,42 @@ readonly CROSS=aarch64-linux-gnu-
 command -v "${CROSS}gcc" >/dev/null 2>&1 || {
     echo "${CROSS}gcc not found; apt-get install gcc-aarch64-linux-gnu" >&2; exit 1; }
 
+# ---------------------------------------------------------------------------
+# Host tools, checked here rather than found by the build.
+#
+# U-Boot builds a SWIG Python extension (scripts/dtc/pylibfdt) before it can run
+# binman, and binman is what packs u-boot-rockchip.bin. When swig is missing the
+# build gets 400 lines in and stops with
+#
+#   error: command 'swig' failed: No such file or directory
+#   make[2]: *** [scripts/dtc/pylibfdt/Makefile:33: rebuild] Error 1
+#
+# which names neither swig-the-package nor what wanted it. Four checks up front
+# cost nothing and each names the package that satisfies it. The list is upstream's
+# own, from doc/build/gcc.rst.
+# ---------------------------------------------------------------------------
+declare -a need=()
+command -v swig >/dev/null 2>&1 || need+=("swig (apt-get install swig)")
+python3 -c 'import setuptools' >/dev/null 2>&1 || \
+    need+=("python3 setuptools (apt-get install python3-setuptools)")
+python3 -c 'import elftools' >/dev/null 2>&1 || \
+    need+=("python3 pyelftools, which binman imports (apt-get install python3-pyelftools)")
+# The extension is compiled, so Python.h has to be on disk - python3 alone does
+# not bring it. sysconfig names the directory the interpreter was built to look in.
+pyinc="$(python3 -c 'import sysconfig; print(sysconfig.get_paths()["include"])' 2>/dev/null || true)"
+[[ -n "$pyinc" && -f "$pyinc/Python.h" ]] || \
+    need+=("Python.h${pyinc:+ (looked in $pyinc)} (apt-get install libpython3-dev)")
+
+if (( ${#need[@]} )); then
+    echo "U-Boot cannot be built here; ${#need[@]} host requirement(s) missing:" >&2
+    printf '  %s\n' "${need[@]}" >&2
+    echo >&2
+    echo "All of them are in build/windows/apt-packages.txt. On the WSL pipeline" >&2
+    echo "that list is hashed, so the fix is to re-run the Provision stage:" >&2
+    echo "  .\\build\\windows\\Start-EdgeBuild.ps1 -Stage Provision -Force" >&2
+    exit 1
+fi
+
 # BL31 is the only thing rk3399 needs out of rkbin. U-Boot's own TPL does DDR init
 # on this SoC - the defconfig has CONFIG_TPL=y with CONFIG_RAM_ROCKCHIP_LPDDR4=y -
 # so there is no ROCKCHIP_TPL blob in this build, unlike rk356x/rk3588.

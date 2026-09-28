@@ -3,10 +3,11 @@
 A port of the Khadas Edge1 from its Android 10 (`khadas-edge-Qt`) configuration to
 Android TV 14, on a mainline kernel and with no proprietary blobs.
 
-**The build completes**, and it produces one whole-disk image for an SD card —
-`edge1-sdcard.img`, written with Balena Etcher. Nothing has been booted yet, so
-nothing here is claimed to work. [`docs/STATUS.md`](docs/STATUS.md) has the state in
-detail.
+**The build completes** and produces every image the flash layout names, `super.img`
+included. The last stage assembles those into one whole-disk image for an SD card —
+`edge1-sdcard.img`, written with Balena Etcher — and that stage has not run to the end
+yet: the bootloader it needs has still to build. Nothing has been booted, so nothing
+here is claimed to work. [`docs/STATUS.md`](docs/STATUS.md) has the state in detail.
 
 The card is the install, not the eMMC. The RK3399 BootROM reads the SD card before
 the eMMC, so the card carries its own mainline U-Boot and takes over the boot with
