@@ -20,7 +20,7 @@ written to the board yet**, so nothing here is claimed to boot.
 | VINTF: `vendor_manifest.xml` | assembles |
 | `vendor/build.prop`, `system/build.prop` | generated |
 | `recovery.img` | builds |
-| `check_vintf_all` | HAL levels pass at `target-level="7"`; VNDK requirement removed |
+| `check_vintf_all` | HAL levels pass at `target-level="7"`, VNDK requirement removed, kernel-version check disabled |
 | `system.img`, `super.img`, `boot.img`, `vbmeta.img` | in progress |
 | Flash pack (`edge1-flash/` + generated `flash-emmc.sh`) | written, never run |
 
@@ -83,7 +83,14 @@ Rockchip's own gralloc did.
    Android 14 device: the vendor image's HAL surface is Android-13-era.
 5. **Codec performance numbers are placeholders.** `media/media_codecs_performance.xml`
    holds datasheet ceilings, not measurements from this board.
-6. **`kmsro` in `BOARD_GPU_DRIVERS` is confirmed valid but unproven useful.** It is
+6. **ART's userfaultfd GC is off, and no longer for the original reason.** It was
+   off because the 4.19 BSP kernel lacked the feature; 6.12 has all of it, and by
+   AOSP's own rule this board qualifies. It stays off for the first boot on purpose
+   — a different garbage collector is an untested variable in the one attempt that
+   matters, and it would fail inside ART during zygote startup. Flip
+   `PRODUCT_ENABLE_UFFD_GC` to `true` once the device boots; it is a memory win on a
+   4GB board, not a requirement.
+7. **`kmsro` in `BOARD_GPU_DRIVERS` is confirmed valid but unproven useful.** It is
    in the driver-name list `external/mesa3d/Android.mk` accepts
    (`kmsro.HAVE_GALLIUM_KMSRO`); whether panfrost on this board needs it is a
    question for the first boot.
@@ -237,6 +244,41 @@ Writing the gate for this reproduced the kernel-fragment trap exactly. A
 comment and reported a requirement on a clean tree. The gate parses the XML instead,
 since ElementTree does not see comments — and the test that caught it was the one
 that checked the *passing* case, not the failing one.
+
+## The one check that is disabled rather than satisfied
+
+Everything else in this tree was made to pass. This one cannot be:
+
+```
+Runtime info and framework compatibility matrix are incompatible: No kernel
+entry found for kernel version 6.12 at kernel FCM version 7. The following
+kernel requirements are checked:
+  Minimum LTS: 5.10.107 ... 5.15.41 ... 6.1.0 ... 6.6.0
+```
+
+Read what it lists. Those are minimums, and 6.12.111 is above every one of them. The
+failure is not that the kernel is too old — it is that libvintf matches the LTS
+*branch* exactly, the matrices in this release carry `<kernel>` rows for 5.10, 5.15,
+6.1 and 6.6, and 6.12 LTS did not exist when Android 14 was cut. There is no row to
+match and no mechanism for a device to add one.
+
+So `PRODUCT_OTA_ENFORCE_VINTF_KERNEL_REQUIREMENTS := false`, which is AOSP's own
+remedy — option (4) in the warning it prints at `core/Makefile:5259`. The variable was
+true only because `PRODUCT_SHIPPING_API_LEVEL` is 29, and 29 ≥ 29
+(`core/product_config.mk:523-528`).
+
+What is genuinely lost is worth naming rather than glossing: the same check also
+verified the `CONFIG_*` symbols those rows require, and that half would have worked.
+The probe does it instead — it collects every `<config>` requirement across all
+`<kernel>` rows in every matrix and lists the ones this board's config does not name,
+checking the merged `.config` when the kernel has been built and the fragment
+otherwise. Reported rather than gated: many of those entries are conditional on a GKI
+kernel or on another config, and deciding which apply to a non-GKI board is not a
+judgement a script can make. The enforcement is gone; the information is not.
+
+This is also the first failure in the run that was not the tree's fault. The previous
+seven were all the same mistake — claiming something the platform does not agree with.
+This one is a version table that ends before the kernel this board runs.
 
 ## The vendor_boot that had nothing to carry
 

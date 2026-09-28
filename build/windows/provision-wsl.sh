@@ -589,6 +589,8 @@ PY_DEPS
         # the Android 14 FCM, which is what target-level in
         # device/khadas/edge/vintf/manifest.xml claims.
         cm="$TREE/hardware/interfaces/compatibility_matrices"
+        KERNEL_CFG="$TREE/kernel/mainline/out/.config"
+        FRAGMENT_CFG="$MANIFEST/device/khadas/edge/kernel/edge1_mainline.config"
         if [[ -d "$cm" ]]; then
             ls "$cm" | grep -E 'compatibility_matrix\.[0-9]+\.xml' | sed 's/^/  /' || true
             for lvl in 8 7; do
@@ -627,6 +629,73 @@ for key in ('false', 'absent'):
         print('    ... and %d more' % (len(buckets[key]) - 40))
 PY_VINTF
             done
+            # What PRODUCT_OTA_ENFORCE_VINTF_KERNEL_REQUIREMENTS := false gave up.
+            #
+            # That check rejected the kernel for its version - the matrices carry
+            # <kernel> rows for the 5.10, 5.15, 6.1 and 6.6 LTS branches and none
+            # for 6.12, which did not exist when Android 14 was cut, so libvintf
+            # found no row to match and said so. The minimums it listed are all
+            # below 6.12.111.
+            #
+            # But the same check also verified the CONFIG_* symbols those rows
+            # require, and that half would have worked. So it is done here instead,
+            # against the merged .config if the kernel has been built and against
+            # the fragment otherwise. Reported, not gated: many of those entries are
+            # conditional on a GKI kernel or on another config being set, and
+            # deciding which apply to a non-GKI board is a judgement this cannot
+            # make.
+            echo "  --- FCM kernel config requirements vs this board's kernel ---"
+            python3 - "$cm" "$KERNEL_CFG" "$FRAGMENT_CFG" <<'PY_KCFG'
+import os, re, sys, xml.etree.ElementTree as ET
+cm, merged, fragment = sys.argv[1], sys.argv[2], sys.argv[3]
+have = {}
+src = merged if os.path.exists(merged) else fragment
+if not os.path.exists(src):
+    print('    no kernel config to check against (%s)' % src)
+    raise SystemExit(0)
+print('    checking against %s' % src)
+for raw in open(src, errors='replace'):
+    line = raw.strip()
+    m = re.match(r'^(CONFIG_[A-Za-z0-9_]+)=(.*)$', line)
+    if m:
+        have[m.group(1)] = m.group(2)
+        continue
+    m = re.match(r'^# (CONFIG_[A-Za-z0-9_]+) is not set$', line)
+    if m:
+        have[m.group(1)] = 'n'
+# Requirements from the matrices, per LTS branch, deduplicated by symbol.
+want = {}
+for fn in sorted(os.listdir(cm)):
+    if not re.match(r'^compatibility_matrix\.[0-9]+\.xml$', fn):
+        continue
+    try:
+        root = ET.parse(os.path.join(cm, fn)).getroot()
+    except Exception:
+        continue
+    for k in root.findall('kernel'):
+        ver = k.get('version', '?')
+        for c in k.findall('config'):
+            key = c.findtext('key')
+            v = c.find('value')
+            val = (v.text or '') if v is not None else ''
+            typ = v.get('type') if v is not None else ''
+            if key:
+                want.setdefault(key, set()).add('%s=%s%s' % (ver, val, '' if typ != 'tristate' else ''))
+if not want:
+    print('    the matrices state no kernel config requirements')
+    raise SystemExit(0)
+missing = []
+for key in sorted(want):
+    if key not in have:
+        missing.append(key)
+print('    %d distinct CONFIG_* required across all <kernel> rows; %d not named by'
+      % (len(want), len(missing)))
+print('    this board\'s config:')
+for key in missing:
+    print('      %-44s wanted as %s' % (key, ' '.join(sorted(want[key]))[:60]))
+if not missing:
+    print('      (none)')
+PY_KCFG
             echo "  --- level 8 kernel requirements (6.12 LTS is what we have) ---"
             python3 - "$cm/compatibility_matrix.8.xml" <<'PY_KERNEL' || true
 import sys, xml.etree.ElementTree as ET

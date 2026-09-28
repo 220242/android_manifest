@@ -63,14 +63,59 @@ PRODUCT_SHIPPING_API_LEVEL := 29
 # derives PRODUCT_BUILD_SUPER_PARTITION from it.
 PRODUCT_USE_DYNAMIC_PARTITIONS := true
 
-# ART's userfaultfd GC, off. This is a kernel capability question, not a policy
-# one: Android 14's default is PRODUCT_ENABLE_UFFD_GC := default, which makes
-# post_process_props.py decide from the kernel version at build time, and the
-# 4.19.111 kernel here has neither the userfaultfd feature set nor
-# MREMAP_DONTUNMAP that the GC needs. Saying so explicitly also removes the
-# build's dependency on reading the version back out of the kernel image, which
-# is a separate mechanism that can fail on its own.
+# ART's userfaultfd GC, off - and the reason has changed, so the old one is worth
+# correcting rather than leaving to be read.
+#
+# It was off because the 4.19 BSP kernel had neither the userfaultfd feature set
+# nor MREMAP_DONTUNMAP. That is no longer the situation: this kernel is 6.12 with
+# CONFIG_USERFAULTFD=y, MREMAP_DONTUNMAP has been upstream since 5.7, and
+# /dev/userfaultfd since 6.1. By AOSP's own rule - "true if ... a non-GKI kernel
+# that supports userfaultfd(2) and MREMAP_DONTUNMAP" (core/Makefile:5290) - this
+# board now qualifies.
+#
+# It stays false for the first boot anyway, deliberately. UFFD GC is a memory
+# win, not a requirement: with it off ART uses the concurrent-copying collector,
+# which is what every Android before 14 used and is still fully supported. On a
+# board that has never booted, a different garbage collector is an untested
+# variable in the one attempt that matters, and if it goes wrong it goes wrong
+# inside ART during zygote startup, which is among the least legible places to
+# debug from a serial console. Flip it to true once the device boots; docs/STATUS.md
+# tracks it.
+#
+# Setting it explicitly has a second effect worth keeping either way: the default,
+# "default", makes the build decide from the kernel version read back out of the
+# built image, which is a mechanism that can fail on its own - and does, on a
+# kernel this release has never heard of. See
+# PRODUCT_OTA_ENFORCE_VINTF_KERNEL_REQUIREMENTS below.
 PRODUCT_ENABLE_UFFD_GC := false
+
+# The VINTF kernel requirement check, off. This is the one check in this tree that
+# is disabled rather than satisfied, so here is the whole reason.
+#
+# check_vintf compares the built kernel against the <kernel> entries in the
+# framework compatibility matrices. It failed:
+#
+#   Runtime info and framework compatibility matrix are incompatible: No kernel
+#   entry found for kernel version 6.12 at kernel FCM version 7. The following
+#   kernel requirements are checked:
+#     Minimum LTS: 5.10.107 ... 5.15.41 ... 6.1.0 ... 6.6.0
+#
+# Read what it says. Those are minimums, and 6.12.111 is above every one of them.
+# The failure is not that the kernel is too old - it is that libvintf matches the
+# LTS branch exactly, the matrices in this release carry rows for 5.10, 5.15, 6.1
+# and 6.6, and 6.12 LTS did not exist when Android 14 was cut. There is no row to
+# match, and no mechanism for a device to add one.
+#
+# Unsetting this is AOSP's own remedy - option (4) in the warning it prints at
+# core/Makefile:5259. The variable defaults to true here only because
+# PRODUCT_SHIPPING_API_LEVEL is 29, which is >= 29 (core/product_config.mk:523-528).
+#
+# What is genuinely lost: the same check also verifies the kernel *config* symbols
+# the matrix requires, and that part would have worked. The module probe reports
+# those requirements against this board's config fragment instead, so the
+# information is not gone - only the enforcement, which was rejecting the kernel
+# for its version rather than its contents.
+PRODUCT_OTA_ENFORCE_VINTF_KERNEL_REQUIREMENTS := false
 
 # No VNDK settings here, and none in BoardConfig.mk either. VNDK is deprecated in
 # this release: the build clears BOARD_VNDK_VERSION and PLATFORM_VNDK_VERSION
