@@ -72,11 +72,14 @@ PRODUCT_USE_DYNAMIC_PARTITIONS := true
 # is a separate mechanism that can fail on its own.
 PRODUCT_ENABLE_UFFD_GC := false
 
-# VNDK. Vendor code is built against the current VNDK snapshot rather than a
-# frozen Android 10 one, because the Rockchip HALs are being forward-ported
-# rather than kept binary-stable. That is BOARD_VNDK_VERSION := current in
-# BoardConfig.mk; PRODUCT_TARGET_VNDK_VERSION, which used to be set here, is not
-# a variable AOSP 14 reads anywhere and did nothing.
+# No VNDK settings here, and none in BoardConfig.mk either. VNDK is deprecated in
+# this release: the build clears BOARD_VNDK_VERSION and PLATFORM_VNDK_VERSION
+# outright when KEEP_VNDK is not true (core/config.mk:1266-1273), and the framework
+# manifest provides no VNDK version for a device matrix to require. See
+# vintf/compatibility_matrix.xml, which is where that cost a build.
+#
+# PRODUCT_TARGET_VNDK_VERSION was also set here once. It is not a variable AOSP 14
+# reads anywhere and did nothing.
 
 # ---------------------------------------------------------------------------
 # Display / density.

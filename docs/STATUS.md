@@ -20,7 +20,7 @@ written to the board yet**, so nothing here is claimed to boot.
 | VINTF: `vendor_manifest.xml` | assembles |
 | `vendor/build.prop`, `system/build.prop` | generated |
 | `recovery.img` | builds |
-| `check_vintf_all` | passes with `target-level="7"`; rejected `"8"` |
+| `check_vintf_all` | HAL levels pass at `target-level="7"`; VNDK requirement removed |
 | `system.img`, `super.img`, `boot.img`, `vbmeta.img` | in progress |
 | Flash pack (`edge1-flash/` + generated `flash-emmc.sh`) | written, never run |
 
@@ -125,9 +125,9 @@ Also checked and found clean: none of the 69 `KATI_obsolete_var` names are used
 anywhere in the device tree, and the dynamic-partition group naming matches what
 `core/config.mk` derives.
 
-## One failure shape, six times
+## One failure shape, seven times
 
-Six build failures were variations of one mistake: the tree claims something the
+Seven build failures were variations of one mistake: the tree claims something the
 platform does not agree with, and the tool that objects reports one instance per run.
 Each now has a gate in the module probe (`build/windows/provision-wsl.sh`, `stage_probe`),
 which runs before the build and takes about a minute.
@@ -140,6 +140,7 @@ which runs before the build and takes about a minute.
 | Property the build derives from a variable | `post_process_props.py`: `found duplicate sysprop assignments` | ~9 min |
 | Property `exact` match labelled twice | `host_init_verifier`: `Duplicate exact match detected` | ~20 min |
 | HAL declared at an FCM level that does not list it | `check_vintf`: `INCOMPATIBLE` | ~15 min |
+| Device matrix requiring a VNDK version | `check_vintf`: `Vndk version 34 is not supported` | ~10 min |
 
 Two of those are worth spelling out because the rule is not the obvious one:
 
@@ -199,6 +200,43 @@ level, and fails the run naming the ones that are not accepted. It covers the de
 manifest's own entries only — instances that arrive with an installed service's VINTF
 fragment, like the cas one, are not visible without a built image — so it narrows
 `check_vintf` rather than replacing it.
+
+## VNDK, deprecated in silence
+
+With the FCM levels agreed, `check_vintf` moved on to the next line of the same
+file:
+
+```
+All HALs in device manifest are declared in FCM <= level 7
+ERROR: files are incompatible: Framework manifest and device compatibility
+matrix are incompatible: Vndk version 34 is not supported. Supported versions
+in framework manifest are: []
+```
+
+An empty list, not a mismatched number. VNDK is deprecated in this release, and AOSP
+wires that up in two steps neither of which says anything:
+
+* `core/envsetup.mk:53-58` — `KEEP_VNDK` defaults to **false** when the release
+  config sets `RELEASE_DEPRECATE_VNDK`, and true otherwise.
+* `core/config.mk:1266-1273` — when `KEEP_VNDK` is not true, `BOARD_VNDK_VERSION`
+  and `PLATFORM_VNDK_VERSION` are assigned empty. No warning, no error.
+
+So `BOARD_VNDK_VERSION := current` in `BoardConfig.mk` was discarded before anything
+read it, the framework manifest listed no versions at all, and the device
+compatibility matrix was requiring something that no longer exists. Both are gone.
+Nothing replaces them: if a future release keeps VNDK, `envsetup.mk:64` sets
+`BOARD_VNDK_VERSION := current` itself when the board has not — the same value that
+line used to state.
+
+The device matrix now requires nothing, which is correct rather than lazy: nothing on
+the vendor side of this board calls into a framework HAL, because every HAL here is
+an AOSP one talking to a mainline driver.
+
+Writing the gate for this reproduced the kernel-fragment trap exactly. A
+`grep -c '<vendor-ndk>'` over the matrix counted the explanation in that file's own
+comment and reported a requirement on a clean tree. The gate parses the XML instead,
+since ElementTree does not see comments — and the test that caught it was the one
+that checked the *passing* case, not the failing one.
 
 ## The vendor_boot that had nothing to carry
 

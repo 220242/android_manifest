@@ -335,7 +335,18 @@ BOARD_VENDOR_SEPOLICY_DIRS += device/khadas/edge/sepolicy/vendor
 # ---------------------------------------------------------------------------
 DEVICE_MANIFEST_FILE := device/khadas/edge/vintf/manifest.xml
 DEVICE_MATRIX_FILE := device/khadas/edge/vintf/compatibility_matrix.xml
-BOARD_VNDK_VERSION := current
+
+# No BOARD_VNDK_VERSION. It was "current" here and the build threw it away:
+# core/config.mk:1266-1273 clears both BOARD_VNDK_VERSION and PLATFORM_VNDK_VERSION
+# whenever KEEP_VNDK is not true, and core/envsetup.mk:53-58 makes KEEP_VNDK false
+# whenever the release config sets RELEASE_DEPRECATE_VNDK - which this release does.
+# Neither step warns. The framework manifest therefore provides no VNDK version at
+# all, which is what check_vintf reported when the device matrix still asked for 34;
+# see vintf/compatibility_matrix.xml.
+#
+# Nothing replaces it. If a future release keeps VNDK, envsetup.mk:64 sets
+# BOARD_VNDK_VERSION := current itself when the board has not - the same value this
+# line used to state.
 
 # ---------------------------------------------------------------------------
 # Connectivity: AP6398S = Broadcom BCM4359, on SDIO.

@@ -2,22 +2,41 @@
 <!--
   Khadas Edge1 - device compatibility matrix.
 
-  This is the mirror of vintf/manifest.xml: the manifest says what this vendor
-  image *provides*, this matrix says what it *requires of the framework*. It is
-  referenced by DEVICE_MATRIX_FILE in BoardConfig.mk and checked against the
-  framework manifest by check_vintf.
+  The mirror of vintf/manifest.xml: the manifest says what this vendor image
+  *provides*, this matrix says what it *requires of the framework*. BoardConfig.mk
+  names it as DEVICE_MATRIX_FILE, and check_vintf checks it against the framework
+  manifest.
 
-  type="device" (not "framework" - that is the FCM, which lives in AOSP and
-  states what the framework requires of vendors).
+  type="device" - not "framework", which is the FCM that lives in AOSP and states
+  what the framework requires of vendors.
 
-  Deliberately minimal. The Rockchip vendor code on this board does not call into
-  any framework HAL: the HALs it talks to are its own, plus the kernel. The one
-  real requirement is the VNDK version, because BOARD_VNDK_VERSION := current
-  means vendor libraries are linked against the Android 14 VNDK snapshot and will
-  not load against an older one.
+  It requires nothing, and that is correct rather than lazy. Nothing on the vendor
+  side of this board calls into a framework HAL: every HAL here is an AOSP one
+  talking to a mainline kernel driver, so there is no framework-provided interface
+  this image depends on.
+
+  It did carry one requirement, <vendor-ndk><version>34</version>, and check_vintf
+  rejected it:
+
+    ERROR: files are incompatible: Framework manifest and device compatibility
+    matrix are incompatible: Vndk version 34 is not supported. Supported versions
+    in framework manifest are: []
+
+  An empty list, not a mismatched number: this release provides no VNDK snapshot at
+  all. VNDK is deprecated, and AOSP wires that deprecation up in two steps that are
+  easy to miss because neither says anything.
+
+    core/envsetup.mk:53-58   KEEP_VNDK defaults to false when the release config
+                             sets RELEASE_DEPRECATE_VNDK, and to true otherwise.
+    core/config.mk:1266-1273 when KEEP_VNDK is not true, BOARD_VNDK_VERSION and
+                             PLATFORM_VNDK_VERSION are cleared - assigned empty,
+                             with no warning.
+
+  So BOARD_VNDK_VERSION := current in BoardConfig.mk was discarded before anything
+  read it, the framework manifest listed no versions to match, and this file was
+  asking for something that no longer exists. Both are gone. Nothing needs to
+  replace them: when a future release keeps VNDK, envsetup.mk:64 sets
+  BOARD_VNDK_VERSION := current itself if the board has not.
 -->
 <compatibility-matrix version="1.0" type="device">
-    <vendor-ndk>
-        <version>34</version>
-    </vendor-ndk>
 </compatibility-matrix>

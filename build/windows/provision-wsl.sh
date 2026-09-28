@@ -197,7 +197,8 @@ stage_probe() {
     # Cleared first: if the diagnostic block below dies early, a stale count from
     # the last run would gate this one - in whichever direction is wrong.
     rm -f "$WORK/.probe-miss-hard" "$WORK/.probe-sepol-dupes" \
-          "$WORK/.probe-prop-dupes" "$WORK/.probe-ctx-dupes" "$WORK/.probe-fcm-bad"
+          "$WORK/.probe-prop-dupes" "$WORK/.probe-ctx-dupes" "$WORK/.probe-fcm-bad" \
+          "$WORK/.probe-vndk-req"
 
     [[ -d "$TREE/hardware/interfaces" ]] || {
         echo "tree not synced at $TREE" >&2; return 1; }
@@ -718,6 +719,55 @@ if bad:
     print('       matrix names.')
 open(os.path.join(os.environ.get('EDGE1_WORK', '/tmp'), '.probe-fcm-bad'), 'w').write('%d\n' % bad)
 PY_FCM
+
+            # VNDK, which is deprecated in this release and says nothing about it.
+            #
+            #   ERROR: files are incompatible: Framework manifest and device
+            #   compatibility matrix are incompatible: Vndk version 34 is not
+            #   supported. Supported versions in framework manifest are: []
+            #
+            # An empty list, not a mismatched number. core/envsetup.mk:53-58 makes
+            # KEEP_VNDK false whenever the release config sets
+            # RELEASE_DEPRECATE_VNDK, and core/config.mk:1266-1273 then clears
+            # BOARD_VNDK_VERSION and PLATFORM_VNDK_VERSION - assigned empty, no
+            # warning. So a board that sets BOARD_VNDK_VERSION has it discarded, and
+            # a device matrix that requires a VNDK version requires something the
+            # framework no longer provides.
+            echo "  --- VNDK: deprecated or kept in this release ---"
+            if grep -rqs 'RELEASE_DEPRECATE_VNDK' "$TREE/build/release" 2>/dev/null; then
+                grep -rhs -A 3 'RELEASE_DEPRECATE_VNDK' "$TREE/build/release" 2>/dev/null \
+                    | grep -E 'RELEASE_DEPRECATE_VNDK|value|true|false' | head -8 | sed 's/^/    /' || true
+            else
+                echo "    RELEASE_DEPRECATE_VNDK appears nowhere in build/release"
+            fi
+            # Parsed, not grepped. A grep for '<vendor-ndk>' counted the
+            # explanation in that file's own comment - the same trap the kernel
+            # fragment had, where a comment naming a setting was read as the
+            # setting. ElementTree does not see comments.
+            vndk_req=$(python3 -c "
+import sys, xml.etree.ElementTree as ET
+try:
+    r = ET.parse(sys.argv[1]).getroot()
+except Exception:
+    print(0); raise SystemExit(0)
+print(len(r.findall('vendor-ndk')))
+" "$MANIFEST/device/khadas/edge/vintf/compatibility_matrix.xml" 2>/dev/null || echo 0)
+            vndk_board=$(sed 's/#.*//' "$MANIFEST/device/khadas/edge/BoardConfig.mk" \
+                         | grep -cE '^[[:space:]]*BOARD_VNDK_VERSION[[:space:]]*:?=' || true)
+            echo "    device matrix requires a VNDK version: $vndk_req"
+            echo "    BoardConfig.mk sets BOARD_VNDK_VERSION:  $vndk_board"
+            if (( vndk_req > 0 )); then
+                echo "    !! The device compatibility matrix requires a VNDK version. If this"
+                echo "       release deprecates VNDK the framework provides none, and"
+                echo "       check_vintf calls the device INCOMPATIBLE."
+                echo "$vndk_req" > "$WORK/.probe-vndk-req"
+            else
+                echo "0" > "$WORK/.probe-vndk-req"
+            fi
+            if (( vndk_board > 0 )); then
+                echo "    note: BOARD_VNDK_VERSION is set and is a no-op when VNDK is"
+                echo "       deprecated - core/config.mk clears it without warning."
+            fi
         else
             echo "  ABSENT at $cm"
         fi
@@ -994,6 +1044,21 @@ PY_SEPOL
         echo "$fcm_bad HAL(s) in vintf/manifest.xml are not accepted by the framework" >&2
         echo "compatibility matrix at this manifest's target-level." >&2
         sed -n '/declared HAL(s) the level/,+3p' "$out" >&2
+        echo "Full probe: $out" >&2
+        rc=1
+    fi
+
+    # A VNDK version required by the device compatibility matrix. The framework
+    # provides none while VNDK is deprecated, and check_vintf says so 10 minutes in.
+    local vndk_req=0
+    [[ -f "$WORK/.probe-vndk-req" ]] && vndk_req=$(cat "$WORK/.probe-vndk-req")
+    if (( vndk_req > 0 )); then
+        echo >&2
+        echo "The device compatibility matrix requires a VNDK version." >&2
+        echo "VNDK is deprecated in this release: BOARD_VNDK_VERSION and" >&2
+        echo "PLATFORM_VNDK_VERSION are cleared by core/config.mk:1266-1273 and the" >&2
+        echo "framework manifest provides no version to match. Drop the <vendor-ndk>" >&2
+        echo "requirement from vintf/compatibility_matrix.xml." >&2
         echo "Full probe: $out" >&2
         rc=1
     fi
