@@ -52,6 +52,40 @@ readonly DEFCONFIG=khadas-edge-v-rk3399_defconfig
 # ---------------------------------------------------------------------------
 readonly UBOOT_REV="${EDGE1_UBOOT_REV:-}"
 
+# ---------------------------------------------------------------------------
+# EDGE1_ROCKCHIP_TPL=1 - use Rockchip's DDR blob instead of U-Boot's own TPL.
+#
+#   EDGE1_ROCKCHIP_TPL=1 build/build-uboot.sh ~/aosp-14-edge1
+#   EDGE1_IMAGE_TAG=rkddr build/build-images.sh ~/aosp-14-edge1 sdcard
+#
+# This is the A/B that the first hardware attempt actually calls for, and it is one
+# variable rather than a different tree.
+#
+# What the board did: a card whose ID block at sector 64 verifies (rk-idb-check.py
+# says so), and the board boots the eMMC anyway. The owner has a counter-example
+# that settles the boot order - an OpenWrt card on this same board always won over
+# the eMMC - so the BootROM does read the card first. It read our ID block and then
+# fell through, which means the block is fine and the *payload it points at* failed.
+#
+# The first thing that payload does is bring up DRAM, and that is the one part of
+# the chain this tree has no second opinion on: CONFIG_TPL=y with
+# CONFIG_RAM_ROCKCHIP_LPDDR4=y, so U-Boot's own TPL does it. If that does not work
+# on this board's particular LPDDR4 part, DDR init fails, and a BootROM that cannot
+# get a first stage running falls through to the next device - exactly what was
+# seen.
+#
+# Rockchip's DDR blob is the other opinion. binman already supports substituting it:
+# arch/arm/dts/rockchip-u-boot.dtsi:170-184 puts `rockchip-tpl` in idbloader.img
+# instead of `u-boot-tpl` when CONFIG_ROCKCHIP_EXTERNAL_TPL is set, so the output is
+# the same u-boot-rockchip.bin, the same single blob, at the same sector 64. Nothing
+# else about the image changes, which is what makes it a clean comparison.
+#
+# CONFIG_TPL is deliberately left on. binman's #ifdef prefers the external blob when
+# EXTERNAL_TPL is set, so U-Boot's TPL is still built and simply not packaged - a few
+# seconds of build time in exchange for not perturbing anything else in the config.
+# ---------------------------------------------------------------------------
+readonly USE_RK_TPL="${EDGE1_ROCKCHIP_TPL:-0}"
+
 [[ -d "$UB" ]]    || { echo "no U-Boot at $UB; run sync.sh first" >&2; exit 1; }
 [[ -d "$RKBIN" ]] || { echo "no rkbin at $RKBIN; run sync.sh first" >&2; exit 1; }
 [[ -f "$UB/configs/$DEFCONFIG" ]] || {
@@ -112,6 +146,26 @@ BL31="$(find "$RKBIN" -name 'rk3399_bl31*.elf' 2>/dev/null | sort -V | tail -1)"
     find "$RKBIN" -name '*bl31*' 2>/dev/null | head -20 >&2
     exit 1; }
 echo "==> BL31: ${BL31#$TREE/}"
+
+# The DDR blob, only when asked for. Searched rather than hardcoded, same as BL31:
+# rkbin carries several speed bins (666/800/933MHz) each with its own version. 933MHz
+# is the one Armbian picks for rk3399 (rockchip64_common.inc:113), so prefer it and
+# fall back to whatever rk3399 DDR blob is there.
+RKTPL=
+if [[ "$USE_RK_TPL" == "1" ]]; then
+    RKTPL="$(find "$RKBIN" -name 'rk3399_ddr_933MHz_v*.bin' 2>/dev/null | sort -V | tail -1)"
+    [[ -n "$RKTPL" ]] || \
+        RKTPL="$(find "$RKBIN" -name 'rk3399_ddr_*.bin' 2>/dev/null | sort -V | tail -1)"
+    [[ -n "$RKTPL" ]] || {
+        echo "EDGE1_ROCKCHIP_TPL=1 but no rk3399_ddr_*.bin under $RKBIN" >&2
+        echo "what is there:" >&2
+        find "$RKBIN" -name '*ddr*' 2>/dev/null | head -20 >&2
+        exit 1; }
+    echo "==> DDR blob: ${RKTPL#$TREE/}  (instead of U-Boot's own TPL)"
+else
+    echo "==> DDR init: U-Boot's own TPL (CONFIG_RAM_ROCKCHIP_LPDDR4)"
+    echo "               EDGE1_ROCKCHIP_TPL=1 uses rkbin's DDR blob instead"
+fi
 
 cd "$UB"
 if [[ -n "$UBOOT_REV" ]]; then
@@ -275,6 +329,9 @@ CONFIG_PREBOOT="$STDOUT_BOTH"
 CONFIG_USE_BOOTCOMMAND=y
 CONFIG_BOOTCOMMAND="$BOOTCMD"
 EOF
+if [[ -n "$RKTPL" ]]; then
+    echo 'CONFIG_ROCKCHIP_EXTERNAL_TPL=y' >> "$FRAGMENT"
+fi
 
 echo "==> merging the Android boot delta"
 ./scripts/kconfig/merge_config.sh -m -O . .config "$FRAGMENT" >/dev/null
@@ -331,6 +388,15 @@ if (( missing )); then
 fi
 echo "  bootcmd tries, in order: SD card (mmc 1), eMMC (mmc 0), NVMe (nvme 0)"
 echo "  console:  serial (ttyS2, 1500000) and HDMI"
+if [[ -n "$RKTPL" ]]; then
+    grep -qx 'CONFIG_ROCKCHIP_EXTERNAL_TPL=y' .config \
+        && echo "  DDR init: rkbin blob $(basename "$RKTPL")" \
+        || { echo "  NOT SET: CONFIG_ROCKCHIP_EXTERNAL_TPL - the DDR blob was asked for" >&2
+             echo "           but binman will package U-Boot's own TPL instead" >&2
+             exit 1; }
+else
+    echo "  DDR init: U-Boot's own TPL"
+fi
 
 # And this list is what the build EXPECTS: symbols we do not set, whose defaults
 # should give us what we want. They are reported, never fatal - failing a working
@@ -409,7 +475,9 @@ else
 fi
 
 echo "==> building ($(nproc) jobs)"
-make "CROSS_COMPILE=$CROSS" "BL31=$BL31" -j"$(nproc)"
+declare -a MAKE_ARGS=("CROSS_COMPILE=$CROSS" "BL31=$BL31")
+[[ -n "$RKTPL" ]] && MAKE_ARGS+=("ROCKCHIP_TPL=$RKTPL")
+make "${MAKE_ARGS[@]}" -j"$(nproc)"
 
 readonly OUT="$UB/u-boot-rockchip.bin"
 [[ -f "$OUT" ]] || {

@@ -16,10 +16,9 @@ wrong. Each row says what it confirms or corrects.
 | RAM | `MemTotal: 3945072 kB` → a 4GB board | confirms what `edge1_tv.mk` sizes for; the Edge also ships in 2GB |
 | kernel in use | `6.12.47-current-rockchip64` | we build `6.12.111` — same series |
 
-## The BootROM prefers the eMMC to the SD card
+## The boot order, and a conclusion that was wrong
 
-This is the finding that cost the first boot attempt, and it contradicts what is widely
-repeated about Rockchip boards. Measured, with `build/rk-idb-check.py`:
+Measured with `build/rk-idb-check.py`:
 
 | Where | Sector | Result |
 |---|---|---|
@@ -27,15 +26,48 @@ repeated about Rockchip boards. Measured, with `build/rk-idb-check.py`:
 | eMMC (`mmcblk2`) | 64 | valid Rockchip ID block |
 | SD card (`mmcblk1`) | 64 | valid Rockchip ID block |
 
-With a valid bootloader on **both** the eMMC and the card, and SPI empty, the board
-boots the eMMC: `/proc/device-tree/chosen/u-boot,version` reads
-`2022.07-armbian-...`, which is Armbian's, not the `2026.07` this tree builds.
+With a valid bootloader on both the eMMC and the card, and SPI empty, the board boots
+the eMMC: `/proc/device-tree/chosen/u-boot,version` reads `2022.07-armbian-...`, which
+is Armbian's, not the `2026.07` this tree builds.
 
-So on this board **the eMMC wins**. `bootrom.h:47-59` lists the BootROM's boot sources
-but states no priority, and no source reachable from here does; this is the evidence.
-The consequence for the install story: a card cannot take over from an eMMC that has a
-bootloader on it, so the "pull the card out to undo it" property only holds once *our*
-U-Boot is what runs — which is why its `bootcmd` tries the card first.
+**I first read that as "the BootROM prefers the eMMC to the SD card". That was wrong,
+and the counter-evidence is stronger than the inference:** on this same board, an
+OpenWrt SD card always won over the eMMC — it never reached Armbian. So the BootROM
+*does* read the card first.
+
+Which relocates the fault entirely, and for the better:
+
+> The BootROM read our card's ID block — it verifies — and then **fell through to the
+> eMMC**. A BootROM falls through when it cannot get a first stage running. So the
+> header is fine and the **payload it points at** is what failed.
+
+The first thing that payload does is bring up DRAM, and DDR init is the one link in
+this chain with no second opinion behind it: `CONFIG_TPL=y` with
+`CONFIG_RAM_ROCKCHIP_LPDDR4=y`, so U-Boot's own TPL does it. If that does not work on
+this board's particular LPDDR4 part, the BootROM gets nothing runnable and moves to the
+next device — exactly the observed behaviour.
+
+Rockchip's DDR blob is the other opinion, and substituting it is one variable:
+`EDGE1_ROCKCHIP_TPL=1 build/build-uboot.sh`. binman then packages `rockchip-tpl`
+instead of `u-boot-tpl` into the same `idbloader.img`
+(`arch/arm/dts/rockchip-u-boot.dtsi:170-184`), so the output is the same
+`u-boot-rockchip.bin` at the same sector 64 and nothing else about the image changes.
+Armbian picks `rk3399_ddr_933MHz_v1.25.bin` for rk3399; the script searches for it
+rather than hardcoding a version.
+
+Worth keeping in mind about Armbian's own choice here: its Edge scenario is
+`tpl-spl-blob`, which passes `BL31=` alone and **no** `ROCKCHIP_TPL` — so Armbian
+relies on U-Boot's TPL on this board too. That is either a point in favour of U-Boot's
+TPL working, or a sign that Armbian's Edge support (`.csc`,
+`BOARD_MAINTAINER=""`) is not exercised on 4GB LPDDR4 parts. The A/B is what tells the
+two apart.
+
+## What is still not known
+
+The ID block's decoded fields were never read off the card — the one-liner used on the
+board printed only the magic. `init_offset`, `init_size` and `init_boot_size` would say
+whether the BootROM is being pointed at the right place and the right amount, and
+`build/rk-idb-check.py` prints all three.
 
 ## Storage, by controller address
 

@@ -59,12 +59,14 @@ anything is written:
 1. **U-Boot in SPI NOR.** Armbian's board file has `BOOT_SUPPORT_SPI=yes`. The BootROM
    reads SPI NOR as one of its boot sources, and if a bootloader is there it wins over
    both eMMC and SD. `cat /proc/mtd` from the running Armbian answers this.
-2. **The BootROM prefers the eMMC to the SD card on this board — now measured, not
-   guessed.** SPI NOR is erased (`mtd0`, all `0xff`), and both the eMMC and the card
-   carry a valid ID block at sector 64, and the board boots the eMMC. This tree
-   deliberately never asserted an order, because `bootrom.h:47-59` lists the sources
-   without a priority and no source reachable from here states one. Now there is
-   evidence, and it says eMMC-first. [`HARDWARE.md`](HARDWARE.md) has the readings.
+2. **The card's first stage fails, and the BootROM falls through to the eMMC.** SPI
+   NOR is erased, both the eMMC and the card carry a valid ID block at sector 64, and
+   the board boots the eMMC. I first read that as the BootROM preferring eMMC; the
+   board's owner has the counter-example that settles it — an OpenWrt card on this
+   same board always won over the eMMC. So the card *is* read first, its header *is*
+   accepted, and what fails is the payload the header points at. The first thing that
+   payload does is DDR init, which is the one link here with no second opinion behind
+   it. [`HARDWARE.md`](HARDWARE.md) has the readings and the A/B that separates them.
 
 **The card itself is proven correct**, which the first check nearly got wrong. From the
 board: the GPT is exactly the seven partitions at exactly the right sectors, and
