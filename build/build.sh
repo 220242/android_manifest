@@ -100,7 +100,7 @@ fi
 
 # droid plus one host tool. simg2img is built only as part of otatools
 # (core/Makefile:5561), so a plain "m" does not produce it - and it is what
-# build-sdimage.sh needs if an image ever comes out Android-sparse again. Naming it
+# build-images.sh needs if an image ever comes out Android-sparse again. Naming it
 # here costs a few seconds of host compile and means the SD image stage can never be
 # blocked on a tool that has to be built from inside a lunched shell. An unknown
 # target fails at the end of the ninja parse, in seconds, not hours in.
@@ -194,7 +194,7 @@ done < "$LAYOUT"
     # that is checked rather than trusted: a sparse image is a container (28-byte
     # header, magic 0xed26ff3a, then chunks saying where each belongs), so writing
     # one verbatim leaves the partition with no filesystem in it and the board
-    # fails to mount with nothing in any log. build-sdimage.sh carries the same
+    # fails to mount with nothing in any log. build-images.sh carries the same
     # guard, and the same magic, for the same reason.
     echo 'sparse_check() {'
     echo '  [ "$(od -An -tx1 -N4 -- "$1" | tr -d " \n")" = "3aff26ed" ] || return 0'

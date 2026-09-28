@@ -239,7 +239,7 @@ if [[ -f "$TSV" ]]; then
     fi
     # And the guard in both writers, which is what catches it if the setting is ever
     # lost. The magic is the on-disk byte order of 0xed26ff3a.
-    for w in build/build-sdimage.sh build/build.sh; do
+    for w in build/build-images.sh build/build.sh; do
         if grep -q '3aff26ed' "$ROOT/$w"; then
             ok "${w#build/} checks the sparse magic before writing"
         else
@@ -249,6 +249,74 @@ if [[ -f "$TSV" ]]; then
         fi
     done
     (( sparse_bad )) || ok "nothing in the layout can reach a partition sparse"
+fi
+echo
+
+# --- 3e. the layout's three consumers must agree --------------------------------
+#
+# flash/partitions.tsv is the single source of truth for the GPT, but two numbers
+# that go with it are not in the file, and there are now three places that write
+# this layout onto a disk:
+#
+#   build/build-images.sh                 the three whole-disk images
+#   build/build.sh                        the generated flash-emmc.sh
+#   device/khadas/edge/bin/edge1-install-internal.sh   the on-device installer
+#
+# The first partition starts at 16MiB and the bootloader goes at sector 64, and if
+# any one of the three disagrees it writes a disk whose bootloader is under a
+# partition or whose partitions start where the bootloader ends. Neither shows up
+# until the board does not boot.
+#
+# The installer also reads the layout at run time from the path device.mk installs
+# it to. Those two strings are in different files and nothing but this ties them
+# together; a rename on one side leaves an installer that cannot find its layout.
+echo "[3e] the layout's consumers agree"
+readonly INSTALLER="$DEV/bin/edge1-install-internal.sh"
+if [[ -f "$INSTALLER" ]]; then
+    consumers_bad=0
+    # 16MiB, in whatever form each file states it.
+    img_first=$(grep -oE '^readonly FIRST_PART_MIB=[0-9]+' "$ROOT/build/build-images.sh" | grep -oE '[0-9]+$')
+    ins_first=$(grep -oE '^FIRST_PART_MIB=[0-9]+' "$INSTALLER" | grep -oE '[0-9]+$')
+    gen_first=$(grep -oE '^[[:space:]]*start=[0-9]+' "$ROOT/build/build.sh" | grep -oE '[0-9]+$' | head -1)
+    if [[ "$img_first" == "$ins_first" && "$img_first" == "$gen_first" && -n "$img_first" ]]; then
+        ok "first partition at ${img_first}MiB in all three writers"
+    else
+        err "the first partition offset differs: build-images.sh=${img_first:-?}"
+        err "  installer=${ins_first:-?} build.sh=${gen_first:-?}"
+        consumers_bad=$((consumers_bad+1))
+    fi
+    # sector 64, in the two that write a bootloader.
+    img_seek=$(grep -oE '^readonly UBOOT_SEEK_SECTORS=[0-9]+' "$ROOT/build/build-images.sh" | grep -oE '[0-9]+$')
+    ins_seek=$(grep -oE '^UBOOT_SEEK_SECTORS=[0-9]+' "$INSTALLER" | grep -oE '[0-9]+$')
+    if [[ -n "$img_seek" && "$img_seek" == "$ins_seek" ]]; then
+        ok "bootloader at sector $img_seek in both writers that place one"
+    else
+        err "the bootloader sector differs: build-images.sh=${img_seek:-?} installer=${ins_seek:-?}"
+        consumers_bad=$((consumers_bad+1))
+    fi
+    # The installer's layout path must be the one device.mk installs.
+    ins_path=$(grep -oE '^LAYOUT=[^ ]+' "$INSTALLER" | cut -d= -f2)
+    if [[ -z "$ins_path" ]]; then
+        err "the installer does not set LAYOUT"
+        consumers_bad=$((consumers_bad+1))
+    elif grep -q "partitions.tsv:\$(TARGET_COPY_OUT_VENDOR)${ins_path#/vendor}" "$DEV/device.mk"; then
+        ok "the installer reads $ins_path, which device.mk installs"
+    else
+        err "the installer reads $ins_path but device.mk does not install"
+        err "  flash/partitions.tsv there, so it would find no layout on the board"
+        consumers_bad=$((consumers_bad+1))
+    fi
+    # And it must be installed itself.
+    if grep -q "bin/edge1-install-internal.sh:\$(TARGET_COPY_OUT_VENDOR)/bin/" "$DEV/device.mk"; then
+        ok "the installer is installed into /vendor/bin"
+    else
+        err "device.mk does not install bin/edge1-install-internal.sh, so it would not"
+        err "  be on the board at all"
+        consumers_bad=$((consumers_bad+1))
+    fi
+    (( consumers_bad )) || ok "one layout, three writers, no disagreement"
+else
+    err "missing $INSTALLER"
 fi
 echo
 

@@ -7,7 +7,8 @@
 # makes quoting unreadable and is a common source of silent breakage.
 #
 #   usage: provision-wsl.sh <stage>
-#   stages: deps | clone | preflight | sync | aidl | probe | kernel | build | all
+#   stages: deps | clone | preflight | sync | aidl | probe | kernel | uboot |
+#           build | images | all
 #           report  - consolidated diagnostics on stdout, for the Windows report
 #
 set -euo pipefail
@@ -166,26 +167,37 @@ stage_uboot() {
     "$MANIFEST/build/build-uboot.sh" "$TREE" 2>&1 | tee "$LOGS/uboot.log"
 }
 
-stage_sdimage() {
+stage_images() {
     place_device
-    log "assembling the SD card image"
-    "$MANIFEST/build/build-sdimage.sh" "$TREE" 2>&1 | tee "$LOGS/sdimage.log"
-    # Copied out to $WORK so it is reachable from Explorer without going through
-    # the tree. The compressed copy is the one worth moving: the raw image is 7GiB
-    # and \\wsl.localhost is slow.
-    local img="$TREE/out/target/product/edge/edge1-sdcard.img"
-    if [[ -f "$img.gz" ]]; then
-        mkdir -p "$WORK/output"
-        cp -f "$img.gz" "$WORK/output/"
-        log "SD image copied to $WORK/output/$(basename "$img.gz") ($(du -h "$img.gz" | cut -f1))"
-    elif [[ -f "$img" ]]; then
-        mkdir -p "$WORK/output"
-        cp -f "$img" "$WORK/output/"
-        log "SD image copied to $WORK/output/$(basename "$img") ($(du -h "$img" | cut -f1))"
-    else
-        echo "no SD image produced; see $LOGS/sdimage.log" >&2
+    log "assembling the whole-disk images (SD card, eMMC, NVMe)"
+    "$MANIFEST/build/build-images.sh" "$TREE" 2>&1 | tee "$LOGS/images.log"
+    # Copied out to $WORK so they are reachable from Explorer without going through
+    # the tree. Only the compressed copies are moved: the raw images are 7 and 15GiB
+    # and \\wsl.localhost is slow. Etcher reads .gz directly.
+    local pout="$TREE/out/target/product/edge"
+    local moved=0
+    mkdir -p "$WORK/output"
+    local img
+    for img in edge1-sdcard.img edge1-emmc.img edge1-nvme.img; do
+        if [[ -f "$pout/$img.gz" ]]; then
+            cp -f "$pout/$img.gz" "$WORK/output/"
+            log "$img.gz -> $WORK/output/ ($(du -h "$pout/$img.gz" | cut -f1))"
+            moved=$((moved+1))
+        elif [[ -f "$pout/$img" ]]; then
+            cp -f "$pout/$img" "$WORK/output/"
+            log "$img -> $WORK/output/ ($(du -h "$pout/$img" | cut -f1))"
+            moved=$((moved+1))
+        fi
+    done
+    if (( moved == 0 )); then
+        echo "no images produced; see $LOGS/images.log" >&2
         return 1
     fi
+    log "$moved image(s) in $WORK/output"
+    echo
+    echo "edge1-sdcard.img.gz is the one to write with Etcher. The other two are"
+    echo "installed onto the board by /vendor/bin/edge1-install-internal.sh, which"
+    echo "runs from the card - see docs/PORTING.md."
 }
 
 stage_build() {
@@ -1279,7 +1291,7 @@ stage_report() {
     # Existence, size, and format. The format is the one that cost a card: an
     # Android sparse image (magic 0xed26ff3a, on disk 3a ff 26 ed) is a container
     # rather than a filesystem, so dd'ing one leaves the partition unmountable and
-    # nothing in any log says why. build-sdimage.sh refuses to write one, but this is
+    # nothing in any log says why. build-images.sh refuses to write one, but this is
     # where it can be seen without running a stage.
     local pout="$TREE/out/target/product/edge"
     local tsv="$TREE/device/khadas/edge/flash/partitions.tsv"
@@ -1408,12 +1420,12 @@ case "$STAGE" in
     kernel)    stage_kernel ;;
     uboot)     stage_uboot ;;
     build)     stage_build ;;
-    sdimage)   stage_sdimage ;;
+    images)    stage_images ;;
     aidl)      stage_aidl ;;
     probe)     stage_probe ;;
     report)    stage_report ;;
     all)       stage_deps; stage_clone; stage_preflight; stage_sync
-               stage_kernel; stage_uboot; stage_build; stage_sdimage ;;
+               stage_kernel; stage_uboot; stage_build; stage_images ;;
     *)
         # A stage this copy does not know about almost always means the in-distro
         # clone is behind the one the instructions were written for, so say which

@@ -67,7 +67,7 @@ Reach it from Explorer at `\\wsl.localhost\Edge1Build\home\builder\android_khada
 | `Kernel` | Builds mainline 6.12 LTS with the Android 14 config delta, and stages the board dtb |
 | `Uboot` | Builds mainline U-Boot with Android boot image support, so the SD card boots on its own |
 | `Build` | `lunch edge1_tv-trunk_staging-userdebug`, `m`, then the eMMC flash pack |
-| `SdImage` | Assembles one whole-disk image for Balena Etcher and copies it to `android_khadas\output` |
+| `Images` | Assembles the three whole-disk images (SD card, eMMC, NVMe) and copies them to `android_khadas\output` |
 
 Run one on its own with `-Stage Build`. Re-run a completed stage with `-Force`.
 

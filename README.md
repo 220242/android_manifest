@@ -4,14 +4,29 @@ A port of the Khadas Edge1 from its Android 10 (`khadas-edge-Qt`) configuration 
 Android TV 14, on a mainline kernel and with no proprietary blobs.
 
 **The build completes** and produces every image the flash layout names, `super.img`
-included. The last stage assembles those into one whole-disk image for an SD card —
-`edge1-sdcard.img`, written with Balena Etcher — and that stage has not run to the end
-yet: the bootloader it needs has still to build. Nothing has been booted, so nothing
-here is claimed to work. [`docs/STATUS.md`](docs/STATUS.md) has the state in detail.
+included and in raw rather than sparse form, so it can actually be written. The last
+stage assembles those into three whole-disk images — one per medium — and has not yet
+run to the end: the bootloader it needs has still to build. Nothing has been booted, so
+nothing here is claimed to work. [`docs/STATUS.md`](docs/STATUS.md) has the state in
+detail.
 
-The card is the install, not the eMMC. The RK3399 BootROM reads the SD card before
-the eMMC, so the card carries its own mainline U-Boot and takes over the boot with
-the eMMC untouched — pull the card out and the board is exactly as it was.
+**Three media, one layout.**
+
+| | Bootloader | How it is written |
+|---|---|---|
+| `edge1-sdcard.img` | sector 64 | Balena Etcher, from the desktop |
+| `edge1-emmc.img` | sector 64 | from the card, by `edge1-install-internal.sh` |
+| `edge1-nvme.img` | none possible | from the card, by `edge1-install-internal.sh` |
+
+The card is the install, and it stays the escape hatch. It carries its own mainline
+U-Boot, and that U-Boot tries the **card, then the eMMC, then the NVMe** — so a card
+with an Android boot partition always wins, and pulling it out puts the board back on
+whatever is on internal storage. The first attempt is reversible and so is every one
+after it.
+
+The NVMe never holds the bootloader: the RK3399 BootROM can start from NAND, eMMC, SPI
+or SD, but not from PCIe. An SSD install keeps U-Boot on the eMMC or the card and puts
+only Android's partitions on the SSD.
 
 ## The shape of the port
 
@@ -49,8 +64,9 @@ image header v2, no `vendor_boot`), a 96MiB `recovery`, and a 4608MiB `super`
 holding system/system_ext/product/vendor/odm as logical partitions, plus `misc`,
 `vbmeta`, `metadata` and `userdata`. Non-A/B. The layout is
 [`device/khadas/edge/flash/partitions.tsv`](device/khadas/edge/flash/partitions.tsv),
-and it is the single source for both the SD card image and the eMMC flash script —
-not a Rockchip `update.img`, which needs the BSP bootloader this path does not use.
+and it is the single source for all three images, the eMMC flash script and the
+on-device installer — not a Rockchip `update.img`, which needs the BSP bootloader this
+path does not use.
 
 **Bootloader.** Mainline U-Boot at `v2026.07`, `khadas-edge-v-rk3399_defconfig` plus
 Android boot image support, with `BL31` from `rkbin`. It sits in the card's raw
@@ -86,7 +102,13 @@ build/sync.sh         ~/aosp-14-edge1       # AOSP 14 + the mainline kernel
 build/build-kernel.sh  ~/aosp-14-edge1      # 6.12.111 + the Android 14 config delta
 build/build-uboot.sh   ~/aosp-14-edge1      # mainline U-Boot, Android boot support
 build/build.sh         ~/aosp-14-edge1 userdebug
-build/build-sdimage.sh ~/aosp-14-edge1      # one image for Etcher
+build/build-images.sh  ~/aosp-14-edge1      # the three whole-disk images
+```
+
+Then, once the card boots, to move it onto internal storage:
+
+```sh
+adb root && adb shell sh /vendor/bin/edge1-install-internal.sh emmc   # or nvme
 ```
 
 The kernel has to be built before `m`: both the `Image` and the dtb are read at

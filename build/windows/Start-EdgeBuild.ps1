@@ -53,7 +53,11 @@
 param(
     [string] $Root = 'D:\android_khadas',
 
-    [ValidateSet('All','Check','Wsl','Distro','Tune','Provision','Sync','Aidl','Probe','Kernel','Build','Report')]
+    # Every name in $order, plus All and Report. Uboot and Images were missing from
+    # this list although both are in $order, so "-Stage Uboot" was refused by
+    # PowerShell before the script ran - the stage existed and could not be asked for.
+    [ValidateSet('All','Check','Wsl','Distro','Tune','Provision','Sync','Aidl','Probe',
+                 'Kernel','Uboot','Build','Images','Report')]
     [string] $Stage = 'All',
 
     # Swap size for WSL. 0 = automatic (2x RAM, floored at 32, capped at 128).
@@ -848,16 +852,17 @@ function Stage-Uboot {
     Set-Done 'Uboot'
 }
 
-function Stage-SdImage {
-    Write-Stage 'Stage 12/12  SD card image'
-    Write-Info 'one whole-disk image, for Balena Etcher'
-    $rc = Invoke-InDistro -Command '~/android_khadas/android_manifest/build/windows/provision-wsl.sh sdimage' -AllowFailure
+function Stage-Images {
+    Write-Stage 'Stage 12/12  Whole-disk images (SD card, eMMC, NVMe)'
+    Write-Info 'edge1-sdcard.img is the one Etcher writes; the other two are installed'
+    Write-Info 'onto the board from the card by /vendor/bin/edge1-install-internal.sh'
+    $rc = Invoke-InDistro -Command '~/android_khadas/android_manifest/build/windows/provision-wsl.sh images' -AllowFailure
     Write-Info "output: \\wsl.localhost\$($script:DistroName)\home\builder\android_khadas\output"
     if ($rc -ne 0) {
-        throw "the SD image was not assembled (exit $rc). See sdimage.log in the report."
+        throw "the images were not assembled (exit $rc). See images.log in the report."
     }
-    Write-Good 'SD card image ready'
-    Set-Done 'SdImage'
+    Write-Good 'images ready'
+    Set-Done 'Images'
 }
 
 function Stage-Build {
@@ -919,7 +924,7 @@ $order = @(
     @{ Name='Kernel';    Fn={ Stage-Kernel } }
     @{ Name='Uboot';     Fn={ Stage-Uboot } }
     @{ Name='Build';     Fn={ Stage-Build } }
-    @{ Name='SdImage';   Fn={ Stage-SdImage } }
+    @{ Name='Images';    Fn={ Stage-Images } }
 )
 
 New-Item -ItemType Directory -Path $Root -Force | Out-Null
@@ -989,7 +994,7 @@ if ($script:DistroReady) {
 # probe from several commits ago - which is how two rounds were spent on module
 # names that a current probe would have settled. They cost minutes against a
 # build that costs hours, so they always run.
-$alwaysRun = @('Aidl', 'Probe', 'SdImage')
+$alwaysRun = @('Aidl', 'Probe', 'Images')
 
 # A stage is complete only if what it produced is still there. Kernel was marked
 # done by a run in which the dtb staging step had failed, so every run

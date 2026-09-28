@@ -29,9 +29,10 @@ That is the next step and the one that matters.
 | `boot.img`, `recovery.img`, `dtb.img`, `vbmeta.img` | build |
 | `system.img`, `vendor.img`, `product.img`, `system_ext.img`, `odm.img` | build |
 | `super.img` | builds, and raw rather than sparse, so it can be written |
-| U-Boot (mainline v2026.07 + Android boot image support) | configured and verified; the build needs host packages the pipeline was not installing |
-| SD card image (`edge1-sdcard.img`, for Etcher) | new, never written |
-| Flash pack (`edge1-flash/` + `flash-emmc.sh`, for eMMC) | assembled, never run |
+| U-Boot (mainline v2026.07, Android boot image, card→eMMC→NVMe) | configured and verified; never built to the end |
+| Images: `edge1-sdcard.img`, `edge1-emmc.img`, `edge1-nvme.img` | build and are verified offline; none written to hardware |
+| On-device installer (card → eMMC or NVMe) | new; offsets verified against the layout, never run on hardware |
+| Flash pack (`edge1-flash/` + `flash-emmc.sh`, for eMMC) | superseded by the installer, never run |
 
 ### super.img, twice
 
@@ -84,7 +85,7 @@ raw on the way in too, which costs apparent size in `out/` and nothing else — 
 
 Three things now hold it:
 
-* `build-sdimage.sh` reads the first four bytes of every image it writes and expands a
+* `build-images.sh` reads the first four bytes of every image it writes and expands a
   sparse one with `simg2img` rather than copying it through. `build.sh` names
   `simg2img` as a build target for this, because it is otherwise built only as part of
   `otatools` (`core/Makefile:5561`).
@@ -95,6 +96,65 @@ Three things now hold it:
 The size check moved too. It used to measure the file in `out/`; it now measures what
 will actually be written, which is the expanded image. A 12KB sparse file that expands
 to 2GiB passed the old check and is rejected by the new one.
+
+### Three media, and what the silicon decides
+
+The install targets are the SD card, the eMMC and an M.2 NVMe. One layout —
+`flash/partitions.tsv` — covers all three; only the total size and the bootloader
+differ. Two facts shape the whole story, and both come from the SoC rather than from
+preference:
+
+**The BootROM cannot boot from PCIe.** Its boot sources are the enum in U-Boot's
+`arch/arm/include/asm/arch-rockchip/bootrom.h:47-59`: NAND, eMMC, SPI NOR, SPI NAND,
+SD, UFS, I2C, SPI, USB. So nothing on an M.2 card can ever be the first thing that
+runs, `edge1-nvme.img` has no bootloader, and an SSD install always leaves U-Boot on
+the eMMC or the card. There is no configuration that changes this.
+
+**mmc0 is the eMMC and mmc1 is the SD slot.** `arch/arm/dts/rk3399-u-boot.dtsi`
+aliases them that way, and `arch/arm/mach-rockchip/rk3399/rk3399.c:27-31` gives the
+same mapping from the BootROM's side — eMMC at `mmc@fe330000`, SD at `mmc@fe320000`.
+The installer uses the controller address rather than the `mmcblk` number for exactly
+this reason: `mmcblk2` is probe order, `fe330000` is the board.
+
+From those two, the boot order follows: **card, then eMMC, then NVMe**, instantiated
+three times in one `CONFIG_BOOTCOMMAND`. `part start` fails when there is no such
+partition, and that failure is what moves to the next medium — which is why
+`CONFIG_HUSH_PARSER` is in the fragment; without `&&` and `||` there is no fallback
+and a missing card is a dead board.
+
+Putting the card first is the single most useful property here. Whichever medium the
+BootROM happened to load U-Boot from, a card with an Android boot partition takes
+over — so every install onto internal storage is undone by inserting the card, with
+no serial console and nothing to repair. It also means the port does not depend on
+knowing the BootROM's own preference between SD and eMMC, which is not stated
+anywhere in the sources this tree is verified against.
+
+`CONFIG_NVME_PCI`, `CONFIG_PCI`, `CONFIG_CMD_NVME` and `CONFIG_CMD_USB_MASS_STORAGE`
+all turned out to be in the Edge-V defconfig already, so the third medium and the
+`ums 0 mmc 0` escape hatch cost no configuration at all.
+
+### Why the installer rather than the eMMC and NVMe images
+
+Neither the eMMC nor the SSD is removable, so only something already running on the
+board can write them. `edge1-install-internal.sh` ships inside the image it installs
+and copies the running card partition by partition — the card already holds every
+image byte for byte in its own partitions, so there is nothing to carry and nothing
+to unpack.
+
+It also partitions the target to its **real** size, which the fixed images cannot:
+`userdata` gets all of a 128GB SSD instead of the 14GiB `edge1-nvme.img` was built
+for. The two image files remain useful for the other route — `ums 0 mmc 0` from the
+U-Boot prompt exposes the target as a USB disk and Etcher writes it — which needs a
+serial console but no Android.
+
+The offsets are the part that had to be right, since a wrong one puts `super` where
+nothing looks for it. They are checked against the layout's own arithmetic, in a
+sandbox with `sgdisk` and `dd` stubbed to log rather than write: the seven partition
+starts and the four `dd` offsets all match, and they match what the generated
+`flash-emmc.sh` produces. That test also caught the installer's one real bug —
+`grep -c ... || echo 0` prints `0` **and** exits 1 when nothing matches, so the count
+read `0\n0`, the "something is mounted" check fired on every run, and no install
+could ever have started.
 
 ## The approach
 
@@ -141,14 +201,17 @@ Rockchip's own gralloc did.
    RK3399 BootROM reads the card before the eMMC, so the card boots on its own with
    the eMMC untouched, and removing it puts the board back. That makes the first
    attempt reversible, which the eMMC path is not.
-2. **U-Boot and the SD image builder are new and unexercised.** Both are written
-   against the real sources — the boot sequence is U-Boot's own from
-   `doc/android/boot-image.rst`, the Khadas Edge-V defconfig is upstream, and
-   `build-sdimage.sh` is tested end to end against fabricated images, with every
-   partition's contents verified at its sector and the sparse path exercised with a
-   real sparse image and a reference decoder. But no U-Boot has been compiled all the
-   way through yet — the first attempt stopped on missing host packages — and no card
-   has been written.
+2. **U-Boot, the image builder and the installer are new and unexercised on hardware.**
+   All three are written against the real sources and verified as far as a host can
+   verify them: the boot sequence is U-Boot's own from `doc/android/boot-image.rst`,
+   the Edge-V defconfig is upstream, `build-images.sh` is tested end to end against
+   fabricated images with every partition's contents checked at its sector and the
+   sparse path exercised with a real sparse image and a reference decoder, the SD
+   image it produces is byte-identical to the single-target script it replaced apart
+   from sgdisk's random GUIDs, and the installer's offsets are checked against the
+   layout's own arithmetic with `sgdisk` and `dd` stubbed. But no U-Boot has been
+   compiled all the way through yet — the first attempt stopped on missing host
+   packages — and nothing has been written to any medium.
 3. **Hardware video decode is not wired up.** `CONFIG_VIDEO_ROCKCHIP_VDEC` is in the
    kernel and `external/v4l2_codec2` is in the tree, with
    `android.hardware.media.c2@1.2-service-v4l2` available — but it is not in
@@ -211,7 +274,7 @@ survive in a diff.
 | Four `PRODUCT_*` variables deleted | `PRODUCT_BUILD_PROP_OVERRIDES`, `PRODUCT_HAS_CAMERA`, `PRODUCT_HAVE_OPTEE`, `PRODUCT_TARGET_VNDK_VERSION` appear nowhere in AOSP 14. They were read by `device/rockchip/common`, which this tree does not have, so they were decoration that read like configuration. |
 | No `ro.product.first_api_level`, `ro.product.board`, `ro.board.platform` or `ro.sf.lcd_density` set by hand | `core/main.mk:284,332-341` emits all four from product and board variables. Setting one as well produces two assignments in the same `build.prop`, which `post_process_props.py` rejects unless the values happen to be identical. |
 | `TARGET_USERIMAGES_SPARSE_EXT_DISABLED := true` | The only switch that makes `lpmake` drop `--sparse` (`core/Makefile:6145-6148` → `build_super_image.py:136`). A sparse `super.img` is a container, not a filesystem, and `dd`ing one leaves a partition with no superblock and no log. |
-| `m droid simg2img` rather than `m` | `simg2img` is built only as part of `otatools` (`core/Makefile:5561`), and `build-sdimage.sh` needs it if an image is ever sparse again. An unknown target fails at the end of the ninja parse, in seconds. |
+| `m droid simg2img` rather than `m` | `simg2img` is built only as part of `otatools` (`core/Makefile:5561`), and `build-images.sh` needs it if an image is ever sparse again. An unknown target fails at the end of the ninja parse, in seconds. |
 | `CCACHE_DIR=$TREE/out/ccache` | 14 runs ninja with everything outside `$OUT_DIR` bind-mounted read-only, so ccache's default `$HOME/.cache/ccache` is on the wrong side and the first real compile died at target 151 of 167136. The build's own error text names the fix: generate into `out/`. |
 
 Also checked and found clean: none of the 69 `KATI_obsolete_var` names are used

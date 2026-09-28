@@ -131,8 +131,9 @@ Three details in that line were each wrong once:
 build/build-uboot.sh ~/aosp-14-edge1
 ```
 
-Mainline U-Boot, `khadas-edge-v-rk3399_defconfig`, plus a four-symbol fragment that
-teaches it to read an Android boot image. It checks its four host requirements first —
+Mainline U-Boot, `khadas-edge-v-rk3399_defconfig`, plus a five-symbol fragment that
+teaches it to read an Android boot image and gives it a shell with conditionals. It
+checks its four host requirements first —
 `swig`, setuptools, pyelftools and `Python.h`, all of which go into building the SWIG
 extension binman needs — and names the package for each, because the failure otherwise
 arrives 400 lines in as `command 'swig' failed: No such file or directory` and names
@@ -144,56 +145,124 @@ and `u-boot.itb`.
 The boot sequence in `CONFIG_BOOTCOMMAND` is U-Boot's own documented one from
 `doc/android/boot-image.rst` for a header v2 image with the DTB inside it: read the
 `boot` partition raw, `abootimg get dtb --index=0`, copy it to `$fdt_addr_r`, then
-`bootm <img> <img> $fdt_addr_r`. The script fails rather than building a U-Boot whose
-Android support silently did not take — `CONFIG_CMD_ABOOTIMG` depends on
-`CONFIG_ANDROID_BOOT_IMAGE`, and losing it would present on the board as
-`Unknown command 'abootimg'` with no log.
+`bootm <img> <img> $fdt_addr_r`.
 
-## 6. The SD card image
+**It is instantiated three times, and tried in order: SD card (`mmc 1`), eMMC
+(`mmc 0`), NVMe (`nvme 0`).** `part start` fails when there is no such partition, and
+that failure is what moves on to the next medium — which needs
+`CONFIG_HUSH_PARSER` for `&&` and `||`, hence the fifth symbol. The card comes first
+deliberately: whichever medium the BootROM loaded U-Boot from, a card with an Android
+boot partition takes over, so an install on internal storage is always undone by
+inserting the card. NVMe is last because it cannot be first — the BootROM has no PCIe.
+
+`mmc0` is the eMMC and `mmc1` the SD slot, which is not a guess:
+`arch/arm/dts/rk3399-u-boot.dtsi` aliases them that way and
+`arch/arm/mach-rockchip/rk3399/rk3399.c:27-31` states the same mapping from the
+BootROM's side — eMMC at `mmc@fe330000`, SD at `mmc@fe320000`. `CONFIG_NVME_PCI` and
+`CONFIG_PCI` are already in the Edge-V defconfig and `CONFIG_CMD_NVME` is
+`default y if NVME`, so the third target costs no configuration at all.
+
+The script fails rather than building a U-Boot whose Android support silently did not
+take — `CONFIG_CMD_ABOOTIMG` depends on `CONFIG_ANDROID_BOOT_IMAGE`, and losing it
+would present on the board as `Unknown command 'abootimg'` with no log. It also checks
+that all three attempts survived into `.config`: a truncated `bootcmd` would still
+build, still boot the card, and silently never fall through to the eMMC or the SSD,
+which is exactly the case that cannot be tested without the hardware.
+
+## 6. The three whole-disk images
 
 ```sh
-build/build-sdimage.sh ~/aosp-14-edge1
+build/build-images.sh ~/aosp-14-edge1               # all three
+build/build-images.sh ~/aosp-14-edge1 sdcard        # just the card
 ```
 
-One whole-disk image, `edge1-sdcard.img` and a `.img.gz` beside it, both of which
-Balena Etcher writes directly. It contains the bootloader at sector 64, a GPT built
-from `flash/partitions.tsv`, and each partition image `dd`'d into place. Sizes:
-`EDGE1_SD_SIZE_MIB` defaults to 7000, which fits any card sold as 8GB and leaves
-about 2.1GiB of `userdata`.
+| Image | Size | Bootloader | Written by |
+|---|---|---|---|
+| `edge1-sdcard.img` | `EDGE1_SD_SIZE_MIB`, default 7000 | sector 64 | Balena Etcher, from the desktop |
+| `edge1-emmc.img` | `EDGE1_EMMC_SIZE_MIB`, default 14400 | sector 64 | the on-device installer, or `ums 0 mmc 0` + Etcher |
+| `edge1-nvme.img` | `EDGE1_NVME_SIZE_MIB`, default 14400 | **none** | the on-device installer, or `ums 0 nvme 0` + Etcher |
 
-**This is the safe install path, and the reason is the boot order.** The RK3399
-BootROM looks at the SD card before the eMMC, so a card with a valid bootloader in
-its raw sectors takes over the boot. The eMMC is never written to — whatever is
-installed there stays — and pulling the card out puts the board back exactly as it
-was. Nothing needs to be running on the board first, either: Etcher writes the card
-from a desktop.
+One layout — `flash/partitions.tsv` — and three media. Each image is a GPT built from
+that file with every partition image `dd`'d into place, plus a `.img.gz` beside it that
+Etcher reads directly.
 
-The script refuses rather than producing something misleading: no bootloader, an
-image too big for its partition, a layout that does not fit the requested size, or a
-`userdata` too small for Android to format. It also checks that the bootloader fits
-between sector 64 and the first partition at 16MiB.
+**The NVMe image has no bootloader and cannot have one.** The RK3399 BootROM's boot
+sources are the enum in U-Boot's `arch/arm/include/asm/arch-rockchip/bootrom.h:47-59` —
+NAND, eMMC, SPI NOR, SPI NAND, SD, UFS, I2C, SPI, USB. PCIe is not among them, so
+nothing on an M.2 card can ever be the first thing that runs. An NVMe install keeps
+U-Boot on the eMMC or on the card and puts only Android's partitions on the SSD.
+
+### The card is the install
+
+Write `edge1-sdcard.img` with Etcher and boot it. Nothing has to be running on the
+board, the eMMC is not written to, and pulling the card out puts the board back exactly
+as it was — which is what makes the first attempt reversible in a way the eMMC path is
+not.
+
+It stays reversible afterwards, too: `build-uboot.sh` builds a `bootcmd` that tries the
+**card, then the eMMC, then the NVMe**, so whichever medium the BootROM loaded U-Boot
+from, a card with an Android boot partition wins. After installing to internal storage,
+remove the card to run from it and put the card back to override it.
+
+### Installing onto the eMMC or the SSD
+
+Neither is removable, so only something already running on the board can write them.
+That something ships inside the image:
+
+```sh
+adb root
+adb shell sh /vendor/bin/edge1-install-internal.sh emmc
+adb shell sh /vendor/bin/edge1-install-internal.sh nvme
+```
+
+It does not use the image files. It copies the running card partition by partition —
+the card already holds every image byte for byte in its own partitions — and it
+partitions the target to its **real** size, so `userdata` gets the whole 128GB SSD
+rather than the 14GiB a fixed image was built for. That is the one thing
+`edge1-emmc.img` and `edge1-nvme.img` cannot do, and it is why the installer is the
+path to prefer.
+
+It refuses rather than guessing: it will not write the disk it is running from, it
+will not write a disk with anything mounted from it, it finds the eMMC from the
+controller address in sysfs rather than trusting `mmcblk2` to be stable, and it asks
+for the word `yes` before it writes. It copies neither `userdata` nor `metadata` —
+Android formats both on first boot, and copying an encrypted `/data` to another device
+would be pointless.
+
+For `nvme` it writes no bootloader, for the reason above, and says so: install to the
+eMMC as well if the board is to run from the SSD with no card in it.
+
+The other way in needs a serial console but no Android: from the U-Boot prompt,
+`ums 0 mmc 0` or `ums 0 nvme 0` exposes the target as a USB disk and Etcher writes the
+matching image to it. `CONFIG_CMD_USB_MASS_STORAGE` is already in the Edge-V defconfig,
+so that path costs nothing.
+
+### What the builder refuses
+
+No bootloader when one is needed, an image too big for its partition, a layout that
+does not fit the requested size, a `userdata` too small for Android to format, or a
+bootloader that would run past the first partition at 16MiB.
 
 It reads the first four bytes of every image, too. An Android sparse image is a
-container rather than a filesystem, so writing one into a partition produces a card
+container rather than a filesystem, so writing one into a partition produces a disk
 that looks correct and cannot mount anything; the board config makes the build emit raw
 images, and this is where that is verified rather than assumed. A sparse image is
 expanded with `simg2img` before it is written, and the size check measures what will be
 written rather than the file on disk — a 12KB sparse file can expand past its
 partition.
 
-### The other way in, which is not the default
+### The generated eMMC script, which is not the default
 
-`build.sh` also stages `out/target/product/edge/edge1-flash/` with the same images
-and a generated `flash-emmc.sh`. That one partitions and writes the **eMMC**, runs on
-the board itself, and needs a Linux already booted there:
+`build.sh` also stages `out/target/product/edge/edge1-flash/` with the same images and
+a generated `flash-emmc.sh`. That one partitions and writes the eMMC from a Linux
+already booted on the board:
 
 ```sh
 ./flash-emmc.sh /dev/mmcblk2
 ```
 
-It erases the eMMC, it has never been run, and it is not how this is installed. It
-exists for the point where the card boots reliably and the install should become
-permanent.
+It predates the installer, it erases the eMMC, it has never been run, and it guesses
+the device name rather than reading sysfs. Prefer `edge1-install-internal.sh`.
 
 ## Layout
 
@@ -209,7 +278,8 @@ device/khadas/edge/              the device tree
   audio/, media/, input/, permissions/, overlay/
   wifi/firmware/brcm/            brcmfmac firmware + board NVRAM (AP6398S)
   kernel/edge1_mainline.config   arm64 defconfig -> Android 14 delta, 6.12
-  flash/partitions.tsv           the GPT build.sh turns into a flash script
+  flash/partitions.tsv           one layout: images, flash script, installer
+  bin/edge1-install-internal.sh  installs the running card onto eMMC or NVMe
 build/
   verify-tree.sh                 static checks, no tree needed
   preflight.sh                   host requirements
@@ -217,7 +287,7 @@ build/
   build-kernel.sh                mainline 6.12 + the Android config delta
   build-uboot.sh                 mainline U-Boot + Android boot image support
   build.sh                       the platform build and the eMMC flash pack
-  build-sdimage.sh               one whole-disk image for Etcher
+  build-images.sh                the three whole-disk images
   verify-aidl-surface.sh         dumps the real method list of declared HALs
   windows/                       the WSL2 orchestrator and the in-distro driver
     apt-packages.txt             host packages, hashed so a change re-provisions

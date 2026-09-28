@@ -536,3 +536,33 @@ PRODUCT_PROPERTY_OVERRIDES += \
 # from the system one. Properties are global at run time, so this does not change
 # who can read them - but it does mean every line in this file is a vendor
 # property, which is why the duplicate above was found in vendor/build.prop.
+
+# ---------------------------------------------------------------------------
+# Installing onto the internal storage, from the card.
+#
+# The card is the install: it boots on its own with the eMMC untouched, and pulling
+# it out puts the board back. Once it boots reliably, the same system belongs on the
+# eMMC or the M.2 SSD - and the only thing that can write those is something already
+# running on the board, because neither is removable.
+#
+# So the installer travels inside the image it installs. It copies the running
+# card partition by partition and sizes the target to the real device, which is the
+# one thing the fixed edge1-emmc.img and edge1-nvme.img cannot do: userdata gets the
+# whole SSD rather than the 14GiB the image was built for.
+#
+# The layout is installed beside it rather than written into it, so that
+# flash/partitions.tsv stays the single source of truth for the GPT. The image
+# builder, the generated eMMC flash script and this installer all read that one file.
+PRODUCT_COPY_FILES += \
+    $(LOCAL_PATH)/bin/edge1-install-internal.sh:$(TARGET_COPY_OUT_VENDOR)/bin/edge1-install-internal.sh \
+    $(LOCAL_PATH)/flash/partitions.tsv:$(TARGET_COPY_OUT_VENDOR)/etc/edge1-partitions.tsv
+
+# sgdisk writes the GPT on the target. It is not assumed to be present: it comes
+# from external/gptfdisk, which AOSP builds as a device binary because vold uses it
+# to partition adoptable storage - but "vold uses it" is not the same as "it is in
+# this product", and a missing module is dropped from PRODUCT_PACKAGES in silence
+# unless PRODUCT_ENFORCE_PACKAGES_EXIST is set. The module probe resolves every name
+# in this file against the synced tree in about a minute, so if this one is wrong
+# the next report says so rather than the installer failing on the board.
+PRODUCT_PACKAGES += \
+    sgdisk

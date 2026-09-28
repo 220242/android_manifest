@@ -6,7 +6,7 @@
 #
 # Output: $TREE/bootloader/u-boot/u-boot-rockchip.bin, one blob containing the
 # TPL, the SPL and u-boot.itb, written to sector 64 of the card by
-# build-sdimage.sh. That single-image packaging is binman's, and is what
+# build-images.sh. That single-image packaging is binman's, and is what
 # doc/board/rockchip/rockchip.rst:346 says to dd at seek=64.
 #
 # Why this exists at all: the board is installed by writing one whole-disk image
@@ -90,45 +90,90 @@ make "CROSS_COMPILE=$CROSS" "$DEFCONFIG"
 # The Android delta.
 #
 # khadas-edge-v-rk3399_defconfig builds a U-Boot that boots a distro - extlinux,
-# a boot script, EFI. It cannot read an Android boot image, so these four things
-# are added.
+# a boot script, EFI. It cannot read an Android boot image, and it has no shell
+# with conditionals, so these five symbols are added.
 #
-# The boot sequence is not invented. It is the one in U-Boot's own
+# The boot sequence itself is not invented. It is the one in U-Boot's own
 # doc/android/boot-image.rst:110-133, for exactly this case: a boot image with
 # header v2 whose DTB travels inside it, and no dtbo partition to merge.
 #
-#   mmc dev 1                          the SD card. arch/arm/dts/rk3399-u-boot.dtsi
-#                                      aliases mmc0 = &sdhci (eMMC) and
-#                                      mmc1 = &sdmmc (the card slot), so the card
-#                                      is 1. Hardcoded rather than probed: this
-#                                      image is built to boot from the card, and
-#                                      U-Boot's simple parser has no conditionals
-#                                      to fall back with (CONFIG_HUSH_PARSER and
-#                                      CONFIG_CMD_SETEXPR are both off in this
-#                                      defconfig). Change it to 0 to boot the same
-#                                      layout from eMMC.
-#   part start/size mmc 1 boot         by partition name, which cmd/part.c resolves
-#                                      with part_get_info_by_name. The boot
-#                                      partition is raw - there is no filesystem to
-#                                      load from.
-#   mmc read 0x20000000 ...            the whole boot.img into RAM at 512MB, clear
-#                                      of everywhere bootm will copy things to.
-#   abootimg get dtb --index=0         the board dtb out of the image's DTB area.
-#   cp.b ... ${fdt_addr_r}             to 0x12000000, which
-#                                      include/configs/rk3399_common.h sets.
-#   bootm <img> <img> ${fdt_addr_r}    the documented Android form: kernel address,
-#                                      ramdisk address, DTB address. bootm reads
-#                                      the ANDROID! magic and unpacks it.
+#   part start/size <if> <dev> boot   by partition name, which cmd/part.c resolves
+#                                     with part_get_info_by_name, and which FAILS
+#                                     if there is no such partition - that failure
+#                                     is what makes the fallback below work. The
+#                                     boot partition is raw; there is no
+#                                     filesystem to load from.
+#   <if> read 0x20000000 ...          the whole boot.img into RAM at 512MB, clear
+#                                     of everywhere bootm will copy things to.
+#   abootimg get dtb --index=0        the board dtb out of the image's DTB area.
+#   cp.b ... ${fdt_addr_r}            to 0x12000000, which
+#                                     include/configs/rk3399_common.h sets.
+#   bootm <img> <img> ${fdt_addr_r}   the documented Android form: kernel address,
+#                                     ramdisk address, DTB address. bootm reads
+#                                     the ANDROID! magic and unpacks it.
 #
 # CONFIG_CMD_ADTIMG is not enabled: it merges DTBO overlays, and this device has no
 # dtbo partition - the one dtb is inside boot.img.
+#
 # ---------------------------------------------------------------------------
-readonly BOOTCMD='mmc dev 1; part start mmc 1 boot ba; part size mmc 1 boot bs; mmc read 0x20000000 ${ba} ${bs}; abootimg addr 0x20000000; abootimg get dtb --index=0 da ds; cp.b ${da} ${fdt_addr_r} ${ds}; bootm 0x20000000 0x20000000 ${fdt_addr_r}'
+# Three media, tried in order: SD card, eMMC, NVMe.
+#
+# This used to be one hardcoded "mmc dev 1", which boots only the card. Three
+# media are wanted, and the order is what makes the whole install story work, so
+# it is worth stating why this order and not another.
+#
+#   mmc 1   the SD card.  arch/arm/dts/rk3399-u-boot.dtsi aliases mmc0 = &sdhci
+#           and mmc1 = &sdmmc; arch/arm/mach-rockchip/rk3399/rk3399.c:27-31 is the
+#           same fact from the BootROM's side - EMMC is mmc@fe330000 (sdhci) and
+#           SD is mmc@fe320000 (sdmmc). The card is 1.
+#   mmc 0   the eMMC.
+#   nvme 0  the M.2 SSD. CONFIG_NVME_PCI=y and CONFIG_PCI=y are already in the
+#           Edge-V defconfig, and CONFIG_CMD_NVME is "default y if NVME", so the
+#           nvme command comes for free. "nvme scan" has to run first because
+#           PCIe enumeration is not automatic.
+#
+# The card first, and that is the single most useful property here: whichever
+# medium the BootROM loaded U-Boot from, a card with an Android boot partition
+# takes over. So an install on the eMMC or the NVMe is always recoverable by
+# inserting the card - no serial console, no maskrom button, nothing to undo.
+#
+# NVMe is last because it cannot be first: the BootROM has no PCIe. Its boot
+# sources are the enum in arch/arm/include/asm/arch-rockchip/bootrom.h:47-59 -
+# NAND, EMMC, SPINOR, SPINAND, SD, UFS, I2C, SPI, USB - and PCIe is not among
+# them. An NVMe install therefore always leaves U-Boot on the eMMC or the card;
+# only Android's own partitions live on the SSD. That is a property of the
+# silicon, not a choice, and it is why flash/partitions.tsv has no bootloader row
+# for the NVMe image.
+#
+# The sequence is written once, here, and instantiated three times: the three
+# copies in CONFIG_BOOTCOMMAND differ only in the interface, the device number
+# and how the device is selected.
+# ---------------------------------------------------------------------------
+readonly IMGADDR=0x20000000
+
+# $1 the command that selects the device, $2 the interface, $3 the device number
+boot_one() {
+    printf '%s && part start %s %s boot ba && part size %s %s boot bs' "$1" "$2" "$3" "$2" "$3"
+    printf ' && %s read %s ${ba} ${bs}' "$2" "$IMGADDR"
+    printf ' && abootimg addr %s && abootimg get dtb --index=0 da ds' "$IMGADDR"
+    printf ' && cp.b ${da} ${fdt_addr_r} ${ds}'
+    printf ' && bootm %s %s ${fdt_addr_r}' "$IMGADDR" "$IMGADDR"
+}
+
+BOOTCMD="$(boot_one 'mmc dev 1' mmc 1)"
+BOOTCMD="$BOOTCMD || $(boot_one 'mmc dev 0' mmc 0)"
+BOOTCMD="$BOOTCMD || $(boot_one 'nvme scan && nvme device 0' nvme 0)"
+BOOTCMD="$BOOTCMD || echo NO ANDROID BOOT PARTITION ON CARD, eMMC OR NVMe"
+readonly BOOTCMD
 
 readonly FRAGMENT=.config-android-fragment
+# CONFIG_HUSH_PARSER is what makes the fallback possible at all: without it the
+# parser has no && or ||, so the three attempts could not be chained and a missing
+# card would be a dead board rather than the next medium. cmd/Kconfig:14-20.
 cat > "$FRAGMENT" <<EOF
 CONFIG_ANDROID_BOOT_IMAGE=y
 CONFIG_CMD_ABOOTIMG=y
+CONFIG_HUSH_PARSER=y
 CONFIG_USE_BOOTCOMMAND=y
 CONFIG_BOOTCOMMAND="$BOOTCMD"
 EOF
@@ -142,20 +187,38 @@ make "CROSS_COMPILE=$CROSS" olddefconfig >/dev/null
 # CONFIG_ANDROID_BOOT_IMAGE (cmd/Kconfig:534), so one missing dependency silently
 # takes the command with it and the boot sequence dies at "Unknown command
 # 'abootimg'" - on the board, with no log.
+#
+# CONFIG_CMD_NVME is not in the fragment because it is not ours to set - it is
+# "default y if NVME" and the defconfig already has CONFIG_NVME_PCI=y. It is
+# checked anyway: if it ever stops coming for free, the third boot target
+# silently becomes "Unknown command 'nvme'", which is the same class of failure.
 echo "==> verifying the delta took"
 missing=0
-for sym in CONFIG_ANDROID_BOOT_IMAGE CONFIG_CMD_ABOOTIMG CONFIG_USE_BOOTCOMMAND; do
+for sym in CONFIG_ANDROID_BOOT_IMAGE CONFIG_CMD_ABOOTIMG CONFIG_HUSH_PARSER \
+           CONFIG_USE_BOOTCOMMAND CONFIG_CMD_NVME CONFIG_PCI \
+           CONFIG_CMD_USB_MASS_STORAGE; do
     grep -qx "${sym}=y" .config || { echo "  NOT SET: $sym" >&2; missing=$((missing+1)); }
 done
 if ! grep -q '^CONFIG_BOOTCOMMAND=' .config; then
     echo "  NOT SET: CONFIG_BOOTCOMMAND" >&2; missing=$((missing+1))
 fi
+# The three attempts have to survive into .config intact. A truncated bootcmd
+# would still build, still boot the card, and silently not fall through to the
+# eMMC or the SSD - which is precisely the case that cannot be tested without
+# the hardware.
+got="$(sed -n 's/^CONFIG_BOOTCOMMAND="\(.*\)"$/\1/p' .config)"
+for want in 'mmc dev 1' 'mmc dev 0' 'nvme device 0'; do
+    case "$got" in
+        *"$want"*) ;;
+        *) echo "  BOOTCOMMAND lost the '$want' attempt" >&2; missing=$((missing+1)) ;;
+    esac
+done
 if (( missing )); then
     echo "==> $missing symbol(s) did not take. U-Boot would build and then not boot" >&2
     echo "    Android. Fix the fragment before flashing anything." >&2
     exit 1
 fi
-echo "  bootcmd: $(sed -n 's/^CONFIG_BOOTCOMMAND="\(.*\)"$/\1/p' .config)"
+echo "  bootcmd tries, in order: SD card (mmc 1), eMMC (mmc 0), NVMe (nvme 0)"
 
 echo "==> building ($(nproc) jobs)"
 make "CROSS_COMPILE=$CROSS" "BL31=$BL31" -j"$(nproc)"
@@ -170,5 +233,5 @@ readonly OUT="$UB/u-boot-rockchip.bin"
 echo
 echo "u-boot-rockchip.bin: $OUT ($(du -h "$OUT" | cut -f1))"
 echo
-echo "build-sdimage.sh writes this at sector 64 of the card image, ahead of the"
+echo "build-images.sh writes this at sector 64 of the card image, ahead of the"
 echo "first partition - which flash/partitions.tsv starts at 16MiB for this reason."
