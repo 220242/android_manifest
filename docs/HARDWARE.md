@@ -62,12 +62,72 @@ TPL working, or a sign that Armbian's Edge support (`.csc`,
 `BOARD_MAINTAINER=""`) is not exercised on 4GB LPDDR4 parts. The A/B is what tells the
 two apart.
 
-## What is still not known
+### The ID blocks, decoded and compared
 
-The ID block's decoded fields were never read off the card — the one-liner used on the
-board printed only the magic. `init_offset`, `init_size` and `init_boot_size` would say
-whether the BootROM is being pointed at the right place and the right amount, and
-`build/rk-idb-check.py` prints all three.
+Read off both devices with `build/rk-idb-check.py`. The eMMC's is a **known-working**
+bootloader, which makes it the reference:
+
+| Field | our card | eMMC (Armbian, works) |
+|---|---|---|
+| `init_offset` | 4 blocks (2048 B) | 4 blocks (2048 B) |
+| `init_size` (TPL) | 136 blocks (69,632 B) | 140 blocks (71,680 B) |
+| `init_boot_size` | 376 blocks (192,512 B) | 1164 blocks (595,968 B) |
+| ⇒ SPL size | 240 blocks (122,880 B) | 1024 blocks (524,288 B) |
+
+**The header is not the fault.** `init_offset` is identical, the two TPLs are within 2KB
+of each other, and ours is internally consistent: 136 + 240 = 376, which is exactly the
+TPL and SPL our build produces.
+
+The one difference is explained and benign. 1024 blocks is 512KiB is exactly
+`RK_MAX_BOOT_SIZE` (`tools/rkcommon.h:14`), and `rkcommon.c:334-337` uses that as a
+placeholder when mkimage is given no separate boot file:
+
+```c
+if (spl_params.boot_file)
+    init_boot_size = spl_params.init_size + spl_params.boot_size;
+else
+    init_boot_size = spl_params.init_size + RK_MAX_BOOT_SIZE;
+```
+
+So Armbian's 2022.07 built its `idbloader.img` from one concatenated file and got the
+placeholder; ours uses binman's `multiple-data-files` (TPL and SPL separately) and gets
+the real size. Ours is the more precise of the two.
+
+## So where the fault has to be
+
+`chosen/u-boot,version` reading `2022.07-armbian` says precisely one thing: the U-Boot
+that handed off to the kernel was **Armbian's**, not the `2026.07` this tree builds.
+Combined with everything above, two chains survive:
+
+**(A) Our TPL fails to bring up DRAM.** The BootROM cannot get a first stage running off
+the card and falls through to the eMMC, where Armbian's TPL, SPL and U-Boot all run.
+This is the hypothesis `EDGE1_ROCKCHIP_TPL=1` tests, and DDR init is the only link in
+our chain with no second opinion behind it.
+
+**(B) Our TPL and SPL run, but SPL loads `u-boot.itb` from the eMMC.** The search order
+is `u-boot,spl-boot-order = "same-as-spl", &sdhci, &sdmmc`
+(`arch/arm/dts/rk3399-u-boot.dtsi:16`) — and `&sdhci` is the **eMMC**, ahead of the card.
+`same-as-spl` should resolve to the card: rk3399 implements
+`board_spl_was_booted_from()` (`arch/arm/mach-rockchip/spl.c:51`), which reads the
+BootROM's boot-source ID from `CFG_IRAM_BASE + 0x10` and maps `BROM_BOOTSOURCE_SD` to
+`/mmc@fe320000` (`rk3399/rk3399.c:27-31`). But if that value does not survive to SPL,
+`same-as-spl` yields NULL, the loop `continue`s, and the next entry is the eMMC — whose
+`u-boot.itb` at sector 16384 is Armbian's.
+
+A third chain is ruled out: our U-Boot proper running and its `bootcmd` failing would
+leave it at a prompt, and even if `CONFIG_ENV_IS_IN_MMC` pulled Armbian's saved
+environment and its `bootcmd`, the handoff would still be done by 2026.07. The version
+string says otherwise.
+
+### Which to test first, and why in this order
+
+1. **`EDGE1_ROCKCHIP_TPL=1`, one card write, nothing destructive.** If (A), this fixes
+   it outright. It is also the only test here that risks nothing.
+2. **Only if that fails, (B).** The fix is to stop the eMMC offering a competing
+   `u-boot.itb` — back up the eMMC's first 16MiB, then clear the region at sector 16384.
+   In *both* chains that makes some SPL fall through to the card and load ours, so it
+   fixes as well as diagnoses; the cost is that Armbian stops booting until the backup
+   is restored.
 
 ## Storage, by controller address
 
