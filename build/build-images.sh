@@ -253,6 +253,33 @@ if [[ -f "$UBOOT" ]]; then
             exit 1
         fi
     fi
+
+    # And the second stage, which until now was only ever arithmetic.
+    #
+    # SPL reads u-boot.itb from a fixed raw sector - CONFIG_SYS_MMCSD_RAW_MODE_U_BOOT_SECTOR,
+    # 0x4000 = 16384 on Rockchip. binman places the FIT at CONFIG_SPL_PAD_TO
+    # (0x7f8000 = 16320 sectors) inside the blob, and the blob goes to sector 64, so
+    # 64 + 16320 = 16384 and the two meet. build-uboot.sh checks that those numbers
+    # agree; this checks that the FIT is actually THERE, by looking for the
+    # 0xd00dfeed magic at that offset.
+    #
+    # Worth doing separately because the two can disagree in a way no arithmetic
+    # catches: a blob whose FIT is missing or at a different offset still has a valid
+    # ID block, still has the right size, and still passes every other check here -
+    # and SPL then finds nothing at sector 16384. On a board whose eMMC carries
+    # another u-boot.itb at that same sector, the search simply moves on to that one.
+    FIT_OFF=$(( 0x7f8000 ))
+    fit_magic="$(od -An -tx1 -N4 -j "$FIT_OFF" -- "$UBOOT" 2>/dev/null | tr -d ' \n')"
+    if [[ "$fit_magic" == "d00dfeed" ]]; then
+        printf '    u-boot.itb: FIT magic at 0x%x, so sector %d once written at %d\n' \
+               "$FIT_OFF" "$(( UBOOT_SEEK_SECTORS + FIT_OFF / 512 ))" "$UBOOT_SEEK_SECTORS"
+    else
+        echo "no FIT at offset $FIT_OFF of u-boot-rockchip.bin (found '${fit_magic:-nothing}'," >&2
+        echo "expected d00dfeed). SPL reads u-boot.itb from sector 16384 and would find" >&2
+        echo "nothing there - and on this board the eMMC has another one at that sector," >&2
+        echo "so the search would silently move on to it. Rebuild with build-uboot.sh." >&2
+        exit 1
+    fi
     # The bootloader has to fit between sector 64 and the first partition, or writing
     # the partitions would overwrite it.
     if (( UBOOT_SEEK_SECTORS * 512 + ub_bytes > FIRST_PART_MIB * 1024 * 1024 )); then
