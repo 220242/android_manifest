@@ -306,12 +306,25 @@ readonly FRAGMENT=.config-android-fragment
 # include/configs/khadas_edge_rk3399.h to put it in, so rk3399_common.h's empty
 # fallback applies.
 #
-# PREBOOT reaches the same end from a defconfig alone, which is what we have.
-# CONFIG_CONSOLE_MUX is "default y if VIDEO" (common/Kconfig:260-262), and with it
-# a runtime change to stdout takes effect immediately through the environment
-# callback at common/console.c:73. If the HDMI probe found no display, iomux_doenv
-# fails, on_console rejects the assignment, and stdout stays serial - so the worst
-# case is the behaviour we have today.
+# PREBOOT reaches the same end from a defconfig alone, which is what we have. With
+# CONSOLE_MUX on, a runtime change to stdout takes effect immediately through the
+# environment callback at common/console.c:73. If the HDMI probe found no display,
+# iomux_doenv fails, on_console rejects the assignment, and stdout stays serial - so
+# the worst case is the behaviour we have today.
+#
+# CONFIG_CONSOLE_MUX and CONFIG_VIDEO_ROCKCHIP_MAX_YRES are stated here even though
+# Kconfig would give both: "default y if VIDEO || LCD" (common/Kconfig:260-262) and
+# "default 2160 if DISPLAY_ROCKCHIP_HDMI" (drivers/video/rockchip/Kconfig:33-37).
+# The first attempt relied on that and the build stopped with
+#
+#   NOT SET: CONFIG_CONSOLE_MUX
+#
+# because a Kconfig default only applies to a symbol nothing has decided yet. The
+# base defconfig names neither VIDEO nor CONSOLE_MUX, so running it evaluated
+# CONSOLE_MUX with VIDEO=n, wrote "# CONFIG_CONSOLE_MUX is not set" into .config,
+# and olddefconfig then kept that decided value when our fragment turned VIDEO on.
+# Same shape as the kernel's DWMAC_ROCKCHIP staying m behind a tristate parent: a
+# default is not a guarantee, so anything this build depends on is stated.
 # ---------------------------------------------------------------------------
 readonly STDOUT_BOTH='setenv stdout serial,vidconsole; setenv stderr serial,vidconsole'
 
@@ -324,6 +337,8 @@ CONFIG_VIDEO=y
 CONFIG_DISPLAY=y
 CONFIG_VIDEO_ROCKCHIP=y
 CONFIG_DISPLAY_ROCKCHIP_HDMI=y
+CONFIG_VIDEO_ROCKCHIP_MAX_YRES=2160
+CONFIG_CONSOLE_MUX=y
 CONFIG_USE_PREBOOT=y
 CONFIG_PREBOOT="$STDOUT_BOTH"
 CONFIG_USE_BOOTCOMMAND=y
@@ -349,20 +364,31 @@ make "CROSS_COMPILE=$CROSS" olddefconfig >/dev/null
 # silently becomes "Unknown command 'nvme'", which is the same class of failure.
 echo "==> verifying the delta took"
 missing=0
-# Two lists, and the split is the point: this one is what the build ASSERTS, so a
-# missing symbol is fatal. Everything in it is either in the fragment or is a
-# functional dependency of something in the fragment - CONFIG_CMD_NVME and CONFIG_PCI
-# are what make the third boot target exist at all, and without
-# CONFIG_CMD_USB_MASS_STORAGE the documented "ums 0 mmc 0" escape hatch is not there.
-for sym in CONFIG_ANDROID_BOOT_IMAGE CONFIG_CMD_ABOOTIMG CONFIG_HUSH_PARSER \
-           CONFIG_USE_BOOTCOMMAND CONFIG_CMD_NVME CONFIG_PCI \
-           CONFIG_CMD_USB_MASS_STORAGE CONFIG_VIDEO CONFIG_DISPLAY \
-           CONFIG_VIDEO_ROCKCHIP CONFIG_DISPLAY_ROCKCHIP_HDMI \
-           CONFIG_USE_PREBOOT CONFIG_CONSOLE_MUX; do
+# The contract is read from the fragment, not from a second list kept beside it.
+# Keeping two lists in step is exactly what failed: the hand-kept list named
+# CONFIG_CONSOLE_MUX, which the fragment never set, and the build stopped on a symbol
+# nothing had asked for. Now every line of the fragment is checked and nothing else
+# can drift.
+while IFS= read -r line; do
+    case "$line" in ''|\#*) continue ;; esac
+    sym="${line%%=*}"; val="${line#*=}"
+    case "$val" in
+        # A string value: only presence can be checked generically. The two strings
+        # that matter have their own content checks below.
+        \"*) grep -q "^${sym}=" .config \
+                || { echo "  NOT SET: $sym" >&2; missing=$((missing+1)); } ;;
+        *)   grep -qx "${sym}=${val}" .config \
+                || { echo "  NOT SET: ${sym}=${val}" >&2; missing=$((missing+1)); } ;;
+    esac
+done < "$FRAGMENT"
+
+# Symbols this build depends on but does not set, because the base defconfig or a
+# default already provides them. CONFIG_CMD_NVME and CONFIG_PCI are what make the
+# third boot target exist at all, and without CONFIG_CMD_USB_MASS_STORAGE the
+# documented "ums 0 mmc 0" escape hatch is not there. Asserted, not assumed - but
+# they have been observed to take, unlike the two now in the fragment.
+for sym in CONFIG_CMD_NVME CONFIG_PCI CONFIG_CMD_USB_MASS_STORAGE; do
     grep -qx "${sym}=y" .config || { echo "  NOT SET: $sym" >&2; missing=$((missing+1)); }
-done
-for str in CONFIG_BOOTCOMMAND CONFIG_PREBOOT; do
-    grep -q "^${str}=" .config || { echo "  NOT SET: $str" >&2; missing=$((missing+1)); }
 done
 # The console has to end up on both, or the screen stays blank and this was for
 # nothing. Checked as a string rather than assumed from CONFIG_VIDEO being on.

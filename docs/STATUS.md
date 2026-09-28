@@ -684,7 +684,7 @@ of these was checked against `rk3399-base.dtsi`, `rk3399-khadas-edge.dtsi` and
 | `init.edge1.usb.rc`: `/sys/class/android_usb/android0/...` | `sys.usb.controller=fe800000.usb` | `android_usb` is the pre-configfs gadget. The dts gives `usbdrd_dwc3_0` (`usb@fe800000`) `dr_mode = "otg"`, so that is the UDC. |
 | fragment: `CONFIG_DWMAC_ROCKCHIP=y` alone | `+ CONFIG_STMMAC_PLATFORM=y` | `DWMAC_ROCKCHIP` is inside `if STMMAC_PLATFORM`, a tristate. While the parent was `m` the child could not be `y`, so `olddefconfig` demoted it — no Ethernet, on a board whose dts enables `&gmac`. |
 
-## Four traps in the tooling itself
+## Five traps in the tooling itself
 
 **The device tree cannot be a symlink.** It was one — one place to edit, under
 version control — and that is why the first platform build could not start:
@@ -792,6 +792,34 @@ because the 120GiB checkout and 150GiB of output it is sizing for are exactly wh
 no longer free. It stopped a run that had only to rebuild a few images. The requirement
 is now tiered by what is already on the filesystem - 250GiB bare, 140GiB synced, 40GiB
 with a built `out/` - and `PORTING.md` has the table.
+
+**A Kconfig default is not a guarantee, and this is the third time.** The U-Boot build
+stopped with
+
+```
+NOT SET: CONFIG_CONSOLE_MUX
+```
+
+on a symbol whose Kconfig entry is `default y if VIDEO || LCD` (`common/Kconfig:260-262`)
+— and the fragment had just turned `CONFIG_VIDEO` on. A default only applies to a symbol
+nothing has decided yet. The base defconfig names neither `VIDEO` nor `CONSOLE_MUX`, so
+running it evaluated `CONSOLE_MUX` with `VIDEO=n` and wrote
+`# CONFIG_CONSOLE_MUX is not set` into `.config`; `olddefconfig` then *kept* that decided
+value when the fragment turned `VIDEO` on. Same shape as `DWMAC_ROCKCHIP` staying `m`
+behind a tristate parent, and as `BOARD_VNDK_VERSION` being cleared in silence: the
+config says one thing and the build does another.
+
+The symbol is stated in the fragment now, along with
+`CONFIG_VIDEO_ROCKCHIP_MAX_YRES=2160`, which was inherited from a default for the same
+reason and could have gone the same way.
+
+The second half of the fix is the one that matters more. The check that caught it named
+`CONFIG_CONSOLE_MUX` in a list kept **beside** the fragment rather than derived from it,
+so the two could disagree — and they did, in the direction of asserting something never
+set. **The fragment is now the only list**: the check reads it and requires every line to
+survive, comparing exact values rather than assuming `=y`, so `SPL_PAD_TO=0x7f8000` and
+`MAX_YRES=2160` are held to their values and not merely to being present. Four cases
+tested, including the one that happened.
 
 ## How this tree got here
 
