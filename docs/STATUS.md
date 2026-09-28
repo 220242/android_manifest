@@ -425,7 +425,7 @@ of these was checked against `rk3399-base.dtsi`, `rk3399-khadas-edge.dtsi` and
 | `init.edge1.usb.rc`: `/sys/class/android_usb/android0/...` | `sys.usb.controller=fe800000.usb` | `android_usb` is the pre-configfs gadget. The dts gives `usbdrd_dwc3_0` (`usb@fe800000`) `dr_mode = "otg"`, so that is the UDC. |
 | fragment: `CONFIG_DWMAC_ROCKCHIP=y` alone | `+ CONFIG_STMMAC_PLATFORM=y` | `DWMAC_ROCKCHIP` is inside `if STMMAC_PLATFORM`, a tristate. While the parent was `m` the child could not be `y`, so `olddefconfig` demoted it — no Ethernet, on a board whose dts enables `&gmac`. |
 
-## Three traps in the tooling itself
+## Four traps in the tooling itself
 
 **The device tree cannot be a symlink.** It was one — one place to edit, under
 version control — and that is why the first platform build could not start:
@@ -494,6 +494,33 @@ distro takes seconds. `build-uboot.sh` also checks its four host requirements up
 because the error the build gives names neither the package nor what wanted it. U-Boot
 builds a SWIG Python extension (`scripts/dtc/pylibfdt`) before it can run binman, and
 binman is what packs `u-boot-rockchip.bin`.
+
+**A diagnostic must never abort on the thing it is diagnosing.** The report is one
+file, and the build log section is the part that explains a failure. It stopped
+mid-sentence on a run whose whole purpose was to explain a failure, on this line:
+
+```sh
+first_failed=$(grep -nE '^FAILED:' "$f" | head -1 | cut -d: -f1)
+```
+
+A log with no `FAILED:` line - a kernel that built fine, or a stage that died in a
+shell script rather than in ninja - makes `grep` exit 1, `pipefail` makes the pipeline
+exit 1, and under `errexit` an assignment from a failing command substitution ends the
+function. The report ended after printing the first log's first heading, so the logs of
+the stage that actually failed never reached it.
+
+This was the fourth occurrence of that shape, and the first three were each fixed on
+whichever line happened to trip, with a `|| true`. The module probe had already drawn
+the right conclusion and enforced the property once for its whole body; the report now
+does the same - `set +e +o pipefail` inside a subshell, so the rest of the script keeps
+both. A diagnostic printing something odd is always better than a diagnostic stopping.
+
+Adjacent, and the same kind of mistake in a different tool: `preflight.sh` asked for
+250GiB of free disk on every run. That is right before a sync and impossible after one,
+because the 120GiB checkout and 150GiB of output it is sizing for are exactly what is
+no longer free. It stopped a run that had only to rebuild a few images. The requirement
+is now tiered by what is already on the filesystem - 250GiB bare, 140GiB synced, 40GiB
+with a built `out/` - and `PORTING.md` has the table.
 
 ## How this tree got here
 

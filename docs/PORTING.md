@@ -28,10 +28,24 @@ once reached a build.
 build/preflight.sh /path/to/where/the/tree/will/live
 ```
 
-Needs ~250GiB free (350 recommended), at least 16GiB RAM (64 recommended), 8+
-cores, an `aarch64-linux-gnu-` cross toolchain, and git read access to
-`android.googlesource.com` and `github.com/gregkh`. It exits 1 and names each unmet
-requirement rather than letting the build fail hours in.
+Needs at least 16GiB RAM (64 recommended), 8+ cores, an `aarch64-linux-gnu-` cross
+toolchain, and git read access to `android.googlesource.com` and `github.com/gregkh`.
+It exits 1 and names each unmet requirement rather than letting the build fail hours
+in.
+
+Disk is three requirements, because what is still needed depends on what is already
+there:
+
+| State of the target directory | Free space needed |
+|---|---|
+| nothing synced | 250GiB (350 comfortable) |
+| tree synced, nothing built | 140GiB (200) |
+| tree synced and `out/` built | 40GiB (80) |
+
+The middle and last rows exist because the first is unmeetable once the work is done:
+a 120GiB checkout and 150GiB of output are not free space any more. A run was stopped
+by `FAIL disk 183GiB free, need >= 250GiB` on a host that had only to rebuild a few
+images, for which 183GiB was ample.
 
 The packages themselves are in [`build/windows/apt-packages.txt`](../build/windows/apt-packages.txt),
 one per line — the AOSP list plus what the kernel, U-Boot and the SD image need. On a

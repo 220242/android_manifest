@@ -12,9 +12,24 @@
 set -uo pipefail
 
 # --- Requirements -------------------------------------------------------------
-# Checkout is ~120GiB and the output tree for one userdebug target is ~150GiB.
-readonly DISK_MIN_GIB=250
+# Disk is three requirements, not one, because what is still needed depends on
+# what is already on the filesystem. The checkout is ~120GiB and the output tree
+# for one userdebug target is ~150GiB, so a bare host needs 250GiB free - but once
+# both are in place that space is no longer free, by definition. Asking for it
+# anyway is a requirement that can never be met again after the work is done, and
+# that is not a theoretical objection: a run was stopped by
+#
+#   FAIL disk  183GiB free, need >= 250GiB
+#
+# on a host whose tree was synced, whose build had completed, and which only had to
+# rebuild a few images. 183GiB was ample for that.
+readonly DISK_MIN_GIB=250        # nothing synced yet: checkout plus output
 readonly DISK_REC_GIB=350
+readonly DISK_SYNCED_GIB=140     # tree present, output still to build
+readonly DISK_SYNCED_REC_GIB=200
+# An incremental rebuild, the images, the 7GiB card image and its compressed copy.
+readonly DISK_BUILT_GIB=40
+readonly DISK_BUILT_REC_GIB=80
 # Android 14's build needs 16GiB to link and run R8; 64GiB is Google's own
 # recommendation for a full platform build.
 readonly RAM_MIN_GIB=16
@@ -34,15 +49,34 @@ echo
 # --- Disk ---------------------------------------------------------------------
 # Checks the filesystem holding the tree, not /, since they are often different.
 readonly TREE_DIR="${1:-$PWD}"
+
+# Which of the three requirements applies. The caller passes the parent directory
+# (provision-wsl.sh passes $WORK), so the checkout is looked for both there and at
+# the conventional path under it; a second argument names it outright.
+aosp=
+for c in "${2:-}" "$TREE_DIR" "$TREE_DIR/aosp-14-edge1"; do
+    [[ -n "$c" && -d "$c/.repo" ]] && aosp="$c"
+done
+if [[ -z "$aosp" ]]; then
+    disk_need=$DISK_MIN_GIB; disk_rec=$DISK_REC_GIB
+    disk_why="nothing synced yet: a ~120GiB checkout plus ~150GiB of build output"
+elif [[ -f "$aosp/out/target/product/edge/system.img" ]]; then
+    disk_need=$DISK_BUILT_GIB; disk_rec=$DISK_BUILT_REC_GIB
+    disk_why="tree and a built out/ are already here; this is what an incremental rebuild, the images and the card image still need"
+else
+    disk_need=$DISK_SYNCED_GIB; disk_rec=$DISK_SYNCED_REC_GIB
+    disk_why="tree is synced; this is what the build output still needs"
+fi
+
 avail_gib=$(df -BG --output=avail "$TREE_DIR" 2>/dev/null | tail -1 | tr -dc '0-9')
 if [[ -z "$avail_gib" ]]; then
     warn "disk" "could not determine free space on $TREE_DIR"
-elif (( avail_gib < DISK_MIN_GIB )); then
-    fail "disk" "${avail_gib}GiB free on $TREE_DIR, need >= ${DISK_MIN_GIB}GiB (${DISK_REC_GIB}GiB recommended)"
-elif (( avail_gib < DISK_REC_GIB )); then
-    warn "disk" "${avail_gib}GiB free; ${DISK_REC_GIB}GiB recommended for a full build plus update.img"
+elif (( avail_gib < disk_need )); then
+    fail "disk" "${avail_gib}GiB free on $TREE_DIR, need >= ${disk_need}GiB - $disk_why"
+elif (( avail_gib < disk_rec )); then
+    warn "disk" "${avail_gib}GiB free, >= ${disk_need}GiB needed and ${disk_rec}GiB comfortable - $disk_why"
 else
-    pass "disk" "${avail_gib}GiB free on $TREE_DIR"
+    pass "disk" "${avail_gib}GiB free on $TREE_DIR (needs ${disk_need}GiB: $disk_why)"
 fi
 
 # --- RAM ----------------------------------------------------------------------

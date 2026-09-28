@@ -1176,6 +1176,26 @@ stage_report() {
     # Emits a consolidated diagnostic to stdout. Start-EdgeBuild.ps1 captures it
     # into the Windows-side report, so this must stay quiet on stderr and never
     # exit non-zero: a diagnostic that fails to run is worse than useless.
+    #
+    # The whole body runs with errexit and pipefail off, in a subshell so the rest
+    # of the script keeps them. This is the fourth time the same shape of bug has
+    # truncated this report, and the first three were each fixed on the one line
+    # that happened to trip:
+    #
+    #   first_failed=$(grep -nE '^FAILED:' "$f" | head -1 | cut -d: -f1)
+    #
+    # A log with no FAILED: line - a kernel that built fine, a stage that died in a
+    # shell script - makes grep exit 1, pipefail makes the pipeline exit 1, and an
+    # assignment from a failing command substitution ends the function under
+    # errexit. The report then stops mid-sentence, and it stops in the LOGS section,
+    # which is the part that was going to explain the failure. One run was lost to
+    # exactly that: the log of the stage that failed never made it into the report.
+    #
+    # stage_probe already enforces this property once rather than per line, for the
+    # same reason. The rule here is the same: a diagnostic must print something odd
+    # rather than stop.
+    (
+    set +e +o pipefail
     echo "##### LINUX ENVIRONMENT #####"
     echo "uname:      $(uname -a 2>&1)"
     echo "distro:     $(. /etc/os-release 2>/dev/null; echo "${PRETTY_NAME:-unknown}")"
@@ -1375,6 +1395,9 @@ stage_report() {
     done
     echo
     echo "##### END LINUX REPORT #####"
+    )
+    # Always 0: the caller reads the text, not the status.
+    return 0
 }
 
 case "$STAGE" in
