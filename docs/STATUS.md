@@ -480,6 +480,13 @@ table of (file, state key, stages):
 |---|---|
 | `manifests/khadas_edge_tv14.xml` | `Sync`, `Kernel` |
 | `build/windows/apt-packages.txt` | `Provision` |
+| `device/khadas/edge/**` | `Build` |
+
+The third row is the same lesson applied to the expensive stage, and it is the one that
+would have saved the `super.img` cycle: a `BoardConfig.mk` change that makes the build
+emit a raw image does nothing while `Build` is still marked complete. Any edit under the
+device tree now un-completes it, and re-running `Build` with `out/` intact is an
+incremental rebuild.
 
 Adding a package now re-runs Provision by itself, and apt on an already-provisioned
 distro takes seconds. `build-uboot.sh` also checks its four host requirements up front

@@ -161,19 +161,36 @@ function Test-Done { param([string] $Name)
 #     marked complete - and the U-Boot stage failed on a missing swig a whole cycle
 #     later, after an eight-hour platform build. Adding a package now re-runs
 #     Provision by itself; apt on an already-provisioned distro takes seconds.
+#   device/khadas/edge/** -> Build
+#     The third one, and the one that would have saved this cycle: changing
+#     BoardConfig.mk to make super.img raw does not make a completed Build stage
+#     produce a raw super.img. A device tree edit means the images in out/ are stale,
+#     and re-running Build on a warm ccache and an intact out/ is an incremental
+#     rebuild, not a fresh one.
+#
+# An entry names its own Probe when a plain sha256sum will not do - the device tree is
+# a directory, so its hash is the sorted hash of every file in it.
 $script:TrackedInputs = @(
     @{ Key='manifestHash'; Path='manifests/khadas_edge_tv14.xml';
        Stages=@('Sync', 'Kernel'); Label='the manifest overlay' }
     @{ Key='aptHash';      Path='build/windows/apt-packages.txt';
        Stages=@('Provision'); Label='the host package list' }
+    @{ Key='deviceHash';   Path='device/khadas/edge';
+       Stages=@('Build'); Label='the device tree';
+       Probe=('find ~/android_khadas/android_manifest/device/khadas/edge -type f -print0 ' +
+              '2>/dev/null | sort -z | xargs -0 sha256sum 2>/dev/null | sha256sum | cut -c1-16') }
 )
 
 function Invalidate-OnInputChange {
     $s = Get-State
     $dirty = $false
     foreach ($tracked in $script:TrackedInputs) {
-        $probe = "sha256sum ~/android_khadas/android_manifest/$($tracked.Path) " +
-                 '2>/dev/null | cut -c1-16'
+        $probe = if ($tracked.ContainsKey('Probe')) {
+            $tracked.Probe
+        } else {
+            "sha256sum ~/android_khadas/android_manifest/$($tracked.Path) " +
+            '2>/dev/null | cut -c1-16'
+        }
         try { $hash = (Invoke-WslCapture -Command $probe).Trim() } catch { continue }
         if (-not $hash) { continue }
         # Set-StrictMode -Version Latest makes reading a property that does not

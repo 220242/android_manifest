@@ -71,15 +71,22 @@ Reach it from Explorer at `\\wsl.localhost\Edge1Build\home\builder\android_khada
 
 Run one on its own with `-Stage Build`. Re-run a completed stage with `-Force`.
 
-Two inputs are hashed into the state file, and a stage whose input moved is
+Three inputs are hashed into the state file, and a stage whose input moved is
 un-completed by itself:
 
 | Input | Un-completes | Because |
 |---|---|---|
 | `manifests/khadas_edge_tv14.xml` | `Sync`, `Kernel` | a tree synced against a different manifest is not synced |
 | `build/windows/apt-packages.txt` | `Provision` | a distro provisioned against a shorter package list is missing packages |
+| `device/khadas/edge/**` | `Build` | images built from an older device tree are stale |
 
-The second one exists because `swig` was added to the dependency list and never
+The device tree's hash is the sorted hash of every file under it, so any edit counts.
+Re-running `Build` with `out/` intact and ccache warm is an incremental rebuild, not a
+fresh one - and the alternative is what happened with `super.img`: a `BoardConfig.mk`
+change that makes the build produce a raw image does nothing at all while `Build` is
+still marked complete.
+
+The package list one exists because `swig` was added to the dependency list and never
 installed: `Provision` was already marked complete, so apt never ran again, and the
 `Uboot` stage failed on the missing package after an eight-hour platform build. The
 package list is a file rather than a list inside `provision-wsl.sh` so that it can be
