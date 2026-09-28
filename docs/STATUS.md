@@ -205,6 +205,58 @@ kernel is at fault. The A/B that is worth running is two *mainline* tags, which 
 `EDGE1_IMAGE_TAG=v2025.07 build-images.sh ... sdcard` — same packaging, same scripts,
 two files side by side. A console is worth more than any number of variants.
 
+### What Armbian has for this board
+
+Armbian is mainline-based, so unlike the Khadas fork its work is portable here. Checked
+`armbian/build@main`, and it is worth recording both what it confirms and what it does
+not have.
+
+**It independently corroborates every substantive bootloader choice.**
+`config/boards/khadas-edge.csc` and `config/sources/families/include/rockchip64_common.inc`
+give:
+
+| | Armbian | here |
+|---|---|---|
+| defconfig | `BOOTCONFIG="khadas-edge-v-rk3399_defconfig"` | the same |
+| BL31 | `rk3399_bl31_v1.35.elf` | the same file our search picks |
+| DDR init | `BOOT_SCENARIO="tpl-spl-blob"` → `BL31=<blob>` and no `ROCKCHIP_TPL` | the same: U-Boot's own TPL |
+
+That third row is the one that could have gone either way. `rockchip64_common.inc` does
+pass `ROCKCHIP_TPL=<rkbin DDR blob>` — but only in its `binman` and `vendor-spl-blobs`
+scenarios, which other SoCs use. The Edge's `tpl-spl-blob` passes `BL31=` alone, so
+Armbian relies on U-Boot's own TPL for DDR bring-up on this board, exactly as this tree
+does.
+
+Their packaging differs and agrees anyway: they emit `idbloader.img` and `u-boot.itb`
+separately and write them at sectors 64 and 16384, where we write binman's single
+`u-boot-rockchip.bin` at sector 64. Those are the same bytes in the same places — an
+independent check of the `SPL_PAD_TO` arithmetic above.
+
+Caveat on authority: the board file is `.csc` with `BOARD_MAINTAINER=""`, which in
+Armbian's taxonomy is community-supported and currently unmaintained.
+
+**It has no Edge or RK3399 board patches at all.** Every `khadas-edge` hit in Armbian's
+whole patch tree is `khadas-edge2`, which is RK3588 — a different SoC. So Armbian runs
+this board on bare upstream DTS, the same as this tree.
+
+**What it does have is a shortlist of SoC-wide rk3399 patches**, and
+`patch/kernel/archive/rockchip64-6.12/` is the same kernel series we build. None of them
+is needed to boot, and this tree has no kernel patch mechanism at all — adding one is a
+small change to `build-kernel.sh` if a symptom ever calls for it. Kept here as a
+symptom-to-patch map rather than applied, because adding an unnecessary DTS change
+before the first boot adds a variable to the one attempt that matters:
+
+| Symptom | Patch | What it does |
+|---|---|---|
+| SD card unreliable at speed, read errors under load | `rk3399-sd-drive-level-8ma.patch` | raises `sdmmc` bus pins to `pull_up_8ma` and clk to `pull_none_12ma` in `rk3399-base.dtsi`. In Armbian since 2019. The most relevant one, since the whole install path is a card. |
+| USB-C/adb does not enumerate | `rk3399-fix-usb-phy.patch` | one line: longer Type-C PHY init timeout in `phy-rockchip-typec.c` |
+| NVMe not detected, PCIe link does not train | `rk3399-fix-pci-phy.patch`, `rk3399-fix-pci-lanes.patch` | PHY reset on probe, and not disabling `PHY_LANE_IDLE_OFF` per lane, in `phy-rockchip-pcie.c` |
+| Thermal throttling too early | `rk3399-unlock-temperature.patch` | raises trip points in the DTS |
+
+Two others exist and do not apply: `rk3399-add-sclk-i2sout-src-clock.patch` is for the
+rt5651 codec on an OrangePi (we use HDMI audio), and `rk3399-sd-pwr-pinctrl.patch` only
+*defines* an `sdmmc_pwr` pinctrl group that nothing on this board references.
+
 ### Why the installer rather than the eMMC and NVMe images
 
 Neither the eMMC nor the SSD is removable, so only something already running on the
