@@ -155,6 +155,34 @@ BOARD_KERNEL_PAGESIZE := 2048
 BOARD_BOOT_HEADER_VERSION := 2
 BOARD_MKBOOTIMG_ARGS := --header_version $(BOARD_BOOT_HEADER_VERSION)
 
+# --ramdisk_offset, and this one is a boot failure rather than a preference. It was
+# found by reading U-Boot rather than by booting, so the arithmetic is written out.
+#
+# mkbootimg's defaults put the kernel at base + 0x00008000 and the ramdisk at
+# base + 0x01000000. With BOARD_KERNEL_BASE = 0x00200000 that is:
+#
+#   kernel  0x00208000
+#   ramdisk 0x01200000   = kernel + 16MiB
+#
+# The Image is 50MB. It therefore occupies 0x00208000 to about 0x03408000, and the
+# ramdisk address is inside that range.
+#
+# U-Boot does not tolerate the overlap, and the order is what makes it fatal
+# (boot/bootm.c:1045-1070): BOOTM_STATE_FINDOTHER runs first and, for a header v2
+# image whose ramdisk_addr is neither 0 nor mkbootimg's 0x11000000 default, memcpy's
+# the ramdisk to that address (boot/image-android.c:714-726). BOOTM_STATE_LOADOS
+# then memmoves the 50MB kernel over it. BOOTM_STATE_RAMDISK relocates a ramdisk
+# that has already been overwritten, and the kernel comes up with a corrupt
+# initramfs - which presents as a panic with no obvious cause.
+#
+# 0x05000000 puts the ramdisk at 0x05200000, which is 79MiB above the kernel's
+# 0x00208000 - so about 30MB of margin over today's Image, and room for it to reach
+# 79MB before this returns. verify-tree.sh check 3c does the arithmetic on every
+# run, against the real Image size when a built kernel is reachable and against a
+# 64MiB floor when it is not. It rejected 0x04000000, which left 63.97MiB: correct
+# for the Image as it stands and not worth the thin margin.
+BOARD_MKBOOTIMG_ARGS += --ramdisk_offset 0x05000000
+
 # BOARD_INCLUDE_RECOVERY_DTBO used to be set here, carried over from the Android
 # 10 config where the boot header was v2. Boot header v3 and v4 have no
 # recovery_dtbo field at all, so mkbootimg is handed a --recovery_dtbo it cannot

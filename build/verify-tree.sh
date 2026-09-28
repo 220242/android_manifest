@@ -148,6 +148,60 @@ else
 fi
 echo
 
+# --- 3c. the boot image's ramdisk must not land inside the kernel ---------------
+# U-Boot copies both to the addresses in the boot image header, and it copies the
+# ramdisk first (boot/bootm.c:1045 BOOTM_STATE_FINDOTHER, then :1059 LOADOS), so an
+# overlap means the kernel is memmoved over a ramdisk that has already been placed.
+# The kernel then comes up with a corrupt initramfs and panics with nothing
+# pointing at the cause.
+#
+# mkbootimg's defaults are kernel_offset 0x00008000 and ramdisk_offset 0x01000000 -
+# 16MiB apart, which was written when kernels were small. This one is 50MB.
+echo "[3c] boot image: ramdisk clear of the kernel"
+kbase=$(sed 's/#.*//' "$DEV/BoardConfig.mk" \
+        | grep -oE '^[[:space:]]*BOARD_KERNEL_BASE[[:space:]]*:?=[[:space:]]*0x[0-9a-fA-F]+' \
+        | grep -oE '0x[0-9a-fA-F]+$' | tail -1)
+roff=$(sed 's/#.*//' "$DEV/BoardConfig.mk" \
+       | grep -oE -- '--ramdisk_offset[[:space:]]+0x[0-9a-fA-F]+' \
+       | grep -oE '0x[0-9a-fA-F]+$' | tail -1)
+# mkbootimg's own defaults, used when the board does not override them.
+koff=0x00008000
+: "${roff:=0x01000000}"
+if [[ -z "$kbase" ]]; then
+    wrn "BoardConfig.mk sets no BOARD_KERNEL_BASE; cannot check the offsets"
+else
+    kaddr=$(( kbase + koff ))
+    raddr=$(( kbase + roff ))
+    headroom=$(( raddr - kaddr ))
+    printf '  %-6s kernel  0x%08x\n' ' ' "$kaddr"
+    printf '  %-6s ramdisk 0x%08x  (%d MiB above the kernel)\n' ' ' "$raddr" \
+           "$(( headroom / 1024 / 1024 ))"
+    # The real Image if one has been built - EDGE1_TREE points at the AOSP tree.
+    image=""
+    for cand in "${EDGE1_TREE:-}/kernel/mainline/out/arch/arm64/boot/Image" \
+                "$HOME/aosp-14-edge1/kernel/mainline/out/arch/arm64/boot/Image"; do
+        [[ -f "$cand" ]] && { image="$cand"; break; }
+    done
+    if [[ -n "$image" ]]; then
+        ksize=$(stat -c %s "$image")
+        if (( ksize < headroom )); then
+            ok "Image is $(( ksize / 1024 / 1024 ))MiB, headroom is $(( headroom / 1024 / 1024 ))MiB"
+        else
+            err "Image is $(( ksize / 1024 / 1024 ))MiB but the ramdisk sits only"
+            err "  $(( headroom / 1024 / 1024 ))MiB above the kernel; raise --ramdisk_offset"
+        fi
+    elif (( headroom < 64 * 1024 * 1024 )); then
+        # No built Image to measure. 64MiB is the floor this board needs: the Image
+        # was 50MB when this was written and nothing about it is shrinking.
+        err "the ramdisk is only $(( headroom / 1024 / 1024 ))MiB above the kernel."
+        err "  This board's Image is around 50MB, so raise --ramdisk_offset in"
+        err "  BOARD_MKBOOTIMG_ARGS to leave at least 64MiB"
+    else
+        ok "headroom is $(( headroom / 1024 / 1024 ))MiB (no built Image here to measure against)"
+    fi
+fi
+echo
+
 # --- 4. VINTF: fragments must NOT duplicate the device manifest ----------------
 #
 # This check used to assert the opposite - that every HAL in a fragment also

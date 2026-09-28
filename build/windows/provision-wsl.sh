@@ -59,7 +59,8 @@ stage_deps() {
         libxml2-utils xsltproc unzip fontconfig python3 python3-pip \
         python-is-python3 rsync ccache bc lz4 libssl-dev \
         device-tree-compiler openjdk-17-jdk-headless \
-        gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu libelf-dev
+        gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu libelf-dev \
+        gdisk pigz swig python3-setuptools python3-pyelftools
     # repo init is run with --git-lfs, and several AOSP projects (notably the
     # Pixel *-kernel prebuilts) store their binaries in LFS. Without the git-lfs
     # binary those projects fetch fine and then fail at checkout, deterministically
@@ -149,6 +150,36 @@ stage_kernel() {
     place_device
     log "building the mainline 6.12 kernel"
     "$MANIFEST/build/build-kernel.sh" "$TREE" 2>&1 | tee "$LOGS/kernel.log"
+}
+
+stage_uboot() {
+    # Before the platform build, because it is quick and because a card without a
+    # bootloader is not worth producing. See build-uboot.sh for what the Android
+    # delta to the upstream defconfig is.
+    log "building mainline U-Boot for a self-booting SD card"
+    "$MANIFEST/build/build-uboot.sh" "$TREE" 2>&1 | tee "$LOGS/uboot.log"
+}
+
+stage_sdimage() {
+    place_device
+    log "assembling the SD card image"
+    "$MANIFEST/build/build-sdimage.sh" "$TREE" 2>&1 | tee "$LOGS/sdimage.log"
+    # Copied out to $WORK so it is reachable from Explorer without going through
+    # the tree. The compressed copy is the one worth moving: the raw image is 7GiB
+    # and \\wsl.localhost is slow.
+    local img="$TREE/out/target/product/edge/edge1-sdcard.img"
+    if [[ -f "$img.gz" ]]; then
+        mkdir -p "$WORK/output"
+        cp -f "$img.gz" "$WORK/output/"
+        log "SD image copied to $WORK/output/$(basename "$img.gz") ($(du -h "$img.gz" | cut -f1))"
+    elif [[ -f "$img" ]]; then
+        mkdir -p "$WORK/output"
+        cp -f "$img" "$WORK/output/"
+        log "SD image copied to $WORK/output/$(basename "$img") ($(du -h "$img" | cut -f1))"
+    else
+        echo "no SD image produced; see $LOGS/sdimage.log" >&2
+        return 1
+    fi
 }
 
 stage_build() {
@@ -1157,7 +1188,8 @@ stage_report() {
     # failure said so.
     # ninja and soong come from the tree's own prebuilts, so a host ninja is not
     # part of this list - it read as "ninja MISSING" and looked like a problem.
-    for t in git git-lfs repo python3 java make ccache aarch64-linux-gnu-gcc; do
+    for t in git git-lfs repo python3 java make ccache aarch64-linux-gnu-gcc \
+             sgdisk pigz dtc; do
         printf '%-8s %s\n' "$t" "$(command -v $t 2>/dev/null || echo MISSING)"
     done
     echo "ninja:      $([[ -x $TREE/prebuilts/build-tools/linux-x86/bin/ninja ]] \
@@ -1297,12 +1329,14 @@ case "$STAGE" in
     preflight) stage_preflight ;;
     sync)      stage_sync ;;
     kernel)    stage_kernel ;;
+    uboot)     stage_uboot ;;
     build)     stage_build ;;
+    sdimage)   stage_sdimage ;;
     aidl)      stage_aidl ;;
     probe)     stage_probe ;;
     report)    stage_report ;;
     all)       stage_deps; stage_clone; stage_preflight; stage_sync
-               stage_kernel; stage_build ;;
+               stage_kernel; stage_uboot; stage_build; stage_sdimage ;;
     *)
         # A stage this copy does not know about almost always means the in-distro
         # clone is behind the one the instructions were written for, so say which

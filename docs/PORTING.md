@@ -71,7 +71,8 @@ that silently reverted to `m` is a driver that does not exist in this layout.
 [`KERNEL.md`](KERNEL.md) has the rest.
 
 The kernel has to be built before `m`: both the `Image` and the staged dtb are read
-at Kati parse time.
+at Kati parse time. U-Boot does not, but building it early is free and a card with
+no bootloader is not worth producing.
 
 ## 4. Platform
 
@@ -95,33 +96,68 @@ Three details in that line were each wrong once:
   `$OUT_DIR` bind-mounted read-only, so the default `$HOME/.cache/ccache` fails on
   the first compiled file.
 
-## 5. Flash
-
-Not `update.img`. That is Rockchip's format and it needs the BSP bootloader plus
-RKTools, neither of which this path uses. Mainline U-Boot boots an ordinary GPT, so
-`build.sh` stages the images together with a generated `flash-emmc.sh`:
+## 5. Bootloader
 
 ```sh
-# on the build host
-ls out/target/product/edge/edge1-flash/
+build/build-uboot.sh ~/aosp-14-edge1
+```
 
-# copy that directory to the board, then from the Linux it already boots:
+Mainline U-Boot, `khadas-edge-v-rk3399_defconfig`, plus a four-symbol fragment that
+teaches it to read an Android boot image. rk3399 needs only `BL31` out of `rkbin` —
+U-Boot's own TPL does DDR init on this SoC — and the script finds it rather than
+hardcoding a version. Output is `u-boot-rockchip.bin`, one blob containing TPL, SPL
+and `u-boot.itb`.
+
+The boot sequence in `CONFIG_BOOTCOMMAND` is U-Boot's own documented one from
+`doc/android/boot-image.rst` for a header v2 image with the DTB inside it: read the
+`boot` partition raw, `abootimg get dtb --index=0`, copy it to `$fdt_addr_r`, then
+`bootm <img> <img> $fdt_addr_r`. The script fails rather than building a U-Boot whose
+Android support silently did not take — `CONFIG_CMD_ABOOTIMG` depends on
+`CONFIG_ANDROID_BOOT_IMAGE`, and losing it would present on the board as
+`Unknown command 'abootimg'` with no log.
+
+## 6. The SD card image
+
+```sh
+build/build-sdimage.sh ~/aosp-14-edge1
+```
+
+One whole-disk image, `edge1-sdcard.img` and a `.img.gz` beside it, both of which
+Balena Etcher writes directly. It contains the bootloader at sector 64, a GPT built
+from `flash/partitions.tsv`, and each partition image `dd`'d into place. Sizes:
+`EDGE1_SD_SIZE_MIB` defaults to 7000, which fits any card sold as 8GB and leaves
+about 2.1GiB of `userdata`.
+
+**This is the safe install path, and the reason is the boot order.** The RK3399
+BootROM looks at the SD card before the eMMC, so a card with a valid bootloader in
+its raw sectors takes over the boot. The eMMC is never written to — whatever is
+installed there stays — and pulling the card out puts the board back exactly as it
+was. Nothing needs to be running on the board first, either: Etcher writes the card
+from a desktop.
+
+The script refuses rather than producing something misleading: no bootloader, an
+image too big for its partition, a layout that does not fit the requested size, or a
+`userdata` too small for Android to format. It also checks that the bootloader fits
+between sector 64 and the first partition at 16MiB.
+
+### The other way in, which is not the default
+
+`build.sh` also stages `out/target/product/edge/edge1-flash/` with the same images
+and a generated `flash-emmc.sh`. That one partitions and writes the **eMMC**, runs on
+the board itself, and needs a Linux already booted there:
+
+```sh
 ./flash-emmc.sh /dev/mmcblk2
 ```
 
-It writes a GPT from `device/khadas/edge/flash/partitions.tsv` and `dd`s each image
-into its partition. Deliberately the lowest-risk way in: no maskrom mode, no vendor
-flashing tool, and the U-Boot already on the board is left alone — it lives in raw
-sectors ahead of the first partition, and nothing here writes below 16MiB. Check the
-device name first; on this board the eMMC is usually `mmcblk2` and an SD card
-`mmcblk1`.
-
-This has never been run. It erases the eMMC.
+It erases the eMMC, it has never been run, and it is not how this is installed. It
+exists for the point where the card boots reliably and the install should become
+permanent.
 
 ## Layout
 
 ```
-manifests/khadas_edge_tv14.xml   repo local-manifest overlay (AOSP 14 + mainline kernel)
+manifests/khadas_edge_tv14.xml   repo local-manifest overlay (AOSP 14, kernel, U-Boot)
 device/khadas/edge/              the device tree
   edge1_tv.mk                    TV product, inherits device/google/atv
   BoardConfig.mk                 arch, dynamic partitions, AVB, boot image, kernel
@@ -137,7 +173,10 @@ build/
   verify-tree.sh                 static checks, no tree needed
   preflight.sh                   host requirements
   sync.sh, place-device.sh       tree setup
-  build-kernel.sh, build.sh      the two builds
+  build-kernel.sh                mainline 6.12 + the Android config delta
+  build-uboot.sh                 mainline U-Boot + Android boot image support
+  build.sh                       the platform build and the eMMC flash pack
+  build-sdimage.sh               one whole-disk image for Etcher
   verify-aidl-surface.sh         dumps the real method list of declared HALs
   windows/                       the WSL2 orchestrator and the in-distro driver
 docs/                            STATUS, KERNEL, HAL_MIGRATION, WINDOWS, this file

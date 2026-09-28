@@ -794,18 +794,37 @@ function Stage-Sync {
 }
 
 function Stage-Kernel {
-    Write-Stage 'Stage 9/10  Kernel (mainline 6.12)'
+    Write-Stage 'Stage 9/12  Kernel (mainline 6.12)'
     Invoke-InDistro -Command '~/android_khadas/android_manifest/build/windows/provision-wsl.sh kernel'
     Write-Good 'kernel built'
     Set-Done 'Kernel'
 }
 
+function Stage-Uboot {
+    Write-Stage 'Stage 10/12  U-Boot (mainline, Android boot image support)'
+    Write-Info 'the SD card carries its own bootloader, so the eMMC is never touched'
+    Invoke-InDistro -Command '~/android_khadas/android_manifest/build/windows/provision-wsl.sh uboot'
+    Write-Good 'u-boot-rockchip.bin built'
+    Set-Done 'Uboot'
+}
+
+function Stage-SdImage {
+    Write-Stage 'Stage 12/12  SD card image'
+    Write-Info 'one whole-disk image, for Balena Etcher'
+    $rc = Invoke-InDistro -Command '~/android_khadas/android_manifest/build/windows/provision-wsl.sh sdimage' -AllowFailure
+    Write-Info "output: \\wsl.localhost\$($script:DistroName)\home\builder\android_khadas\output"
+    if ($rc -ne 0) {
+        throw "the SD image was not assembled (exit $rc). See sdimage.log in the report."
+    }
+    Write-Good 'SD card image ready'
+    Set-Done 'SdImage'
+}
+
 function Stage-Build {
-    Write-Stage 'Stage 10/10  Platform build and flash pack'
-    Write-Warn2 'This tree is NOT finished: the composer3 and audio.core AIDL'
-    Write-Warn2 'HALs are incomplete, so the build uses AOSP fallbacks and the'
-    Write-Warn2 'resulting image will have no display or audio output. See'
-    Write-Warn2 'docs/STATUS.md. Running this verifies the build, not the ROM.'
+    Write-Stage 'Stage 11/12  Platform build and flash pack'
+    Write-Warn2 'Nothing in this tree has ever been booted. The build completing'
+    Write-Warn2 'says the image is well-formed, not that it works. docs/STATUS.md'
+    Write-Warn2 'lists what is unwired - hardware video decode and Bluetooth.'
     $rc = Invoke-InDistro -Command '~/android_khadas/android_manifest/build/windows/provision-wsl.sh build' -AllowFailure
 
     Write-Info "logs and the flash pack are under the distro's home, reachable"
@@ -858,7 +877,9 @@ $order = @(
     @{ Name='Aidl';      Fn={ Stage-Aidl } }
     @{ Name='Probe';     Fn={ Stage-Probe } }
     @{ Name='Kernel';    Fn={ Stage-Kernel } }
+    @{ Name='Uboot';     Fn={ Stage-Uboot } }
     @{ Name='Build';     Fn={ Stage-Build } }
+    @{ Name='SdImage';   Fn={ Stage-SdImage } }
 )
 
 New-Item -ItemType Directory -Path $Root -Force | Out-Null
@@ -927,7 +948,7 @@ if ($script:DistroReady) {
 # probe from several commits ago - which is how two rounds were spent on module
 # names that a current probe would have settled. They cost minutes against a
 # build that costs hours, so they always run.
-$alwaysRun = @('Aidl', 'Probe')
+$alwaysRun = @('Aidl', 'Probe', 'SdImage')
 
 # A stage is complete only if what it produced is still there. Kernel was marked
 # done by a run in which the dtb staging step had failed, so every run

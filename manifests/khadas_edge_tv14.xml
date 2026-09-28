@@ -97,6 +97,34 @@
            revision="refs/tags/v6.12.111" clone-depth="1" />
 
   <!-- ==================================================================
+       U-Boot: mainline, for a self-booting SD card.
+
+       The board is flashed by writing one whole-disk image to an SD card, so the
+       card has to carry its own bootloader - the RK3399 BootROM looks at the SD
+       card before the eMMC, which is why the eMMC install is left untouched and a
+       card can simply be removed to get the board back.
+
+       khadas-edge-v-rk3399_defconfig is upstream and targets exactly this carrier
+       (CONFIG_DEFAULT_DEVICE_TREE="rockchip/rk3399-khadas-edge-v",
+       CONFIG_BAUDRATE=1500000, which is the console this tree's kernel command line
+       names). What it does not enable is Android boot image support, so
+       build/build-uboot.sh merges a fragment for that; see the script for the boot
+       sequence, which is U-Boot's own documented one from
+       doc/android/boot-image.rst.
+
+       rk3399 needs BL31 and nothing else from rkbin: U-Boot's own TPL does DDR init
+       on this SoC (CONFIG_TPL=y with CONFIG_RAM_ROCKCHIP_LPDDR4=y in the defconfig),
+       so no ROCKCHIP_TPL blob is involved. doc/board/rockchip/rockchip.rst:279-285
+       is the recipe.
+
+       v2026.07 is a release tag rather than master. clone-depth="1" for the same
+       reason as the kernel - the full history is not needed to build a tag.
+       ================================================================== -->
+  <remote name="u-boot" fetch="https://github.com/u-boot/" />
+  <project name="u-boot" path="bootloader/u-boot" remote="u-boot"
+           revision="refs/tags/v2026.07" clone-depth="1" />
+
+  <!-- ==================================================================
        Rockchip blobs that remain.
 
        rkbin carries the two things no RK3399 bootloader can be built without,

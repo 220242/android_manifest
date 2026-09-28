@@ -3,11 +3,14 @@
 A port of the Khadas Edge1 from its Android 10 (`khadas-edge-Qt`) configuration to
 Android TV 14, on a mainline kernel and with no proprietary blobs.
 
-**The build completes.** Every image the flash layout names is produced, and
-`build/build.sh` assembles them into `out/target/product/edge/edge1-flash/` with a
-generated `flash-emmc.sh`. Nothing has been written to the board yet, so nothing here
-is claimed to boot — that is the next step.
-[`docs/STATUS.md`](docs/STATUS.md) has the state in detail.
+**The build completes**, and it produces one whole-disk image for an SD card —
+`edge1-sdcard.img`, written with Balena Etcher. Nothing has been booted yet, so
+nothing here is claimed to work. [`docs/STATUS.md`](docs/STATUS.md) has the state in
+detail.
+
+The card is the install, not the eMMC. The RK3399 BootROM reads the SD card before
+the eMMC, so the card carries its own mainline U-Boot and takes over the boot with
+the eMMC untouched — pull the card out and the board is exactly as it was.
 
 ## The shape of the port
 
@@ -45,8 +48,12 @@ image header v2, no `vendor_boot`), a 96MiB `recovery`, and a 4608MiB `super`
 holding system/system_ext/product/vendor/odm as logical partitions, plus `misc`,
 `vbmeta`, `metadata` and `userdata`. Non-A/B. The layout is
 [`device/khadas/edge/flash/partitions.tsv`](device/khadas/edge/flash/partitions.tsv),
-which `build/build.sh` turns into an ordinary GPT and a `flash-emmc.sh` — not a
-Rockchip `update.img`, which needs the BSP bootloader this path does not use.
+and it is the single source for both the SD card image and the eMMC flash script —
+not a Rockchip `update.img`, which needs the BSP bootloader this path does not use.
+
+**Bootloader.** Mainline U-Boot at `v2026.07`, `khadas-edge-v-rk3399_defconfig` plus
+Android boot image support, with `BL31` from `rkbin`. It sits in the card's raw
+sectors ahead of the first partition.
 
 ## What is here
 
@@ -75,8 +82,10 @@ Directly on a Linux host:
 build/verify-tree.sh                        # static check, needs no AOSP tree
 build/preflight.sh    ~/aosp-14-edge1       # disk, RAM, cores, toolchain, git access
 build/sync.sh         ~/aosp-14-edge1       # AOSP 14 + the mainline kernel
-build/build-kernel.sh ~/aosp-14-edge1       # 6.12.111 + the Android 14 config delta
-build/build.sh        ~/aosp-14-edge1 userdebug
+build/build-kernel.sh  ~/aosp-14-edge1      # 6.12.111 + the Android 14 config delta
+build/build-uboot.sh   ~/aosp-14-edge1      # mainline U-Boot, Android boot support
+build/build.sh         ~/aosp-14-edge1 userdebug
+build/build-sdimage.sh ~/aosp-14-edge1      # one image for Etcher
 ```
 
 The kernel has to be built before `m`: both the `Image` and the dtb are read at

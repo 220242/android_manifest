@@ -25,7 +25,9 @@ That is the next step and the one that matters.
 | `boot.img`, `recovery.img`, `dtb.img`, `vbmeta.img` | build |
 | `system.img`, `vendor.img`, `product.img`, `system_ext.img`, `odm.img` | build |
 | `super.img` | needs `BOARD_BUILD_SUPER_IMAGE_BY_DEFAULT := true` |
-| Flash pack (`edge1-flash/` + generated `flash-emmc.sh`) | assembled, never run |
+| U-Boot (mainline v2026.07 + Android boot image support) | new, never built |
+| SD card image (`edge1-sdcard.img`, for Etcher) | new, never written |
+| Flash pack (`edge1-flash/` + `flash-emmc.sh`, for eMMC) | assembled, never run |
 
 ### The last one: super.img is opt-in
 
@@ -88,33 +90,43 @@ Rockchip's own gralloc did.
 
 ## What is still open
 
-1. **Nothing has been flashed.** Everything below is secondary to that.
-2. **Hardware video decode is not wired up.** `CONFIG_VIDEO_ROCKCHIP_VDEC` is in the
+1. **Nothing has been booted.** Everything below is secondary to that. The install
+   path is now an SD card written with Balena Etcher rather than the eMMC script: the
+   RK3399 BootROM reads the card before the eMMC, so the card boots on its own with
+   the eMMC untouched, and removing it puts the board back. That makes the first
+   attempt reversible, which the eMMC path is not.
+2. **U-Boot and the SD image builder are new and unexercised.** Both are written
+   against the real sources — the boot sequence is U-Boot's own from
+   `doc/android/boot-image.rst`, the Khadas Edge-V defconfig is upstream, and
+   `build-sdimage.sh` was tested end to end against fabricated images with every
+   partition's contents verified at its sector — but no U-Boot has been compiled and
+   no card has been written.
+3. **Hardware video decode is not wired up.** `CONFIG_VIDEO_ROCKCHIP_VDEC` is in the
    kernel and `external/v4l2_codec2` is in the tree, with
    `android.hardware.media.c2@1.2-service-v4l2` available — but it is not in
    `PRODUCT_PACKAGES`, and it needs a codec2 store config and a `media_codecs_c2.xml`
    beside it. Until then the software codecs carry playback: 1080p yes, 4K no.
    6.12's rkvdec is H.264 only in any case (`rkvdec-h264.c` and nothing else), so
    HEVC and VP9 stay in software regardless.
-3. **Bluetooth is unresolved.** uart0 carries the BCM4359 and the DTS has a
+4. **Bluetooth is unresolved.** uart0 carries the BCM4359 and the DTS has a
    `brcm,bcm43438-bt` node. The kernel's `hci_bcm` would claim the port and do the
    firmware patch itself; Android's Bluetooth HAL expects to open the tty and patch
    from userspace with a vendor tool this tree no longer carries. The kernel
    transport is left out of the config so `/dev/ttyS0` stays free until that is
    decided. See `KERNEL.md`.
-4. **The device targets FCM level 7, not 8.** That was forced rather than chosen —
+5. **The device targets FCM level 7, not 8.** That was forced rather than chosen —
    see below — and it is worth knowing when reading anything that says this is an
    Android 14 device: the vendor image's HAL surface is Android-13-era.
-5. **Codec performance numbers are placeholders.** `media/media_codecs_performance.xml`
+6. **Codec performance numbers are placeholders.** `media/media_codecs_performance.xml`
    holds datasheet ceilings, not measurements from this board.
-6. **ART's userfaultfd GC is off, and no longer for the original reason.** It was
+7. **ART's userfaultfd GC is off, and no longer for the original reason.** It was
    off because the 4.19 BSP kernel lacked the feature; 6.12 has all of it, and by
    AOSP's own rule this board qualifies. It stays off for the first boot on purpose
    — a different garbage collector is an untested variable in the one attempt that
    matters, and it would fail inside ART during zygote startup. Flip
    `PRODUCT_ENABLE_UFFD_GC` to `true` once the device boots; it is a memory win on a
    4GB board, not a requirement.
-7. **`kmsro` in `BOARD_GPU_DRIVERS` is confirmed valid but unproven useful.** It is
+8. **`kmsro` in `BOARD_GPU_DRIVERS` is confirmed valid but unproven useful.** It is
    in the driver-name list `external/mesa3d/Android.mk` accepts
    (`kmsro.HAVE_GALLIUM_KMSRO`); whether panfrost on this board needs it is a
    question for the first boot.

@@ -65,7 +65,9 @@ Reach it from Explorer at `\\wsl.localhost\Edge1Build\home\builder\android_khada
 | `Aidl` | Dumps the real AIDL method surface of every HAL this board speaks to `aidl-surface.txt` |
 | `Probe` | Checks the device tree against the synced tree and **stops the run** on anything it can answer in a minute that the build would take hours to reach |
 | `Kernel` | Builds mainline 6.12 LTS with the Android 14 config delta, and stages the board dtb |
-| `Build` | `lunch edge1_tv-trunk_staging-userdebug`, `m`, then the flash pack (images plus a generated `flash-emmc.sh`) |
+| `Uboot` | Builds mainline U-Boot with Android boot image support, so the SD card boots on its own |
+| `Build` | `lunch edge1_tv-trunk_staging-userdebug`, `m`, then the eMMC flash pack |
+| `SdImage` | Assembles one whole-disk image for Balena Etcher and copies it to `android_khadas\output` |
 
 Run one on its own with `-Stage Build`. Re-run a completed stage with `-Force`.
 `Sync` and `Kernel` are un-completed automatically when
@@ -166,10 +168,20 @@ powercfg /change hibernate-timeout-ac 0
 
 ## What you get at the end
 
-`out/target/product/edge/edge1-flash/`: the images plus a generated `flash-emmc.sh`
-that writes a GPT and `dd`s each one into place, to be run on the board from the
-Linux it already boots. `PORTING.md` step 5 has the detail. It has never been run,
-and it erases the eMMC.
+`android_khadas\output\edge1-sdcard.img.gz` — one file, written to an SD card with
+Balena Etcher, which reads `.gz` directly. The raw `.img` is beside it in the tree if
+you want that instead; the compressed copy exists because 7GiB over
+`\\wsl.localhost` is slow.
+
+**The eMMC is not touched.** The RK3399 BootROM reads the SD card before the eMMC, so
+a card with a bootloader in its raw sectors takes over the boot and whatever is
+installed on the eMMC stays there. Pull the card out and the board is back as it was.
+That is why this is the install path and not the flash script.
+
+`out/target/product/edge/edge1-flash/` also exists — the same images plus a generated
+`flash-emmc.sh` that partitions and writes the **eMMC**, from a Linux already running
+on the board. It erases the eMMC, it has never been run, and it is for later.
+`PORTING.md` step 6 has both.
 
 Every HAL in the image is an AOSP one talking to a mainline driver rather than a
 half-ported Rockchip HIDL one:
