@@ -64,10 +64,30 @@ anything is written:
    and no source reachable from here states it. This observation is the first evidence,
    and it points at eMMC-first.
 
-What this does **not** establish: whether the card is written correctly. That is checked
-directly, not inferred — the Rockchip ID block signature at sector 64 is `0x0ff0aa55`,
-so `dd ... skip=64 count=1 | hexdump -C` shows `55 aa f0 0f` in the first four bytes if
-the write landed.
+**The card itself is proven correct**, which the first check nearly got wrong. From the
+board: the GPT is exactly the seven partitions at exactly the right sectors, and
+`chosen/u-boot,version` reads `2022.07-armbian`, so it really is Armbian's bootloader
+running and not ours.
+
+Sector 64 of the card reads as high-entropy noise, and **that is what a correct ID block
+looks like.** `tools/rkcommon.c:340` RC4-encrypts the whole 512-byte header0 with the
+fixed key at `:178-181` — unconditionally; the `spl_rc4 = false` in the rk3399 entry at
+`:150` applies to the SPL payload, not this header. U-Boot verifies it by calling the
+same function again (`:427`, RC4 being symmetric) and only then checking the magic. So
+expecting to see `55 aa f0 0f` in a hexdump was wrong in both directions: a valid block
+never shows it, and garbage looks identical.
+
+`build/rk-idb-check.py` does it properly — decrypt, then check `0x0ff0aa55` — and it
+confirmed the card. It is also wired into `build-images.sh`, which now refuses to build
+an image around a bootloader that does not begin with a valid ID block; both the valid
+and the invalid case are tested. A truncated or wrong `u-boot-rockchip.bin` would
+otherwise be written into all three images and produce a card the BootROM silently walks
+past, with nothing anywhere to say so.
+
+One consequence worth keeping: **a 16MB SPI NOR is present** (`mtd0`, `spi1.0`), and
+`CONFIG_ROCKCHIP_SPI_IMAGE=y` is already in the Edge-V defconfig, so this build already
+produces `u-boot-rockchip-spi.bin`. If the SPI turns out to hold the bootloader that
+wins, the path to replace it exists with no configuration change.
 
 **The change this produced: U-Boot now outputs on HDMI.** Being invisible on a board with
 no UART adapter is what made ten seconds of signal worth so little, and it is fixed in

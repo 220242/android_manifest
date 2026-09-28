@@ -241,6 +241,18 @@ done
 ub_bytes=0
 if [[ -f "$UBOOT" ]]; then
     ub_bytes=$(stat -c %s "$UBOOT")
+    # The blob has to actually start with a Rockchip ID block, or the BootROM will
+    # not look past it. Checked with rk-idb-check.py rather than by eye, because the
+    # block is RC4-scrambled and a correct one is indistinguishable from garbage in
+    # a hexdump - which is exactly how a first hardware attempt got misread.
+    IDB_CHECK="$(dirname "${BASH_SOURCE[0]}")/rk-idb-check.py"
+    if [[ -x "$IDB_CHECK" ]] && command -v python3 >/dev/null 2>&1; then
+        if ! "$IDB_CHECK" "$UBOOT" 0 | sed 's/^/    /'; then
+            echo "u-boot-rockchip.bin does not begin with a valid Rockchip ID block." >&2
+            echo "The BootROM would not recognise it. Rebuild with build-uboot.sh." >&2
+            exit 1
+        fi
+    fi
     # The bootloader has to fit between sector 64 and the first partition, or writing
     # the partitions would overwrite it.
     if (( UBOOT_SEEK_SECTORS * 512 + ub_bytes > FIRST_PART_MIB * 1024 * 1024 )); then
