@@ -162,12 +162,36 @@ BootROM's side — eMMC at `mmc@fe330000`, SD at `mmc@fe320000`. `CONFIG_NVME_PC
 `CONFIG_PCI` are already in the Edge-V defconfig and `CONFIG_CMD_NVME` is
 `default y if NVME`, so the third target costs no configuration at all.
 
+### A/B-ing two bootloaders
+
+```sh
+EDGE1_UBOOT_REV=v2025.07 build/build-uboot.sh ~/aosp-14-edge1
+EDGE1_IMAGE_TAG=v2025.07 build/build-images.sh ~/aosp-14-edge1 sdcard
+```
+
+Two cards, two mainline tags, everything else identical, and the outputs sit side by
+side as `edge1-sdcard.img` and `edge1-sdcard-v2025.07.img`. `repo` owns
+`bootloader/u-boot`, so the next `Sync` resets the checkout — the override is for an
+experiment; pin the tag in the manifest to make it a decision.
+
+Not a Khadas branch, and `STATUS.md` has the measurements: every Edge/RK3399 branch in
+`github.com/khadas/u-boot` is U-Boot 2017.09 with no board defconfig and BSP packaging,
+and the one modern branch differs from upstream by two meaningful config lines, both of
+which are already accounted for here. Their board DTS overlays are byte-identical to
+upstream's.
+
+### What the script refuses, and what it only reports
+
 The script fails rather than building a U-Boot whose Android support silently did not
 take — `CONFIG_CMD_ABOOTIMG` depends on `CONFIG_ANDROID_BOOT_IMAGE`, and losing it
 would present on the board as `Unknown command 'abootimg'` with no log. It also checks
 that all three attempts survived into `.config`: a truncated `bootcmd` would still
 build, still boot the card, and silently never fall through to the eMMC or the SSD,
-which is exactly the case that cannot be tested without the hardware.
+which is exactly the case that cannot be tested without the hardware. Symbols it only
+*expects* — `CONFIG_ROCKCHIP_IODOMAIN` and its `DM_REGULATOR` dependency, which should
+arrive from a Kconfig default — are printed rather than enforced. Failing a working
+build over an expectation that was never asserted is how a green build gets blocked for
+nothing.
 
 ## 6. The three whole-disk images
 

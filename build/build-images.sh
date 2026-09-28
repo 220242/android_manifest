@@ -14,6 +14,12 @@
 #   EDGE1_EMMC_SIZE_MIB   total size of the eMMC image   (default 14400, fits "16GB")
 #   EDGE1_NVME_SIZE_MIB   total size of the NVMe image   (default 14400)
 #   EDGE1_NO_GZIP=1       skip the compressed copies
+#   EDGE1_IMAGE_TAG=x     name the outputs edge1-sdcard-x.img and so on, so two
+#                         variants can sit side by side. Set it when A/B-ing
+#                         bootloaders: EDGE1_UBOOT_REV=v2025.07 build-uboot.sh, then
+#                         EDGE1_IMAGE_TAG=v2025.07 build-images.sh ... sdcard.
+#                         The pipeline never sets it, so the stage's own outputs keep
+#                         their plain names.
 #
 # ---------------------------------------------------------------------------
 # Why three images, and what is actually different between them
@@ -78,11 +84,14 @@ done
 # ---------------------------------------------------------------------------
 # Per-target parameters. Kept in one place so a fourth medium is three lines.
 # ---------------------------------------------------------------------------
+# A tag, if given, goes before the extension rather than after the stem, so the
+# files still sort together and still end in .img.
+readonly TAG="${EDGE1_IMAGE_TAG:+-$EDGE1_IMAGE_TAG}"
 target_file() {
     case "$1" in
-        sdcard) echo "$OUT/edge1-sdcard.img" ;;
-        emmc)   echo "$OUT/edge1-emmc.img" ;;
-        nvme)   echo "$OUT/edge1-nvme.img" ;;
+        sdcard) echo "$OUT/edge1-sdcard${TAG}.img" ;;
+        emmc)   echo "$OUT/edge1-emmc${TAG}.img" ;;
+        nvme)   echo "$OUT/edge1-nvme${TAG}.img" ;;
         *) return 1 ;;
     esac
 }

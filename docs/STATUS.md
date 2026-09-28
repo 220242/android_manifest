@@ -29,8 +29,8 @@ That is the next step and the one that matters.
 | `boot.img`, `recovery.img`, `dtb.img`, `vbmeta.img` | build |
 | `system.img`, `vendor.img`, `product.img`, `system_ext.img`, `odm.img` | build |
 | `super.img` | builds, and raw rather than sparse, so it can be written |
-| U-Boot (mainline v2026.07, Android boot image, card→eMMC→NVMe) | configured and verified; never built to the end |
-| Images: `edge1-sdcard.img`, `edge1-emmc.img`, `edge1-nvme.img` | build and are verified offline; none written to hardware |
+| U-Boot (mainline v2026.07, Android boot image, card→eMMC→NVMe) | **builds**; `u-boot-rockchip.bin` 9.2MB, all three boot targets and the itb placement verified |
+| Images: `edge1-sdcard.img`, `edge1-emmc.img`, `edge1-nvme.img` | **build**, around a real bootloader; none written to hardware |
 | On-device installer (card → eMMC or NVMe) | new; offsets verified against the layout, never run on hardware |
 | Flash pack (`edge1-flash/` + `flash-emmc.sh`, for eMMC) | superseded by the installer, never run |
 
@@ -156,6 +156,54 @@ would stop before there is any console to say so — and the blob would still be
 and the right size. `verify-tree` check 3e keeps the 64 the same in all three files that
 name it, `build-uboot.sh` included, since verifying against one number while writing at
 another would pass and still not boot.
+
+### What the Khadas U-Boot fork has for this board
+
+Nothing, as it turns out, and that is worth recording so it is not re-investigated.
+
+`github.com/khadas/u-boot` has 35 branches. Every one that concerns the Edge or the
+RK3399 is **U-Boot 2017.09** — Rockchip's BSP fork — including branches with 2024 dates
+in their names (`khadas-edges-6.1.y-v1.1.1_20240920` is 2017.09). `khadas-edge2-*` is a
+different SoC: Edge2 is RK3588S.
+
+Two things rule those out as a bootloader for this port:
+
+* **No board defconfig exists in them.** The 2017.09 branches carry only the generic
+  `rk3399_defconfig` and `evb-rk3399_defconfig`. There is no Edge-tuned configuration
+  to mine.
+* **Different packaging.** They build through their own `make.sh` into
+  `idbloader.img` + `uboot.img` + `trust.img` at Rockchip's offsets, needing rkbin's
+  miniloader. That is not the single `u-boot-rockchip.bin` at sector 64 that binman
+  produces and that `flash/partitions.tsv` reserves space for, so substituting one is
+  a second port rather than a swap.
+
+The one modern branch, `khadas-u-boot-v2024.07`, does carry
+`khadas-edge-v-rk3399_defconfig`. Diffed against upstream v2026.07 it comes to three
+lines, and only two are real:
+
+| | |
+|---|---|
+| `CONFIG_SPL_PAD_TO=0x7f8000` | the same value upstream's Kconfig default already gives. **Taken** — pinned in the fragment, because it is half of the `seek=64` arithmetic and pinning it means the check can only fail if the other half moves. |
+| `CONFIG_ROCKCHIP_IODOMAIN=y` | `default y if ROCKCHIP_RK3399` upstream, so it should come for free — but it `depends on DM_REGULATOR`. **Reported** by `build-uboot.sh`, not asserted. |
+| `CONFIG_SYS_RELOC_GD_ENV_ADDR` vs `CONFIG_ENV_RELOC_GD_ENV_ADDR` | a rename between versions. Nothing. |
+
+And their `rk3399-khadas-edge-v-u-boot.dtsi` and `rk3399-khadas-edge-u-boot.dtsi` are
+**byte-identical** to upstream's. Upstream already has everything Khadas has for this
+board.
+
+The IODOMAIN line is the only one with a story. The board DTS carries
+`&io_domains { ... sdmmc-supply = <&vccio_sd>; status = "okay"; }`
+(`dts/upstream/src/arm64/rockchip/rk3399-khadas-edge.dtsi:568-574`) — the SD card's IO
+voltage domain, on a board whose whole install path is an SD card. Which is why
+`build-uboot.sh` now reports it rather than assuming it.
+
+**Building several cards with different bootloaders to try in turn is not the cheap
+experiment it looks like.** Without a serial console a failed boot yields one bit, and
+if every card fails it does not say whether the bootloader, `boot.img`, the dtb or the
+kernel is at fault. The A/B that is worth running is two *mainline* tags, which is
+`EDGE1_UBOOT_REV=v2025.07 build-uboot.sh` plus
+`EDGE1_IMAGE_TAG=v2025.07 build-images.sh ... sdcard` — same packaging, same scripts,
+two files side by side. A console is worth more than any number of variants.
 
 ### Why the installer rather than the eMMC and NVMe images
 

@@ -20,6 +20,38 @@ readonly UB="$TREE/bootloader/u-boot"
 readonly RKBIN="$TREE/rkbin"
 readonly DEFCONFIG=khadas-edge-v-rk3399_defconfig
 
+# ---------------------------------------------------------------------------
+# Building a second bootloader to A/B against, without editing anything.
+#
+#   EDGE1_UBOOT_REV=v2025.07 build/build-uboot.sh ~/aosp-14-edge1
+#   build/build-images.sh ~/aosp-14-edge1 sdcard
+#
+# Two cards, two mainline tags, everything else identical. That is the A/B worth
+# running if the first card does not boot, and it is worth saying why it is this and
+# not a Khadas branch.
+#
+# Every Edge/RK3399 branch in github.com/khadas/u-boot is U-Boot 2017.09 - Rockchip's
+# BSP fork - including the ones with 2024 dates in their names. None of them carries
+# an Edge defconfig at all: only the generic rk3399_defconfig and evb-rk3399_defconfig.
+# They build with their own make.sh into idbloader.img + uboot.img + trust.img at
+# Rockchip's offsets, needing rkbin's miniloader; that is a different raw layout from
+# binman's single u-boot-rockchip.bin at sector 64, so swapping one in is a second
+# port, not a substitution.
+#
+# The one modern branch, khadas-u-boot-v2024.07, does carry
+# khadas-edge-v-rk3399_defconfig - and it differs from upstream by exactly
+# CONFIG_ROCKCHIP_IODOMAIN=y, CONFIG_SPL_PAD_TO=0x7f8000 and a SYS_/ENV_ rename.
+# Its rk3399-khadas-edge-v-u-boot.dtsi and rk3399-khadas-edge-u-boot.dtsi are
+# byte-identical to upstream's. Both of those config lines are accounted for below.
+# There is nothing else in that fork for this board.
+#
+# Caveat: repo owns bootloader/u-boot, so the next Sync resets this checkout. That is
+# the right behaviour - the manifest is the source of truth for what gets built - and
+# it means an override is for an experiment, not for a decision. Pin a different tag
+# in manifests/khadas_edge_tv14.xml to make it one.
+# ---------------------------------------------------------------------------
+readonly UBOOT_REV="${EDGE1_UBOOT_REV:-}"
+
 [[ -d "$UB" ]]    || { echo "no U-Boot at $UB; run sync.sh first" >&2; exit 1; }
 [[ -d "$RKBIN" ]] || { echo "no rkbin at $RKBIN; run sync.sh first" >&2; exit 1; }
 [[ -f "$UB/configs/$DEFCONFIG" ]] || {
@@ -82,6 +114,19 @@ BL31="$(find "$RKBIN" -name 'rk3399_bl31*.elf' 2>/dev/null | sort -V | tail -1)"
 echo "==> BL31: ${BL31#$TREE/}"
 
 cd "$UB"
+if [[ -n "$UBOOT_REV" ]]; then
+    echo "==> EDGE1_UBOOT_REV=$UBOOT_REV: checking out a different U-Boot"
+    git fetch --depth 1 origin "refs/tags/$UBOOT_REV:refs/tags/$UBOOT_REV" 2>/dev/null \
+        || git fetch origin "$UBOOT_REV" 2>/dev/null || true
+    git checkout -q --detach "$UBOOT_REV" 2>/dev/null || {
+        echo "  no such tag or branch in bootloader/u-boot: $UBOOT_REV" >&2
+        echo "  what is there:" >&2
+        git tag | tail -5 | sed 's/^/    /' >&2
+        exit 1; }
+    # The build is otherwise identical, so the only way to tell two cards apart later
+    # is this line and the version printed next. Both go into the stage log.
+    echo "  HEAD is now $(git describe --tags --always)"
+fi
 echo "==> U-Boot $(make -s ubootversion 2>/dev/null || echo '(version unknown)')"
 echo "==> base config: $DEFCONFIG"
 make "CROSS_COMPILE=$CROSS" "$DEFCONFIG"
@@ -170,10 +215,20 @@ readonly FRAGMENT=.config-android-fragment
 # CONFIG_HUSH_PARSER is what makes the fallback possible at all: without it the
 # parser has no && or ||, so the three attempts could not be chained and a missing
 # card would be a dead board rather than the next medium. cmd/Kconfig:14-20.
+#
+# CONFIG_SPL_PAD_TO is pinned rather than left to its Kconfig default, and the value
+# is not ours: it is the one Khadas pins in their own khadas-edge-v-rk3399_defconfig
+# on the khadas-u-boot-v2024.07 branch. It is also what the default already gives
+# (common/spl/Kconfig:91, "default 0x7f8000 if ARCH_ROCKCHIP"), so this changes
+# nothing today - it stops it changing tomorrow. The offset of u-boot.itb inside
+# u-boot-rockchip.bin is exactly this number, so it is half of the seek=64
+# arithmetic checked below; pinning it means the check can only ever fail because
+# the OTHER half moved.
 cat > "$FRAGMENT" <<EOF
 CONFIG_ANDROID_BOOT_IMAGE=y
 CONFIG_CMD_ABOOTIMG=y
 CONFIG_HUSH_PARSER=y
+CONFIG_SPL_PAD_TO=0x7f8000
 CONFIG_USE_BOOTCOMMAND=y
 CONFIG_BOOTCOMMAND="$BOOTCMD"
 EOF
@@ -194,6 +249,11 @@ make "CROSS_COMPILE=$CROSS" olddefconfig >/dev/null
 # silently becomes "Unknown command 'nvme'", which is the same class of failure.
 echo "==> verifying the delta took"
 missing=0
+# Two lists, and the split is the point: this one is what the build ASSERTS, so a
+# missing symbol is fatal. Everything in it is either in the fragment or is a
+# functional dependency of something in the fragment - CONFIG_CMD_NVME and CONFIG_PCI
+# are what make the third boot target exist at all, and without
+# CONFIG_CMD_USB_MASS_STORAGE the documented "ums 0 mmc 0" escape hatch is not there.
 for sym in CONFIG_ANDROID_BOOT_IMAGE CONFIG_CMD_ABOOTIMG CONFIG_HUSH_PARSER \
            CONFIG_USE_BOOTCOMMAND CONFIG_CMD_NVME CONFIG_PCI \
            CONFIG_CMD_USB_MASS_STORAGE; do
@@ -219,6 +279,33 @@ if (( missing )); then
     exit 1
 fi
 echo "  bootcmd tries, in order: SD card (mmc 1), eMMC (mmc 0), NVMe (nvme 0)"
+
+# And this list is what the build EXPECTS: symbols we do not set, whose defaults
+# should give us what we want. They are reported, never fatal - failing a working
+# build over an expectation that was never asserted is how a green build gets
+# blocked for nothing.
+#
+# CONFIG_ROCKCHIP_IODOMAIN is here because of where the Khadas fork differs from
+# upstream. drivers/misc/Kconfig:114-125 makes it "default y if ROCKCHIP_RK3399", so
+# it should come for free - but it "depends on DM_REGULATOR", and a dependency that
+# goes away takes the default with it in silence, which is the same shape as the
+# kernel's DWMAC_ROCKCHIP being demoted to m because its tristate parent was m.
+#
+# It matters more than the name suggests. The board DTS carries
+#
+#   &io_domains { ... sdmmc-supply = <&vccio_sd>; status = "okay"; };
+#
+# (dts/upstream/src/arm64/rockchip/rk3399-khadas-edge.dtsi:568-574) - the SD card's
+# IO voltage domain, on a board whose whole install path is an SD card. Khadas name
+# it explicitly in their own khadas-edge-v-rk3399_defconfig; upstream leaves it to
+# the default. Reporting it is how we find out which of those is true here.
+for sym in CONFIG_ROCKCHIP_IODOMAIN CONFIG_DM_REGULATOR CONFIG_SPL_ROCKCHIP_IODOMAIN; do
+    if grep -qx "${sym}=y" .config; then
+        printf '  %-34s y\n' "$sym"
+    else
+        printf '  %-34s not set (expected from a Kconfig default; see the comment above)\n' "$sym"
+    fi
+done
 
 # ---------------------------------------------------------------------------
 # u-boot.itb has to land on the sector SPL reads it from.
