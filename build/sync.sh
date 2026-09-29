@@ -8,7 +8,9 @@
 #
 set -euo pipefail
 
-readonly TREE="${1:-$HOME/aosp-14-edge1}"
+# shellcheck source=build/lib-tree.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib-tree.sh"
+readonly TREE="${1:-$(edge1_default_tree)}"
 # Verified to exist: the android-14.0.0_r* series runs r1..r75, confirmed by
 # listing aosp-mirror/platform_manifest (a GitHub mirror of the AOSP manifest)
 # because android.googlesource.com was unreachable from the authoring

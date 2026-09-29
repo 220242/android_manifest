@@ -10,7 +10,9 @@
 #
 set -euo pipefail
 
-readonly TREE="${1:-$HOME/aosp-14-edge1}"
+# shellcheck source=build/lib-tree.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib-tree.sh"
+readonly TREE="${1:-$(edge1_default_tree)}"
 readonly VARIANT="${2:-userdebug}"
 # Android 14's lunch takes <product>-<release>-<variant> and rejects anything
 # else outright:

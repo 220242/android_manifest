@@ -63,7 +63,7 @@ package to a script that a completed stage no longer runs is how `swig` came to 
 ## 2. Sync
 
 ```sh
-build/sync.sh ~/aosp-14-edge1 android-14.0.0_r75
+build/sync.sh '' android-14.0.0_r75
 ```
 
 This does `repo init` against **upstream AOSP**, applies
@@ -88,7 +88,7 @@ fetched for nothing.
 ## 3. Kernel
 
 ```sh
-build/build-kernel.sh ~/aosp-14-edge1
+build/build-kernel.sh
 ```
 
 `arm64 defconfig` plus `device/khadas/edge/kernel/edge1_mainline.config`, merged with
@@ -106,7 +106,7 @@ no bootloader is not worth producing.
 ## 4. Platform
 
 ```sh
-build/build.sh ~/aosp-14-edge1 userdebug
+build/build.sh '' userdebug
 ```
 
 Which is `source build/envsetup.sh; lunch edge1_tv-trunk_staging-userdebug; m -jN`,
@@ -128,7 +128,7 @@ Three details in that line were each wrong once:
 ## 5. Bootloader
 
 ```sh
-build/build-uboot.sh ~/aosp-14-edge1
+build/build-uboot.sh
 ```
 
 Mainline U-Boot, `khadas-edge-v-rk3399_defconfig`, plus a five-symbol fragment that
@@ -165,14 +165,29 @@ BootROM's side — eMMC at `mmc@fe330000`, SD at `mmc@fe320000`. `CONFIG_NVME_PC
 ### A/B-ing two bootloaders
 
 ```sh
-EDGE1_UBOOT_REV=v2025.07 build/build-uboot.sh ~/aosp-14-edge1
-EDGE1_IMAGE_TAG=v2025.07 build/build-images.sh ~/aosp-14-edge1 sdcard
+EDGE1_UBOOT_REV=v2025.10 build/build-uboot.sh
+EDGE1_IMAGE_TAG=u2510 build/build-images.sh '' sdcard
 ```
 
 Two cards, two mainline tags, everything else identical, and the outputs sit side by
-side as `edge1-sdcard.img` and `edge1-sdcard-v2025.07.img`. `repo` owns
+side as `edge1-sdcard.img` and `edge1-sdcard-u2510.img`. `repo` owns
 `bootloader/u-boot`, so the next `Sync` resets the checkout — the override is for an
 experiment; pin the tag in the manifest to make it a decision.
+
+`v2025.10` and not another tag, because it is the only U-Boot known to boot **this**
+board from an SD card: the OpenWrt card the owner built for this Edge-V wins over the
+eMMC every time, and its bootloader is 2025.10 with this same defconfig.
+`build/reference/openwrt-u-boot-2025.10/` holds those binaries and the `.config` they
+were built from, and [`HARDWARE.md`](HARDWARE.md) has the symbol-by-symbol comparison —
+fifteen differences, eleven of them the Android delta, and four load addresses that
+v2026.07 moved.
+
+That directory also supports the other half of the A/B: `EDGE1_UBOOT_IDB` and
+`EDGE1_UBOOT_ITB` make `build-images.sh` write an externally supplied `idbloader.img`
+and `u-boot.itb` at sectors 64 and 16384 instead of `u-boot-rockchip.bin` — the
+two-file form Armbian and OpenWrt both use. A card with a bootloader known to boot this
+board and our own partitions separates "the BootROM does not run this card" from
+"the BootROM runs it and our U-Boot is at fault", which nothing else does.
 
 Not a Khadas branch, and `STATUS.md` has the measurements: every Edge/RK3399 branch in
 `github.com/khadas/u-boot` is U-Boot 2017.09 with no board defconfig and BSP packaging,
@@ -196,8 +211,8 @@ nothing.
 ## 6. The three whole-disk images
 
 ```sh
-build/build-images.sh ~/aosp-14-edge1               # all three
-build/build-images.sh ~/aosp-14-edge1 sdcard        # just the card
+build/build-images.sh                # all three
+build/build-images.sh '' sdcard      # just the card
 ```
 
 | Image | Size | Bootloader | Written by |

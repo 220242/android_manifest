@@ -53,7 +53,7 @@ gunzip -kf "$R"/idbloader.img.gz "$R"/u-boot.itb.gz
 EDGE1_UBOOT_IDB="$R/idbloader.img" \
 EDGE1_UBOOT_ITB="$R/u-boot.itb" \
 EDGE1_IMAGE_TAG=owboot \
-  build/build-images.sh ~/aosp-14-edge1 sdcard
+  build/build-images.sh '' sdcard
 ```
 
 The result is `edge1-sdcard-owboot.img`, identical to the normal card except for the

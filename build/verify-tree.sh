@@ -13,6 +13,9 @@
 #
 set -uo pipefail
 
+# shellcheck source=build/lib-tree.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib-tree.sh"
+
 readonly ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly DEV="$ROOT/device/khadas/edge"
 errors=0
@@ -179,7 +182,7 @@ else
     # The real Image if one has been built - EDGE1_TREE points at the AOSP tree.
     image=""
     for cand in "${EDGE1_TREE:-}/kernel/mainline/out/arch/arm64/boot/Image" \
-                "$HOME/aosp-14-edge1/kernel/mainline/out/arch/arm64/boot/Image"; do
+                "$(edge1_default_tree)/kernel/mainline/out/arch/arm64/boot/Image"; do
         [[ -f "$cand" ]] && { image="$cand"; break; }
     done
     if [[ -n "$image" ]]; then

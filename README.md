@@ -97,14 +97,20 @@ powershell -ExecutionPolicy Bypass -File .\android_manifest\build\windows\Start-
 Directly on a Linux host:
 
 ```sh
-build/verify-tree.sh                        # static check, needs no AOSP tree
-build/preflight.sh    ~/aosp-14-edge1       # disk, RAM, cores, toolchain, git access
-build/sync.sh         ~/aosp-14-edge1       # AOSP 14 + the mainline kernel
-build/build-kernel.sh  ~/aosp-14-edge1      # 6.12.111 + the Android 14 config delta
-build/build-uboot.sh   ~/aosp-14-edge1      # mainline U-Boot, Android boot support
-build/build.sh         ~/aosp-14-edge1 userdebug
-build/build-images.sh  ~/aosp-14-edge1      # the three whole-disk images
+build/verify-tree.sh       # static check, needs no AOSP tree
+build/preflight.sh         # disk, RAM, cores, toolchain, git access
+build/sync.sh              # AOSP 14 + the mainline kernel
+build/build-kernel.sh      # 6.12.111 + the Android 14 config delta
+build/build-uboot.sh       # mainline U-Boot, Android boot support
+build/build.sh userdebug
+build/build-images.sh      # the three whole-disk images
 ```
+
+Each takes the tree as an optional first argument and otherwise finds it:
+`~/android_khadas/aosp-14-edge1`, which is where the Windows pipeline puts it, then
+`~/aosp-14-edge1` for a tree laid out by hand (`build/lib-tree.sh`). Naming the wrong
+one presents as `run sync.sh first` on a tree that is fully synced and built, which is
+why it is resolved rather than assumed.
 
 Then, once the card boots, to move it onto internal storage:
 

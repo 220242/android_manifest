@@ -17,7 +17,9 @@
 # with a current toolchain and Android packs the dtb into boot.img.
 set -euo pipefail
 
-readonly TREE="${1:-$HOME/aosp-14-edge1}"
+# shellcheck source=build/lib-tree.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib-tree.sh"
+readonly TREE="${1:-$(edge1_default_tree)}"
 readonly KERNEL="$TREE/kernel/mainline"
 readonly DEVICE_DIR="$TREE/device/khadas/edge"
 readonly FRAGMENT="$DEVICE_DIR/kernel/edge1_mainline.config"

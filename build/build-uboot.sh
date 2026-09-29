@@ -15,7 +15,9 @@
 # never touched and removing the card restores the board exactly.
 set -euo pipefail
 
-readonly TREE="${1:-$HOME/aosp-14-edge1}"
+# shellcheck source=build/lib-tree.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib-tree.sh"
+readonly TREE="${1:-$(edge1_default_tree)}"
 readonly UB="$TREE/bootloader/u-boot"
 readonly RKBIN="$TREE/rkbin"
 readonly DEFCONFIG=khadas-edge-v-rk3399_defconfig
@@ -23,8 +25,8 @@ readonly DEFCONFIG=khadas-edge-v-rk3399_defconfig
 # ---------------------------------------------------------------------------
 # Building a second bootloader to A/B against, without editing anything.
 #
-#   EDGE1_UBOOT_REV=v2025.10 build/build-uboot.sh ~/aosp-14-edge1
-#   EDGE1_IMAGE_TAG=u2510 build/build-images.sh ~/aosp-14-edge1 sdcard
+#   EDGE1_UBOOT_REV=v2025.10 build/build-uboot.sh
+#   EDGE1_IMAGE_TAG=u2510 build/build-images.sh '' sdcard
 #
 # Two cards, two mainline tags, everything else identical.
 #
@@ -70,8 +72,8 @@ readonly UBOOT_REV="${EDGE1_UBOOT_REV:-}"
 # ---------------------------------------------------------------------------
 # EDGE1_ROCKCHIP_TPL=1 - use Rockchip's DDR blob instead of U-Boot's own TPL.
 #
-#   EDGE1_ROCKCHIP_TPL=1 build/build-uboot.sh ~/aosp-14-edge1
-#   EDGE1_IMAGE_TAG=rkddr build/build-images.sh ~/aosp-14-edge1 sdcard
+#   EDGE1_ROCKCHIP_TPL=1 build/build-uboot.sh
+#   EDGE1_IMAGE_TAG=rkddr build/build-images.sh '' sdcard
 #
 # This was the A/B for "our TPL cannot bring up this board's LPDDR4". It has been run,
 # on hardware, one card each way - and both cards behaved identically, so DDR init is

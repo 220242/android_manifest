@@ -62,7 +62,9 @@
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
-readonly TREE="${1:-$HOME/aosp-14-edge1}"
+# shellcheck source=build/lib-tree.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib-tree.sh"
+readonly TREE="${1:-$(edge1_default_tree)}"
 shift || true
 readonly OUT="$TREE/out/target/product/edge"
 readonly LAYOUT="$TREE/device/khadas/edge/flash/partitions.tsv"

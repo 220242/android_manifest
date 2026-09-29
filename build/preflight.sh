@@ -11,6 +11,9 @@
 
 set -uo pipefail
 
+# shellcheck source=build/lib-tree.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib-tree.sh"
+
 # --- Requirements -------------------------------------------------------------
 # Disk is three requirements, not one, because what is still needed depends on
 # what is already on the filesystem. The checkout is ~120GiB and the output tree
@@ -51,11 +54,17 @@ echo
 readonly TREE_DIR="${1:-$PWD}"
 
 # Which of the three requirements applies. The caller passes the parent directory
-# (provision-wsl.sh passes $WORK), so the checkout is looked for both there and at
-# the conventional path under it; a second argument names it outright.
+# (provision-wsl.sh passes $WORK), so the checkout is looked for both there and at the
+# conventional path under it; a second argument names it outright, and failing all of
+# those, wherever lib-tree.sh finds it.
+#
+# First match wins, so an explicit argument beats a guess. The last candidate is what
+# makes `build/preflight.sh` with no arguments correct from a checkout of this repo:
+# without it, $PWD holds no .repo, the strictest requirement applies, and a host that
+# has already synced and built gets told it needs 250GiB.
 aosp=
-for c in "${2:-}" "$TREE_DIR" "$TREE_DIR/aosp-14-edge1"; do
-    [[ -n "$c" && -d "$c/.repo" ]] && aosp="$c"
+for c in "${2:-}" "$TREE_DIR" "$TREE_DIR/aosp-14-edge1" "$(edge1_default_tree)"; do
+    if [[ -n "$c" && -d "$c/.repo" ]]; then aosp="$c"; break; fi
 done
 if [[ -z "$aosp" ]]; then
     disk_need=$DISK_MIN_GIB; disk_rec=$DISK_REC_GIB
