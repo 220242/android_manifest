@@ -14,6 +14,12 @@
 #   EDGE1_EMMC_SIZE_MIB   total size of the eMMC image   (default 14400, fits "16GB")
 #   EDGE1_NVME_SIZE_MIB   total size of the NVMe image   (default 14400)
 #   EDGE1_NO_GZIP=1       skip the compressed copies
+#   EDGE1_UBOOT_IDB=path  write this idbloader.img at sector 64 and this u-boot.itb
+#   EDGE1_UBOOT_ITB=path  at sector 16384, instead of u-boot-rockchip.bin. Both or
+#                         neither. For A/B-ing against a bootloader known to boot this
+#                         board - see build/reference/openwrt-u-boot-2025.10/README.md.
+#                         It is the same two sectors: u-boot-rockchip.bin is just those
+#                         two pieces already glued together with the pad between them.
 #   EDGE1_IMAGE_TAG=x     name the outputs edge1-sdcard-x.img and so on, so two
 #                         variants can sit side by side. Set it when A/B-ing
 #                         bootloaders: EDGE1_UBOOT_REV=v2025.07 build-uboot.sh, then
@@ -67,10 +73,42 @@ readonly UBOOT="$TREE/bootloader/u-boot/u-boot-rockchip.bin"
 # everything below 16MiB free for it. doc/board/rockchip/rockchip.rst:346 is where
 # seek=64 comes from.
 readonly UBOOT_SEEK_SECTORS=64
+# Where SPL reads u-boot.itb from: CONFIG_SYS_MMCSD_RAW_MODE_U_BOOT_SECTOR, 0x4000.
+# u-boot-rockchip.bin already has the FIT at this sector once written at 64, because
+# binman pads to CONFIG_SPL_PAD_TO - build-uboot.sh checks that arithmetic. The number
+# is needed here too for the two-file form below, which is how Armbian and OpenWrt both
+# write this board (rockchip64_common.inc, write_uboot_platform).
+readonly UBOOT_ITB_SECTOR=16384
 readonly FIRST_PART_MIB=16
 # 1MiB at the end for the secondary GPT, which sgdisk writes at the very last
 # sectors of the image.
 readonly GPT_TAIL_MIB=1
+
+# ---------------------------------------------------------------------------
+# An externally supplied bootloader, for A/B against one that is known to work.
+#
+# Three cards built from this tree have failed the same way - the board boots the
+# Armbian on its eMMC - and from the outside two very different faults look identical:
+# the BootROM never running the card's first stage, or SPL running and then loading
+# u-boot.itb off the eMMC. Writing someone else's known-good bootloader to the same
+# two sectors separates them in one card write, which no amount of reading our own
+# config can do.
+#
+# Both variables or neither: a valid ID block without a FIT at sector 16384 is the one
+# combination that produces a board which stops with no console and no clue.
+# ---------------------------------------------------------------------------
+readonly EXT_IDB="${EDGE1_UBOOT_IDB:-}"
+readonly EXT_ITB="${EDGE1_UBOOT_ITB:-}"
+if [[ -n "$EXT_IDB$EXT_ITB" ]]; then
+    [[ -n "$EXT_IDB" && -n "$EXT_ITB" ]] || {
+        echo "EDGE1_UBOOT_IDB and EDGE1_UBOOT_ITB go together; only one was set." >&2
+        echo "  idbloader: ${EXT_IDB:-<unset>}" >&2
+        echo "  u-boot.itb: ${EXT_ITB:-<unset>}" >&2
+        exit 1; }
+    for f in "$EXT_IDB" "$EXT_ITB"; do
+        [[ -f "$f" ]] || { echo "no such file: $f" >&2; exit 1; }
+    done
+fi
 
 TARGETS=("$@")
 (( ${#TARGETS[@]} )) || TARGETS=(sdcard emmc nvme)
@@ -117,10 +155,11 @@ for t in "${TARGETS[@]}"; do
         echo "unknown target '$t'; known: sdcard emmc nvme" >&2; exit 1; }
 done
 
-# A bootloader is needed if any requested target wants one.
+# A bootloader is needed if any requested target wants one. The external pair
+# satisfies that requirement on its own - that is the whole point of it.
 need_uboot=1
 for t in "${TARGETS[@]}"; do target_wants_bootloader "$t" && need_uboot=0; done
-if (( need_uboot == 0 )) && [[ ! -f "$UBOOT" ]]; then
+if (( need_uboot == 0 )) && [[ -z "$EXT_IDB" ]] && [[ ! -f "$UBOOT" ]]; then
     echo "no bootloader at $UBOOT" >&2
     echo >&2
     echo "Run build/build-uboot.sh first. Without it these images would be written" >&2
@@ -238,21 +277,56 @@ for i in "${!NAMES[@]}"; do
     fi
 done
 
+# ---------------------------------------------------------------------------
+# Check the bootloader before writing it, in whichever form it came.
+#
+# ub_bytes is what has to fit between sector 64 and the first partition. For the
+# single blob that is its whole length, pad included. For the pair it is the second
+# piece's end, because the pad between them is not a file - the ID block sits at 64
+# and the FIT at 16384, so the last byte written is at 16384*512 + size(itb).
+# ---------------------------------------------------------------------------
 ub_bytes=0
-if [[ -f "$UBOOT" ]]; then
-    ub_bytes=$(stat -c %s "$UBOOT")
-    # The blob has to actually start with a Rockchip ID block, or the BootROM will
-    # not look past it. Checked with rk-idb-check.py rather than by eye, because the
-    # block is RC4-scrambled and a correct one is indistinguishable from garbage in
-    # a hexdump - which is exactly how a first hardware attempt got misread.
-    IDB_CHECK="$(dirname "${BASH_SOURCE[0]}")/rk-idb-check.py"
-    if [[ -x "$IDB_CHECK" ]] && command -v python3 >/dev/null 2>&1; then
-        if ! "$IDB_CHECK" "$UBOOT" 0 | sed 's/^/    /'; then
-            echo "u-boot-rockchip.bin does not begin with a valid Rockchip ID block." >&2
-            echo "The BootROM would not recognise it. Rebuild with build-uboot.sh." >&2
-            exit 1
-        fi
+idb_valid() {
+    # The ID block is RC4-scrambled, so a correct one is indistinguishable from
+    # garbage in a hexdump - which is how a first hardware attempt got misread.
+    # rk-idb-check.py decrypts it and checks the magic.
+    local blob="$1" check
+    check="$(dirname "${BASH_SOURCE[0]}")/rk-idb-check.py"
+    [[ -x "$check" ]] && command -v python3 >/dev/null 2>&1 || return 0
+    "$check" "$blob" 0 | sed 's/^/    /'
+}
+if [[ -n "$EXT_IDB" ]]; then
+    echo "==> external bootloader, written as two pieces at sectors $UBOOT_SEEK_SECTORS and $UBOOT_ITB_SECTOR"
+    echo "    idbloader: $EXT_IDB"
+    echo "    u-boot.itb: $EXT_ITB"
+    idb_valid "$EXT_IDB" || {
+        echo "$EXT_IDB does not begin with a valid Rockchip ID block; the BootROM" >&2
+        echo "would not recognise it." >&2
+        exit 1; }
+    itb_magic="$(od -An -tx1 -N4 -- "$EXT_ITB" 2>/dev/null | tr -d ' \n')"
+    [[ "$itb_magic" == "d00dfeed" ]] || {
+        echo "$EXT_ITB is not a FIT (first 4 bytes '${itb_magic:-nothing}', expected" >&2
+        echo "d00dfeed). SPL reads u-boot.itb from sector $UBOOT_ITB_SECTOR and would find" >&2
+        echo "nothing usable there." >&2
+        exit 1; }
+    idb_bytes=$(stat -c %s "$EXT_IDB")
+    itb_bytes=$(stat -c %s "$EXT_ITB")
+    printf '    u-boot.itb: FIT magic at offset 0, %s bytes at sector %d\n' \
+           "$itb_bytes" "$UBOOT_ITB_SECTOR"
+    # The idbloader must not run into the FIT, and the FIT must not run into the
+    # first partition. Both are silent failures on the board.
+    if (( UBOOT_SEEK_SECTORS * 512 + idb_bytes > UBOOT_ITB_SECTOR * 512 )); then
+        echo "the idbloader is $idb_bytes bytes and would overlap u-boot.itb at sector" >&2
+        echo "$UBOOT_ITB_SECTOR." >&2
+        exit 1
     fi
+    ub_bytes=$(( UBOOT_ITB_SECTOR * 512 + itb_bytes - UBOOT_SEEK_SECTORS * 512 ))
+elif [[ -f "$UBOOT" ]]; then
+    ub_bytes=$(stat -c %s "$UBOOT")
+    idb_valid "$UBOOT" || {
+        echo "u-boot-rockchip.bin does not begin with a valid Rockchip ID block." >&2
+        echo "The BootROM would not recognise it. Rebuild with build-uboot.sh." >&2
+        exit 1; }
 
     # And the second stage, which until now was only ever arithmetic.
     #
@@ -318,7 +392,12 @@ build_target() {
     echo "=========================================================================="
     echo "==> total:      ${size_mib}MiB"
     if target_wants_bootloader "$target"; then
-        echo "==> bootloader: ${ub_bytes} bytes at sector ${UBOOT_SEEK_SECTORS}"
+        if [[ -n "$EXT_IDB" ]]; then
+            echo "==> bootloader: EXTERNAL - $(basename "$EXT_IDB") + $(basename "$EXT_ITB")"
+            echo "                this is not the U-Boot this tree builds"
+        else
+            echo "==> bootloader: ${ub_bytes} bytes at sector ${UBOOT_SEEK_SECTORS}"
+        fi
     else
         echo "==> bootloader: none - the RK3399 BootROM cannot boot from PCIe, so"
         echo "                U-Boot stays on the eMMC or the card"
@@ -346,9 +425,17 @@ build_target() {
     done
 
     if target_wants_bootloader "$target"; then
-        echo "==> bootloader at sector $UBOOT_SEEK_SECTORS"
-        dd if="$UBOOT" of="$img" bs=512 seek="$UBOOT_SEEK_SECTORS" \
-           conv=notrunc,fsync status=none
+        if [[ -n "$EXT_IDB" ]]; then
+            echo "==> bootloader at sectors $UBOOT_SEEK_SECTORS and $UBOOT_ITB_SECTOR (external pair)"
+            dd if="$EXT_IDB" of="$img" bs=512 seek="$UBOOT_SEEK_SECTORS" \
+               conv=notrunc,fsync status=none
+            dd if="$EXT_ITB" of="$img" bs=512 seek="$UBOOT_ITB_SECTOR" \
+               conv=notrunc,fsync status=none
+        else
+            echo "==> bootloader at sector $UBOOT_SEEK_SECTORS"
+            dd if="$UBOOT" of="$img" bs=512 seek="$UBOOT_SEEK_SECTORS" \
+               conv=notrunc,fsync status=none
+        fi
     fi
 
     echo "==> partition contents"

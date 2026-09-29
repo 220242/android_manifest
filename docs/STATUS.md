@@ -86,9 +86,34 @@ after the other in the same boot, each sufficient on its own:
   Armbian loads, which our `bootcmd` never does and Armbian's `boot_targets` always
   does.
 
-Neither fix touches the eMMC; the destructive option of clearing its sector 16384 is
-no longer needed. [`HARDWARE.md`](HARDWARE.md) has the readings, the measured config
-values and the citations.
+Neither fix touches the eMMC. **Both were built and neither booted the card** — the
+log shows the reordered boot order and `env/nowhere.o`, and the board still reports
+`u-boot,version = 2022.07-armbian`. They stay in: each would have bitten the moment the
+other was fixed, and ruling them out is what narrowed the rest.
+
+What narrowed it much further is a known-good reference. The board's owner built OpenWrt
+for this same Edge-V earlier and **that card wins over the eMMC every time**; its
+bootloader now lives in `build/reference/openwrt-u-boot-2025.10/` with the `.config` it
+was built from. Compared against ours: the ID block is structurally identical
+(`init_offset` 4, `init_size` 136, `init_boot_size` 368 vs our 376), the sectors are
+identical, the FIT has the same shape and also has no `tee` image — and only fifteen
+config symbols differ, eleven of them ours. The four that are not ours are the load
+addresses v2026.07 moved: `CONFIG_TEXT_BASE` 0x00200000 -> 0x00800000 and
+`CONFIG_SPL_LOAD_FIT_ADDRESS` 0x0 -> 0x00200000, with `SYS_BOOTM_LEN` and
+`LNX_KRNL_IMG_TEXT_OFFSET_BASE` following.
+
+The comparison also settles two things: the working OpenWrt build has
+`CONFIG_ENV_IS_IN_MMC=y` with device index 0, so there is no valid environment at eMMC
+sector 8128 on this board; and it does not touch `u-boot,spl-boot-order` and still wins,
+so `same-as-spl` does resolve here. Both of our fixes were therefore correct and neither
+was load-bearing.
+
+Two cards separate what is left: `EDGE1_UBOOT_REV=v2025.10` (the one version known to
+boot this board), and OpenWrt's own bootloader written at the same two sectors via
+`EDGE1_UBOOT_IDB`/`EDGE1_UBOOT_ITB`. The second cannot fail to inform - if `U-Boot
+2025.10` reaches HDMI, the BootROM boots this card layout and the fault is in our
+U-Boot; if it does not, the BootROM is not reading the card at all and the path forward
+is the SPI NOR or the eMMC. [`HARDWARE.md`](HARDWARE.md) has every reading and citation.
 
 **The card itself is proven correct**, which the first check nearly got wrong. From the
 board: the GPT is exactly the seven partitions at exactly the right sectors, and

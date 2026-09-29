@@ -90,13 +90,19 @@ So Armbian's 2022.07 built its `idbloader.img` from one concatenated file and go
 placeholder; ours uses binman's `multiple-data-files` (TPL and SPL separately) and gets
 the real size. Ours is the more precise of the two.
 
-## Why the card lost to the eMMC, and the two fixes
+## Two real defects, found and fixed — and neither was the blocker
 
 Both DDR variants were tested — U-Boot's own TPL and rkbin's 933MHz blob, one card
 each — and **both boot Armbian from the eMMC**. That eliminates chain (A), DDR init:
 if DRAM were the problem, the rkbin blob would have changed the outcome, and it
-changed nothing. Two defects remain, and they sit one after the other in the same
-boot. Each one alone is enough to give exactly what the board does.
+changed nothing.
+
+Reading the config then turned up two genuine defects, either of which was enough on
+its own to produce exactly what the board does. Both are fixed. **Neither turned out
+to be the blocker** — see "Both fixes were built and neither booted the card" below,
+and the comparison against a working U-Boot after it. They are written up in full
+anyway, because each would have bitten the moment the other was fixed, and because
+what they rule out is now part of the evidence.
 
 ### 1. SPL loads `u-boot.itb` from the eMMC
 
@@ -196,18 +202,108 @@ is out, and pulling the card still puts the board back exactly as it was. The
 destructive option — backing up the eMMC's first 16MiB and clearing sector 16384 so
 it offers no competing `u-boot.itb` — is no longer needed and has not been done.
 
-### What to look for next
+### Both fixes were built and neither booted the card
 
-`U-Boot 2026.07` on the HDMI console. If the screen is still blank and Armbian still
-boots, the one measurement that separates "our SPL still chose the eMMC" from
-"our U-Boot ran and something else went wrong" is to read, **with the card inserted**:
+Card written from `2f89b3c`, with `==> SPL boot order: "same-as-spl", &sdmmc, &sdhci`
+and `environment: compiled in (ENV_IS_NOWHERE)` in the build log, and `env/nowhere.o`
+compiled instead of `env/mmc.o`. Screen blank, Armbian boots, and with that card in
+the slot:
 
-```sh
-cat /proc/device-tree/chosen/u-boot,version
+```
+# cat /proc/device-tree/chosen/u-boot,version
+2022.07-armbian-2022.07-Se092-P621f-H5921-V2588-Bb703-R448a
 ```
 
-`2026.07` means our U-Boot proper ran and the remaining fault is in `bootcmd`.
-`2022.07-armbian` means SPL is still loading the eMMC's `u-boot.itb`.
+So Armbian's U-Boot still did the kernel handoff. Both fixes are right and neither was
+the blocker. What they did do is narrow it, because the card is now first in SPL's
+search order and our environment cannot be replaced — so whatever is wrong is *upstream*
+of SPL's choice of device.
+
+## Compared against a U-Boot that does boot this board
+
+The board's owner built OpenWrt for this same Edge-V earlier, and **that card wins over
+the eMMC every time**. Its bootloader is in the tree at
+`build/reference/openwrt-u-boot-2025.10/`, with the `.config` it was built from. That is
+the single most valuable artifact in this whole exercise: a known-good answer for this
+exact board.
+
+### The ID block is structurally identical
+
+| | init_offset | init_size | init_boot_size |
+|---|---|---|---|
+| OpenWrt (boots) | 4 blocks | 136 blocks | 368 blocks |
+| ours | 4 blocks | 136 blocks | 376 blocks |
+
+`init_offset` and `init_size` match exactly; `init_boot_size` differs by 8 blocks, which
+is just our SPL being 4KB larger. The BootROM sees the same thing either way.
+
+### The sectors are identical
+
+OpenWrt writes `idbloader.img` at sector 64 and `u-boot.itb` at sector 16384. So does
+Armbian (`rockchip64_common.inc`, `write_uboot_platform`). Our `u-boot-rockchip.bin` is
+those two pieces already glued together with the pad between them — binman puts the FIT
+at `CONFIG_SPL_PAD_TO` = 0x7f8000 = 16320 sectors, written at 64, so 64 + 16320 = 16384.
+`build-images.sh` reads the `0xd00dfeed` back out of the blob at that offset rather than
+trusting the arithmetic.
+
+### The FIT is the same shape
+
+Dumping OpenWrt's `u-boot.itb`: `u-boot` at 0x200000, `atf-1`..`atf-5` (BL31 split into
+segments, the last two landing in SRAM at 0xff8c0000 and 0xff8c2000), `fdt-1`, and
+`config-1` with `firmware = "atf-1"` and `loadables = u-boot atf-2 atf-3 atf-4 atf-5`.
+**No `tee` image at all** — so the `missing optional external blobs ... tee-os` warning
+binman prints on our build is exactly what a working build looks like, and not a fault.
+
+One useful side effect of reading that FIT: `atf-4` loads 0x2000 bytes at **0xff8c0000**,
+which is `CFG_IRAM_BASE`. So BL31 overwrites the BootROM's boot-source id at
+`CFG_IRAM_BASE + 0x10` before Linux ever runs, and reading that address from Linux
+cannot tell us which device the board booted from.
+
+### Only fifteen config symbols differ, and eleven are ours
+
+Normalising both `.config` files and comparing the symbols present in both:
+
+| symbol | OpenWrt 2025.10 (boots) | ours 2026.07 |
+|---|---|---|
+| `CONFIG_TEXT_BASE` | `0x00200000` | `0x00800000` |
+| `CONFIG_SYS_UBOOT_START` | `0x00200000` | `0x00800000` |
+| `CONFIG_LNX_KRNL_IMG_TEXT_OFFSET_BASE` | `0x00200000` | `0x00800000` |
+| `CONFIG_SPL_LOAD_FIT_ADDRESS` | `0x0` | `0x00200000` |
+| `CONFIG_SYS_BOOTM_LEN` | `0x4000000` | `0x8000000` |
+| `CONFIG_SYS_CONSOLE_IS_IN_ENV` | `y` | `n` |
+| `CONFIG_BOOTM_NETBSD`, `CONFIG_CMD_CLS`, `CONFIG_CYCLIC`, `CONFIG_DEVRES` | — | version noise |
+
+plus the five that are the Android delta (`ANDROID_BOOT_IMAGE`, `BOOTCOMMAND`,
+`USE_PREBOOT`, `ENV_IS_IN_MMC`, `ENV_IS_NOWHERE`).
+
+The load addresses are not ours: `arch/arm/mach-rockchip/Kconfig:823-826` derives
+`TEXT_BASE` from `SPL_TEXT_BASE`, and v2026.07 moved the rk3399 value from 0x00200000 to
+0x00800000. **That is the only substantive difference between a U-Boot that boots this
+board and one that does not.**
+
+Two other things this comparison settles:
+
+- **`CONFIG_ENV_IS_IN_MMC=y` with `ENV_MMC_DEVICE_INDEX=0` is in the working OpenWrt
+  build too.** So there is evidently no valid environment at eMMC sector 8128 on this
+  board, and turning it off was hygiene rather than the fix. It stays off: an appliance
+  should not let the internal storage decide what the card boots.
+- **OpenWrt does not touch `u-boot,spl-boot-order`** and still wins over the eMMC. So
+  `same-as-spl` does resolve on this board, and the reordering was insurance rather than
+  the fix. It also stays.
+
+### The two cards that separate what is left
+
+1. **`EDGE1_UBOOT_REV=v2025.10`** — the one version known to boot this board, with our
+   Android delta on top. If this boots, v2026.07's load addresses are the fault.
+2. **OpenWrt's own bootloader, our partitions** — `EDGE1_UBOOT_IDB` and
+   `EDGE1_UBOOT_ITB` in `build-images.sh` write the pair at sectors 64 and 16384. This
+   one cannot fail to inform: if `U-Boot 2025.10` appears on HDMI, the BootROM boots
+   this card layout and everything left is in our U-Boot; if the screen stays blank and
+   Armbian boots, the BootROM is not running the card at all and no U-Boot change will
+   ever help — the path forward is then the SPI NOR, which is erased, or the eMMC.
+
+Card 2 will not boot Android: its `bootcmd` is `bootflow scan -lb`, which knows nothing
+about Android boot images. Its prompt, or its "no bootflow" message, is the result.
 
 ## Storage, by controller address
 

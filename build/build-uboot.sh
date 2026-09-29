@@ -23,12 +23,27 @@ readonly DEFCONFIG=khadas-edge-v-rk3399_defconfig
 # ---------------------------------------------------------------------------
 # Building a second bootloader to A/B against, without editing anything.
 #
-#   EDGE1_UBOOT_REV=v2025.07 build/build-uboot.sh ~/aosp-14-edge1
-#   build/build-images.sh ~/aosp-14-edge1 sdcard
+#   EDGE1_UBOOT_REV=v2025.10 build/build-uboot.sh ~/aosp-14-edge1
+#   EDGE1_IMAGE_TAG=u2510 build/build-images.sh ~/aosp-14-edge1 sdcard
 #
-# Two cards, two mainline tags, everything else identical. That is the A/B worth
-# running if the first card does not boot, and it is worth saying why it is this and
-# not a Khadas branch.
+# Two cards, two mainline tags, everything else identical.
+#
+# v2025.10 rather than any other tag, because it is the only U-Boot known to boot
+# THIS board from an SD card. The board's owner has an OpenWrt card for this Edge-V
+# that wins over the Armbian on the eMMC every time, and its bootloader is U-Boot
+# 2025.10, khadas-edge-v-rk3399_defconfig, plus four symbols for HDMI. Its full
+# .config is in build/reference/openwrt-u-boot-2025.10/ together with the binaries.
+#
+# Diffing that known-good .config against what this script produces on v2026.07
+# leaves fifteen symbols, and only four of them are not ours: v2026.07 moved
+# rk3399's load addresses. CONFIG_TEXT_BASE went 0x00200000 -> 0x00800000 and
+# CONFIG_SPL_LOAD_FIT_ADDRESS went 0x0 -> 0x00200000 (the defaults in
+# arch/arm/mach-rockchip/Kconfig:823-826 keyed off SPL_TEXT_BASE), and
+# CONFIG_SYS_BOOTM_LEN and LNX_KRNL_IMG_TEXT_OFFSET_BASE follow from those. Nothing
+# else differs except the Android delta this script adds. So if 2025.10 boots and
+# 2026.07 does not, the difference is in those addresses, not in anything here.
+#
+# It is worth saying why a mainline tag and not a Khadas branch.
 #
 # Every Edge/RK3399 branch in github.com/khadas/u-boot is U-Boot 2017.09 - Rockchip's
 # BSP fork - including the ones with 2024 dates in their names. None of them carries
