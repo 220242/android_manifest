@@ -123,6 +123,12 @@ for img in system.img vendor.img super.img boot.img; do
     fi
 done
 
+# bootfs.img is partition 1 of every layout and is not an AOSP build output: it is
+# a FAT holding a boot script made from boot.img, for the U-Boot on the eMMC to find
+# (see build-bootfs.sh for why that matters on this board). Built here so the flash
+# pack below, which requires every image in the layout, has it.
+"$(dirname "${BASH_SOURCE[0]}")/build-bootfs.sh" "$TREE"
+
 # ---------------------------------------------------------------------------
 # Flash pack.
 #

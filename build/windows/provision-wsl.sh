@@ -1320,6 +1320,19 @@ stage_report() {
                 printf '  %-14s %-16s MISSING\n' "$pname" "$pimg"
             fi
         done < "$tsv"
+        # The command line boot.img actually carries, read out of its header. The
+        # three things first-stage init cannot boot without are called out: the
+        # verified-boot state, and - by its absence - boot_devices, which the
+        # bootloader has to add per medium and must not be baked in here.
+        if [[ -f "$pout/boot.img" ]]; then
+            local bcl
+            bcl="$(python3 -c 'import sys; h=open(sys.argv[1],"rb").read(0x660); print((h[0x40:0x240].split(b"\0")[0]+b" "+h[0x260:0x660].split(b"\0")[0]).decode(errors="replace").strip())' "$pout/boot.img" 2>/dev/null)"
+            echo "  boot.img cmdline: ${bcl:-(unreadable)}"
+            [[ "$bcl" == *"androidboot.verifiedbootstate=orange"* ]] \
+                || echo "    !! no androidboot.verifiedbootstate=orange - avb mounts will fail"
+            [[ "$bcl" == *"androidboot.boot_devices"* ]] \
+                && echo "    !! boot_devices is baked into boot.img; it must come from the bootloader"
+        fi
         # The bootloader, and the one thing about it that cannot be seen from its size:
     # which media its bootcmd knows about. It is read out of the built blob rather
     # than out of the script, because a stage marked complete can leave an old

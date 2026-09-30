@@ -9,10 +9,20 @@
 # build-images.sh. That single-image packaging is binman's, and is what
 # doc/board/rockchip/rockchip.rst:346 says to dd at seek=64.
 #
-# Why this exists at all: the board is installed by writing one whole-disk image
-# to an SD card, so the card needs its own bootloader. The RK3399 BootROM looks at
-# the SD card before the eMMC, which is what makes this safe - the eMMC install is
-# never touched and removing the card restores the board exactly.
+# Where it runs. The RK3399 BootROM tries SPI NOR, then the eMMC, then the SD card,
+# and runs the first bootloader it finds. So this U-Boot, written to the card, runs
+# only when nothing bootable is ahead of it: an empty SPI NOR and eMMC, or Khadas's
+# TST mode (press FUNCTION three times within two seconds), which makes the BootROM
+# skip to the card for one boot. It is also what goes into SPI NOR and onto the eMMC
+# for the installed paths. On a board whose eMMC already boots something - this one
+# has Armbian - the card is started by THAT U-Boot instead, through the boot script
+# on partition 1 (build-bootfs.sh), and none of what is built here runs.
+#
+# That order is not a guess. It is Rockchip's, as documented by Pine64 for the
+# RK3399 and by Khadas for the Edge ("SPI-Flash > eMMC > TF-Card"), and it is written
+# in the owner's own OpenWrt notes for this board. An earlier version of this comment
+# said the card came first; three cards with correct bootloaders all booting the
+# eMMC's Armbian were that claim failing.
 set -euo pipefail
 
 # shellcheck source=build/lib-tree.sh
@@ -76,9 +86,11 @@ readonly UBOOT_REV="${EDGE1_UBOOT_REV:-}"
 #   EDGE1_IMAGE_TAG=rkddr build/build-images.sh '' sdcard
 #
 # This was the A/B for "our TPL cannot bring up this board's LPDDR4". It has been run,
-# on hardware, one card each way - and both cards behaved identically, so DDR init is
-# NOT the fault. docs/HARDWARE.md records what was: SPL was loading u-boot.itb off the
-# eMMC, which happens after DRAM is already up and is therefore invisible to this A/B.
+# on hardware, one card each way - and both cards behaved identically. Neither
+# result says anything about DDR init, as it turned out: the BootROM tries the eMMC
+# before the card, so on this board neither card's TPL ever ran. docs/HARDWARE.md
+# has the whole diagnosis. The A/B is worth repeating in TST mode, where the card's
+# own TPL does run.
 #
 # Kept because it stays useful and costs one variable. binman supports the
 # substitution directly: arch/arm/dts/rockchip-u-boot.dtsi:170-184 puts `rockchip-tpl`
@@ -189,8 +201,24 @@ git checkout -q -- "$ORDER_DTSI" 2>/dev/null || true
 
 if [[ -n "$UBOOT_REV" ]]; then
     echo "==> EDGE1_UBOOT_REV=$UBOOT_REV: checking out a different U-Boot"
-    git fetch --depth 1 origin "refs/tags/$UBOOT_REV:refs/tags/$UBOOT_REV" 2>/dev/null \
-        || git fetch origin "$UBOOT_REV" 2>/dev/null || true
+    # Put the manifest's revision back when this run ends, however it ends. Left on
+    # the experiment's tag, the next ordinary Uboot stage would quietly build the
+    # experiment again - with nothing in its log to say so, because this block is
+    # the only thing that prints the revision. -f because the boot-order edit below
+    # is a local change the checkout would otherwise refuse to overwrite; the next
+    # build resets and re-applies it anyway.
+    orig_head="$(git rev-parse HEAD)"
+    trap 'git -C "$UB" checkout -q -f --detach "$orig_head" && echo "==> bootloader/u-boot restored to $(git -C "$UB" describe --tags --always "$orig_head")"' EXIT
+    # Not "origin": repo names each remote after the manifest's <remote>, which for
+    # U-Boot is "u-boot" - so fetching from origin failed, silently, and the checkout
+    # below reported only that the tag did not exist. The remote is read from the
+    # checkout instead, and a failed fetch is shown rather than swallowed.
+    remote="$(git remote | head -1)"
+    [[ -n "$remote" ]] || { echo "  bootloader/u-boot has no git remote to fetch $UBOOT_REV from" >&2; exit 1; }
+    echo "  fetching $UBOOT_REV from $remote ($(git remote get-url "$remote"))"
+    git fetch --depth 1 "$remote" "refs/tags/$UBOOT_REV:refs/tags/$UBOOT_REV" \
+        || git fetch --depth 1 "$remote" "$UBOOT_REV" \
+        || { echo "  could not fetch $UBOOT_REV from $remote" >&2; exit 1; }
     git checkout -q --detach "$UBOOT_REV" 2>/dev/null || {
         echo "  no such tag or branch in bootloader/u-boot: $UBOOT_REV" >&2
         echo "  what is there:" >&2
@@ -205,55 +233,36 @@ echo "==> U-Boot $(make -s ubootversion 2>/dev/null || echo '(version unknown)')
 # ---------------------------------------------------------------------------
 # Make SPL look at the SD card before the eMMC.
 #
-# This is the first of the two faults the first three cards died of - the other is
-# the environment, further down - and it is worth writing out in full because nothing
-# about it is visible without a serial console.
-#
-# u-boot-rockchip.bin has two stages in it. The BootROM loads the first
-# (TPL+SPL) from sector 64 of whatever it booted from - the card. SPL then loads
-# the second (u-boot.itb) *by itself*, from a device it chooses, and the choice
-# comes from /chosen/u-boot,spl-boot-order in the SPL device tree. Upstream's
-# rk3399-u-boot.dtsi:16 says
+# u-boot-rockchip.bin has two stages in it. The BootROM loads the first (TPL+SPL)
+# from sector 64 of whatever it booted from. SPL then loads the second
+# (u-boot.itb) by itself, from the first device in /chosen/u-boot,spl-boot-order
+# that resolves. Upstream's rk3399-u-boot.dtsi:16 says
 #
 #   u-boot,spl-boot-order = "same-as-spl", &sdhci, &sdmmc;
 #
-# and on rk3399 &sdhci is the eMMC (mmc@fe330000) while &sdmmc is the SD card
-# (mmc@fe320000) - arch/arm/mach-rockchip/rk3399/rk3399.c:27-31. So after
-# "same-as-spl", the eMMC is tried BEFORE the card.
+# and on rk3399 &sdhci is the eMMC (mmc@fe330000), &sdmmc the card
+# (mmc@fe320000) - arch/arm/mach-rockchip/rk3399/rk3399.c:27-31. "same-as-spl" is
+# allowed to fail silently (arch/arm/mach-rockchip/spl-boot-order.c:140-144 just
+# continues), and then the eMMC's u-boot.itb at sector 16384 is loaded - which on
+# this board is Armbian's, since Armbian writes the same two sectors we do.
 #
-# "same-as-spl" should have made that harmless: board_spl_was_booted_from()
-# reads the BootROM's boot-source id from CFG_IRAM_BASE+0x10 and maps 5 (SD) to
-# "/mmc@fe320000". But it is allowed to fail, and arch/arm/mach-rockchip/
-# spl-boot-order.c:140-144 does not treat failure as an error - it just
-# `continue`s to the next entry, which is the eMMC. Anything that loses that id
-# (a TPL that overwrites it, a BootROM revision that does not set it) silently
-# turns the card boot into an eMMC boot.
+# Putting &sdmmc first keeps a card-started SPL on the card. It also sets the
+# order for the SPI NOR install: an SPL started from SPI loads SPI's own itb, and
+# if that is missing, the card's before the eMMC's. Armbian ships the same order
+# for the rk3399 board it boots from removable media
+# (patch/u-boot/v2026.07/board_helios64/dt_uboot/rk3399-kobol-helios64-u-boot.dtsi:17,
+# "same-as-spl", &spiflash, &sdmmc, &sdhci).
 #
-# And an eMMC boot here is not a dead board, which is what made this so hard to
-# see: this board's eMMC has Armbian on it, written the same way ours is -
-# Armbian's own rockchip64 family writes idbloader.img to sector 64 and
-# u-boot.itb to sector 16384 (config/sources/families/include/rockchip64_common.inc,
-# write_uboot_platform). Sector 16384 is exactly where our SPL looks. So SPL
-# finds a perfectly valid FIT there, loads Armbian's U-Boot 2022.07, and the
-# board boots Armbian - from a card that is entirely correct. That matches every
-# symptom: no banner from our U-Boot, Armbian every time, and no difference
-# between the two DDR variants, because the divergence happens after DDR is up.
-#
-# Putting &sdmmc first makes the card win whether or not "same-as-spl" resolves.
-# It is not an invention: Armbian ships exactly this for the other rk3399 board
-# it boots from removable media - patch/u-boot/v2026.07/board_helios64/dt_uboot/
-# rk3399-kobol-helios64-u-boot.dtsi:17 reads
-#
-#   u-boot,spl-boot-order = "same-as-spl", &spiflash, &sdmmc, &sdhci;
-#
-# The eMMC stays in the list, after the card, so an eMMC install still boots on
-# its own with no card in the slot.
+# For the record, since this block once claimed otherwise: this edit did NOT
+# explain the first three cards. They booted Armbian because the BootROM never ran
+# their SPL at all - it tries the eMMC before the card - and a card built with
+# this edit behaved identically. The edit stays because the order it sets is the
+# right one whenever our SPL does run. docs/HARDWARE.md has the whole diagnosis.
 #
 # Done as an edit here rather than as a patch file because repo owns
 # bootloader/u-boot and resets it on every sync - so the edit has to be
 # re-applied by the thing that builds, not by the thing that fetches. That is
-# also why the manifest hash invalidates the Uboot stage in Start-EdgeBuild.ps1:
-# a sync throws this away and the card must not be built from the old blob.
+# also why the manifest hash invalidates the Uboot stage in Start-EdgeBuild.ps1.
 # ---------------------------------------------------------------------------
 [[ -f "$ORDER_DTSI" ]] || {
     echo "$ORDER_DTSI is not in this U-Boot, so SPL's boot order cannot be set." >&2
@@ -345,30 +354,66 @@ make "CROSS_COMPILE=$CROSS" "$DEFCONFIG"
 # for the NVMe image.
 #
 # The sequence is written once, here, and instantiated three times: the three
-# copies in CONFIG_BOOTCOMMAND differ only in the interface, the device number
-# and how the device is selected.
+# copies in CONFIG_BOOTCOMMAND differ only in the interface, the device number,
+# how the device is selected - and which controller Android is told it booted from.
+#
+# That last one is not optional. androidboot.boot_devices names the controller
+# whose partitions first-stage init links as /dev/block/by-name/*, and without it
+# init finds no super and stops (BoardConfig.mk has the AOSP source lines). It is
+# per medium, so it is set here rather than in boot.img: bootm prepends the
+# bootargs variable to the image's own command line (boot/image-android.c:396-433),
+# so setting bootargs to just this one argument before each bootm is enough. The
+# names are the platform devices the mainline dts creates - mmc@fe320000 and
+# mmc@fe330000 under the root node, and the NVMe's nearest platform ancestor,
+# pcie@f8000000 - and they match what GloDroid's RK3399 port passes.
+#
+# After all three, distro boot. A U-Boot that has found no Android anywhere - most
+# usefully one in SPI NOR with no card inserted - then boots whatever the eMMC holds
+# the way that system expects (extlinux.conf, boot.scr), instead of stopping at a
+# prompt nobody can see. It also finds the card's own bootfs script, which is the
+# same Android by another route, so nothing is lost if abootimg ever fails.
 # ---------------------------------------------------------------------------
 readonly IMGADDR=0x20000000
 
-# $1 the command that selects the device, $2 the interface, $3 the device number
+# $1 the command that selects the device, $2 the interface, $3 the device number,
+# $4 the controller as Android names it (androidboot.boot_devices)
 boot_one() {
     printf '%s && part start %s %s boot ba && part size %s %s boot bs' "$1" "$2" "$3" "$2" "$3"
     printf ' && %s read %s ${ba} ${bs}' "$2" "$IMGADDR"
     printf ' && abootimg addr %s && abootimg get dtb --index=0 da ds' "$IMGADDR"
     printf ' && cp.b ${da} ${fdt_addr_r} ${ds}'
+    printf ' && setenv bootargs androidboot.boot_devices=%s' "$4"
     printf ' && bootm %s %s ${fdt_addr_r}' "$IMGADDR" "$IMGADDR"
 }
 
-BOOTCMD="$(boot_one 'mmc dev 1' mmc 1)"
-BOOTCMD="$BOOTCMD || $(boot_one 'mmc dev 0' mmc 0)"
-BOOTCMD="$BOOTCMD || $(boot_one 'nvme scan && nvme device 0' nvme 0)"
-BOOTCMD="$BOOTCMD || echo NO ANDROID BOOT PARTITION ON CARD, eMMC OR NVMe"
+# The attempts are separated by ';', not '||', and that is load-bearing.
+#
+# U-Boot's hush (the old parser, which is the default and what this config has) does
+# not group "a && b || c" the way a POSIX shell does. When a command followed by &&
+# fails, it skips every following command up to the next ';' - the || alternatives
+# included. Measured in U-Boot's own sandbox, same source tree:
+#
+#   false && echo A || echo B            prints nothing
+#   true && false || echo B              prints B
+#   false && echo A; true && echo B      prints B
+#
+# So with '||' between the attempts, a card with no boot partition - or no card at
+# all - failed at "mmc dev 1" or "part start" and skipped the eMMC and the NVMe
+# attempts entirely: the fallback this bootcmd was built around had never worked.
+# With ';', each attempt runs on its own, and a successful bootm never returns, so
+# the next attempt is reached only when the previous one failed.
+BOOTCMD="$(boot_one 'mmc dev 1' mmc 1 fe320000.mmc)"
+BOOTCMD="$BOOTCMD; $(boot_one 'mmc dev 0' mmc 0 fe330000.mmc)"
+BOOTCMD="$BOOTCMD; $(boot_one 'nvme scan && nvme device 0' nvme 0 f8000000.pcie)"
+BOOTCMD="$BOOTCMD; echo NO ANDROID BOOT PARTITION ON CARD, eMMC OR NVMe - trying distro boot"
+BOOTCMD="$BOOTCMD; bootflow scan -lb"
 readonly BOOTCMD
 
 readonly FRAGMENT=.config-android-fragment
-# CONFIG_HUSH_PARSER is what makes the fallback possible at all: without it the
-# parser has no && or ||, so the three attempts could not be chained and a missing
-# card would be a dead board rather than the next medium. cmd/Kconfig:14-20.
+# CONFIG_HUSH_PARSER is what makes each attempt possible at all: without it the
+# parser has no &&, so one failed step could not stop an attempt before bootm ran
+# on garbage. The attempts themselves are joined with ';' - see the note on hush
+# above BOOTCMD for why '||' does not do what it looks like. cmd/Kconfig:14-20.
 #
 # CONFIG_SPL_PAD_TO is pinned rather than left to its Kconfig default, and the value
 # is not ours: it is the one Khadas pins in their own khadas-edge-v-rk3399_defconfig
@@ -443,9 +488,12 @@ readonly FRAGMENT=.config-android-fragment
 # our preboot, and U-Boot boots whatever that environment says instead, with no
 # output on the screen because preboot never ran.
 #
-# On this board that is not hypothetical. The eMMC has Armbian on it, built from
-# this same defconfig, so its U-Boot keeps its environment at exactly this
-# offset on exactly this device.
+# Whether this board's eMMC holds a valid environment at that offset is not known:
+# the owner's OpenWrt build has ENV_IS_IN_MMC with device 0 too and its U-Boot
+# behaved, which suggests not. It does not matter. What matters is that it could -
+# anything that ever runs saveenv against this defconfig puts one there - and that
+# this U-Boot is also what goes onto the eMMC and into SPI NOR, where the eMMC's
+# environment is exactly the one it would read.
 #
 # Turning ENV_IS_IN_MMC off leaves no ENV_IS_IN_* at all, and env/Kconfig:71-79
 # then selects ENV_IS_NOWHERE through ENV_IS_DEFAULT: the compiled-in
@@ -555,7 +603,9 @@ esac
 # eMMC or the SSD - which is precisely the case that cannot be tested without
 # the hardware.
 got="$(sed -n 's/^CONFIG_BOOTCOMMAND="\(.*\)"$/\1/p' .config)"
-for want in 'mmc dev 1' 'mmc dev 0' 'nvme device 0'; do
+for want in 'mmc dev 1' 'mmc dev 0' 'nvme device 0' \
+            'androidboot.boot_devices=fe320000.mmc' 'androidboot.boot_devices=fe330000.mmc' \
+            'androidboot.boot_devices=f8000000.pcie' 'bootflow scan -lb'; do
     case "$got" in
         *"$want"*) ;;
         *) echo "  BOOTCOMMAND lost the '$want' attempt" >&2; missing=$((missing+1)) ;;
@@ -566,7 +616,8 @@ if (( missing )); then
     echo "    Android. Fix the fragment before flashing anything." >&2
     exit 1
 fi
-echo "  bootcmd tries, in order: SD card (mmc 1), eMMC (mmc 0), NVMe (nvme 0)"
+echo "  bootcmd tries, in order: SD card (mmc 1), eMMC (mmc 0), NVMe (nvme 0),"
+echo "           then distro boot; each Android attempt passes its own boot_devices"
 echo "  console:  serial (ttyS2, 1500000) and HDMI"
 echo "  environment: compiled in (ENV_IS_NOWHERE), so nothing on the eMMC can"
 echo "               replace the bootcmd or the preboot above"

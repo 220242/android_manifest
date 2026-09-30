@@ -7,6 +7,26 @@
 # driver, so the GPU is the render node. /dev/mpp_service, /dev/vpu_service,
 # /dev/rga and /dev/iep were Rockchip's own char devices; rkvdec and RGA are V4L2
 # devices here, which AOSP already has a type for.
+# Block devices, by the names first-stage init gives them.
+#
+# /dev/block/by-name/<name> exists only for the controller named in
+# androidboot.boot_devices (init/devices.cpp:410-421), which U-Boot or the bootfs
+# script sets to the medium actually booted - so these label the booted medium's
+# partitions and nothing else. ueventd labels the device node itself through the
+# best match over its symlinks, so the node gets the type too.
+#
+# Nothing had a type here before, which left every partition as the generic
+# block_device. Permissive SELinux on a userdebug bring-up hides that; an enforcing
+# build would fail at first-stage mount of metadata and at every vold and fs_mgr
+# access to userdata. The types are AOSP's public ones, the same set GloDroid's
+# RK3399 port labels. vbmeta has no public type and stays block_device.
+/dev/block/by-name/super            u:object_r:super_block_device:s0
+/dev/block/by-name/metadata         u:object_r:metadata_block_device:s0
+/dev/block/by-name/userdata         u:object_r:userdata_block_device:s0
+/dev/block/by-name/misc             u:object_r:misc_block_device:s0
+/dev/block/by-name/boot             u:object_r:boot_block_device:s0
+/dev/block/by-name/recovery         u:object_r:recovery_block_device:s0
+
 /dev/dri/card0                      u:object_r:graphics_device:s0
 /dev/dri/renderD128                 u:object_r:gpu_device:s0
 # No /dev/video[0-9]* line. AOSP's own file_contexts has that exact spec, and the

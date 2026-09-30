@@ -97,12 +97,16 @@
            revision="refs/tags/v6.12.111" clone-depth="1" />
 
   <!-- ==================================================================
-       U-Boot: mainline, for a self-booting SD card.
+       U-Boot: mainline, for the card, the eMMC and SPI NOR.
 
-       The board is flashed by writing one whole-disk image to an SD card, so the
-       card has to carry its own bootloader - the RK3399 BootROM looks at the SD
-       card before the eMMC, which is why the eMMC install is left untouched and a
-       card can simply be removed to get the board back.
+       The RK3399 BootROM tries SPI NOR, then the eMMC, then the SD card, and runs
+       the first bootloader it finds. So this U-Boot, written to a card, runs only
+       when nothing ahead of it is bootable - an empty eMMC, or Khadas's TST mode
+       (FUNCTION pressed three times within two seconds) for one boot. On a board
+       whose eMMC already boots something, the card is started by the eMMC's own
+       U-Boot instead, through the boot script on the card's partition 1
+       (build/build-bootfs.sh). An earlier version of this comment said the card
+       came first; that was wrong, and docs/HARDWARE.md has how it was found.
 
        khadas-edge-v-rk3399_defconfig is upstream and targets exactly this carrier
        (CONFIG_DEFAULT_DEVICE_TREE="rockchip/rk3399-khadas-edge-v",

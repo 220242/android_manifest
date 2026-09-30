@@ -376,6 +376,98 @@ else
 fi
 echo
 
+# --- 3g. the card has to boot from an eMMC that is not empty ------------------
+#
+# The RK3399 BootROM tries the eMMC before the SD card, so on a board with
+# anything bootable on its eMMC the card's own U-Boot never runs. What runs is the
+# eMMC's U-Boot, whose distro boot looks at the card's partition 1 for boot.scr.
+# That script (flash/boot.cmd, filled in by build/build-bootfs.sh) is the only way
+# the card boots on such a board, so the pieces it depends on are asserted here.
+echo "[3g] bootfs: partition 1, and the script that lives on it"
+bootfs_bad=0
+first_row="$(awk -F'\t' '$1 !~ /^#/ && NF >= 3 { print $1; exit }' "$TSV")"
+if [[ "$first_row" == bootfs ]]; then
+    ok "bootfs is partition 1 (distro boot scans partition 1 when none is flagged)"
+else
+    err "the first row of partitions.tsv is '$first_row', not bootfs; distro boot on the"
+    err "  eMMC's U-Boot would not find the boot script"
+    bootfs_bad=$((bootfs_bad+1))
+fi
+bootcmd_tpl="$DEV/flash/boot.cmd"
+bootfs_sh="$ROOT/build/build-bootfs.sh"
+if [[ -f "$bootcmd_tpl" && -f "$bootfs_sh" ]]; then
+    # Every @PLACEHOLDER@ in the template has to be one the generator prints.
+    emitted="$(grep -oE 'print\(f"[A-Z0-9_]+=' "$bootfs_sh" | sed -E 's/print\(f"//; s/=$//' | sort -u)"
+    unfilled=0
+    while read -r ph; do
+        [[ -n "$ph" ]] || continue
+        grep -qx "$ph" <<< "$emitted" || { err "boot.cmd uses @$ph@, which build-bootfs.sh never sets"; unfilled=$((unfilled+1)); }
+    done < <(grep -oE '@[A-Z0-9_]+@' "$bootcmd_tpl" | tr -d @ | sort -u)
+    (( unfilled )) && bootfs_bad=$((bootfs_bad+unfilled)) || ok "every placeholder in boot.cmd is filled from boot.img"
+    # hush's && / || trap applies to the script as much as to the bootcmd.
+    if grep -vE '^\s*#' "$bootcmd_tpl" | grep -qE '&&.*\|\|'; then
+        err "boot.cmd chains '&& ... ||'; U-Boot's hush skips the || branch when the &&"
+        err "  side fails (see build-uboot.sh). Use if/then/else."
+        bootfs_bad=$((bootfs_bad+1))
+    else
+        ok "boot.cmd uses if/then/else, not '&& ... ||'"
+    fi
+else
+    err "missing $bootcmd_tpl or $bootfs_sh"
+    bootfs_bad=$((bootfs_bad+1))
+fi
+for caller in build/build.sh build/build-images.sh; do
+    if grep -q 'build-bootfs.sh' "$ROOT/$caller"; then
+        ok "$caller builds bootfs.img"
+    else
+        err "$caller does not run build-bootfs.sh, so bootfs.img would be missing or stale"
+        bootfs_bad=$((bootfs_bad+1))
+    fi
+done
+(( bootfs_bad )) || ok "the card can be booted by the U-Boot already on the eMMC"
+echo
+
+# --- 3h. what first-stage init needs from whoever boots it ---------------------
+#
+# Two command-line arguments without which first-stage init stops, whichever
+# bootloader starts the kernel. BoardConfig.mk has the AOSP source lines for both.
+#
+#   androidboot.boot_devices   per medium, so it must come from the bootloader and
+#                              must NOT be fixed in boot.img: both boot paths set it.
+#   androidboot.verifiedbootstate=orange
+#                              no bootloader here supplies vbmeta digests, and the
+#                              avb fstab flags need either those or "unlocked".
+echo "[3h] kernel command line: boot_devices and the verified-boot state"
+cl_bad=0
+if sed 's/#.*//' "$DEV/BoardConfig.mk" | grep -q 'androidboot.boot_devices'; then
+    err "BoardConfig.mk puts androidboot.boot_devices in boot.img; it differs per medium"
+    err "  (card fe320000.mmc, eMMC fe330000.mmc) and has to come from the bootloader"
+    cl_bad=$((cl_bad+1))
+fi
+if sed 's/#.*//' "$DEV/BoardConfig.mk" | grep -q 'androidboot.verifiedbootstate=orange'; then
+    ok "BoardConfig.mk declares the device unlocked (verifiedbootstate=orange)"
+else
+    err "BoardConfig.mk does not pass androidboot.verifiedbootstate=orange; with no vbmeta"
+    err "  digest from the bootloader, the avb-flagged mounts in the fstab fail"
+    cl_bad=$((cl_bad+1))
+fi
+uboot_sh="$ROOT/build/build-uboot.sh"
+for dev in fe320000.mmc fe330000.mmc f8000000.pcie; do
+    for f in "$uboot_sh" "$DEV/flash/boot.cmd"; do
+        grep -q "$dev" "$f" || { err "$(basename "$f") never names $dev for androidboot.boot_devices"; cl_bad=$((cl_bad+1)); }
+    done
+done
+(( cl_bad )) || ok "both boot paths set boot_devices for the card, the eMMC and the NVMe"
+# The bootcmd's attempts are joined with ';'. '||' there made every fallback dead.
+if grep -qE '^BOOTCMD="\$BOOTCMD \|\| ' "$uboot_sh"; then
+    err "build-uboot.sh joins boot attempts with '||'; hush then skips every later attempt"
+    err "  when an earlier one fails before bootm. Join them with ';'."
+    cl_bad=$((cl_bad+1))
+else
+    ok "bootcmd attempts are joined with ';', so each one runs if the last failed"
+fi
+echo
+
 # --- 4. VINTF: fragments must NOT duplicate the device manifest ----------------
 #
 # This check used to assert the opposite - that every HAL in a fragment also
@@ -636,10 +728,16 @@ if [[ -d "$SEDIR" ]]; then
     # build. The module probe resolves this list against the synced
     # system/sepolicy and prints every type this device declares with whether AOSP
     # already has it - that is the authoritative answer, and it gates the run.
+    #
+    # The six *_block_device types label the boot medium's partitions. GloDroid's
+    # RK3399 vendor file_contexts uses five of them (not recovery_block_device)
+    # against AOSP 14; all six are public/device.te types.
     aosp_types="gpu_device graphics_device hal_bluetooth_default_exec
                 vendor_kernel_modules vendor_file
                 vendor_configs_file sysfs_type sysfs_gpu sysfs_leds
-                sysfs_thermal sysfs_devices_system_cpu video_device"
+                sysfs_thermal sysfs_devices_system_cpu video_device
+                super_block_device metadata_block_device userdata_block_device
+                misc_block_device boot_block_device recovery_block_device"
     missing_types=0
     while read -r t; do
         [[ -n "$t" ]] || continue

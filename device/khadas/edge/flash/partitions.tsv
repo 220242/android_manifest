@@ -13,6 +13,13 @@
 # Columns: name <TAB> size in MiB ("rest" = fill the device) <TAB> image file, or
 # "-" for a partition that is created empty and formatted by Android.
 #
+# bootfs       a 4MiB FAT holding boot.scr, built by build/build-bootfs.sh from
+#              boot.img. It is FIRST on purpose: the RK3399 BootROM prefers the eMMC
+#              to the SD card, so on a board with anything bootable on its eMMC the
+#              card's own U-Boot never runs - but the eMMC's U-Boot runs distro boot,
+#              which scans the SD card first and, with no partition flagged bootable,
+#              looks in partition 1 for boot.scr. That script boots our boot.img. See
+#              boot.cmd next to this file.
 # misc         the bootloader control block: recovery and the boot reason live
 #              here, and Android will write to it whether or not we flash it.
 # vbmeta       AVB metadata. Present and flashed even though verification is not
@@ -28,6 +35,7 @@
 # BOARD_BOOTIMAGE_PARTITION_SIZE and BOARD_RECOVERYIMAGE_PARTITION_SIZE; the sizes
 # here and there have to agree, or an image that the build accepted will not fit
 # the partition it is written to.
+bootfs	4	bootfs.img
 misc	4	-
 boot	96	boot.img
 recovery	96	recovery.img

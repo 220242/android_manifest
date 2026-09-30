@@ -108,6 +108,27 @@ BOARD_PREBUILT_DTBIMAGE_DIR := kernel/mainline/out/android-dtb
 # called it ttyFIQ0, which was Rockchip's FIQ-based serial driver and does not
 # exist upstream. androidboot.hardware names the HAL suffix set this board uses -
 # rk30board was the BSP's value and matched nothing in this tree.
+#
+# What is NOT here, and must come from the bootloader: androidboot.boot_devices.
+# It names the storage controller whose GPT partitions become
+# /dev/block/by-name/<name>, and first-stage init resolves super, metadata and misc
+# only through those links. It differs per medium - fe320000.mmc for the SD card,
+# fe330000.mmc for the eMMC, f8000000.pcie for an NVMe - so it cannot be fixed in
+# boot.img. U-Boot's bootcmd (build-uboot.sh) and the bootfs boot script
+# (flash/boot.cmd) both set it. Without it the board gets as far as first-stage
+# init and stops:
+#
+#   init/devices.cpp:410-421     by-name links are made only for boot devices
+#   fs_mgr/libfstab/fstab.cpp:452-460, 868-904
+#                                with no androidboot.boot_devices, the boot devices
+#                                are derived from fstab entries of the form
+#                                /dev/block/platform/<dev>/by-name/..., and this
+#                                fstab uses /dev/block/by-name/, which that
+#                                fallback explicitly skips - so the set is empty.
+#
+# That is the AOSP 14 source (android-14.0.0_r75, system/core); GloDroid's RK3399
+# port (PinePhone Pro) passes exactly these two controller names from its U-Boot
+# script, which is independent confirmation of the names.
 BOARD_KERNEL_CMDLINE := \
     console=ttyS2,1500000n8 \
     androidboot.console=ttyS2 \
@@ -116,12 +137,58 @@ BOARD_KERNEL_CMDLINE := \
     init=/init \
     rootwait ro
 
+# androidboot.verifiedbootstate=orange: the device is unlocked, and says so.
+#
+# The fstab mounts system, vendor and the rest with the avb flag, and first-stage
+# init then insists on a vbmeta digest from the bootloader - androidboot.vbmeta.size,
+# .hash_alg, .digest - unless the device is unlocked. No bootloader in this boot
+# chain computes one: mainline U-Boot only does with CONFIG_AVB_VERIFY and an
+# "avb verify" in its bootcmd, and Armbian's U-Boot, which boots the card through
+# bootfs, never will. Without this, every boot would stop at
+#
+#   fs_mgr/libfs_avb/fs_avb.cpp:114-118  AvbVerifier::Create: "Invalid hash size"
+#   fs_mgr/libfs_avb/fs_avb.cpp:412-420  "vbmeta digest error isn't allowed"
+#
+# because IsAvbPermissive() is true only when fs_mgr/libfs_avb/util.cpp:109-116
+# reads verifiedbootstate == "orange". With it, dm-verity is still set up from
+# vbmeta and still catches corruption; what is skipped is the bootloader-to-kernel
+# attestation that no bootloader here can provide. Orange is the honest state for
+# that, and it is what GloDroid's U-Boot script passes for the same reason.
+#
+# Real AVB (U-Boot "avb verify", which emits the vbmeta.* arguments and a green
+# state) is the way to lift this for a user build; it is listed as open work.
+BOARD_KERNEL_CMDLINE += androidboot.verifiedbootstate=orange
+
 # veritymode is appended per-variant: enforcing on user, eio on userdebug so a
 # bring-up image with a locally modified vendor partition still boots.
 ifeq ($(TARGET_BUILD_VARIANT),user)
 BOARD_KERNEL_CMDLINE += androidboot.veritymode=enforcing
 else
 BOARD_KERNEL_CMDLINE += androidboot.veritymode=eio
+
+# Bring-up aids, userdebug only. This board is being brought up without a serial
+# adapter, so everything that would normally be read off ttyS2 has to be readable
+# off the HDMI screen instead.
+#
+#   console=tty0   the kernel log on the HDMI framebuffer console as well as the
+#                  UART. CONFIG_DRM_FBDEV_EMULATION and CONFIG_FB are in the kernel
+#                  fragment, so fbcon comes up on the DRM device. ttyS2 stays the
+#                  last console= and so remains /dev/console.
+#
+#   androidboot.init_fatal_panic=true
+#                  a fatal init error panics the kernel instead of rebooting
+#                  (system/core/init/reboot_utils.cpp:50-57). A reboot would scroll
+#                  the reason off the screen and loop; a panic leaves it there.
+#
+#   androidboot.selinux=permissive
+#                  a first boot of a new port with enforcing SELinux fails on the
+#                  first missing rule, with the denial in a log nobody can read yet.
+#                  Permissive logs the same denials and lets boot continue, so they
+#                  can be collected with adb and fixed. init only honours it on a
+#                  non-user build (init/selinux.cpp:98-108, ALLOW_PERMISSIVE_SELINUX).
+BOARD_KERNEL_CMDLINE := console=tty0 $(BOARD_KERNEL_CMDLINE)
+BOARD_KERNEL_CMDLINE += androidboot.init_fatal_panic=true
+BOARD_KERNEL_CMDLINE += androidboot.selinux=permissive
 endif
 
 BOARD_KERNEL_BASE := 0x00200000

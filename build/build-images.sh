@@ -64,8 +64,15 @@ set -euo pipefail
 
 # shellcheck source=build/lib-tree.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib-tree.sh"
-readonly TREE="${1:-$(edge1_default_tree)}"
-shift || true
+# The tree argument may be left out entirely when a target follows, so
+# "build-images.sh sdcard" works. That matters on Windows: typing "" for an empty
+# argument through PowerShell 5.1 into wsl.exe does not survive the trip, so the
+# only command that needs no quoting is one that has no empty argument in it.
+case "${1:-}" in
+    sdcard|emmc|nvme) TREE_ARG= ;;
+    *)                TREE_ARG="${1:-}"; shift || true ;;
+esac
+readonly TREE="${TREE_ARG:-$(edge1_default_tree)}"
 readonly OUT="$TREE/out/target/product/edge"
 readonly LAYOUT="$TREE/device/khadas/edge/flash/partitions.tsv"
 readonly UBOOT="$TREE/bootloader/u-boot/u-boot-rockchip.bin"
@@ -99,8 +106,27 @@ readonly GPT_TAIL_MIB=1
 # Both variables or neither: a valid ID block without a FIT at sector 16384 is the one
 # combination that produces a board which stops with no console and no clue.
 # ---------------------------------------------------------------------------
-readonly EXT_IDB="${EDGE1_UBOOT_IDB:-}"
-readonly EXT_ITB="${EDGE1_UBOOT_ITB:-}"
+#
+# EDGE1_UBOOT_REFERENCE=<name> is the same thing by name: it takes the pair from
+# build/reference/<name>/ and ungzips it, so a hand-run command needs no paths and
+# no shell variables - PowerShell hands "$VAR" to a shell that expands it before the
+# one the command was meant for ever sees it.
+EDGE1_UBOOT_IDB="${EDGE1_UBOOT_IDB:-}"
+EDGE1_UBOOT_ITB="${EDGE1_UBOOT_ITB:-}"
+if [[ -n "${EDGE1_UBOOT_REFERENCE:-}" ]]; then
+    ref="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reference/$EDGE1_UBOOT_REFERENCE"
+    [[ -f "$ref/idbloader.img.gz" && -f "$ref/u-boot.itb.gz" ]] || {
+        echo "no reference bootloader '$EDGE1_UBOOT_REFERENCE' (looked in $ref)" >&2
+        echo "available:" >&2; ls "$(dirname "$ref")" >&2; exit 1; }
+    refdir="$(mktemp -d)"
+    gunzip -c "$ref/idbloader.img.gz" > "$refdir/idbloader.img"
+    gunzip -c "$ref/u-boot.itb.gz" > "$refdir/u-boot.itb"
+    EDGE1_UBOOT_IDB="$refdir/idbloader.img"
+    EDGE1_UBOOT_ITB="$refdir/u-boot.itb"
+    echo "==> reference bootloader: $EDGE1_UBOOT_REFERENCE"
+fi
+readonly EXT_IDB="$EDGE1_UBOOT_IDB"
+readonly EXT_ITB="$EDGE1_UBOOT_ITB"
 if [[ -n "$EXT_IDB$EXT_ITB" ]]; then
     [[ -n "$EXT_IDB" && -n "$EXT_ITB" ]] || {
         echo "EDGE1_UBOOT_IDB and EDGE1_UBOOT_ITB go together; only one was set." >&2
@@ -173,6 +199,13 @@ if (( need_uboot == 0 )) && [[ -z "$EXT_IDB" ]] && [[ ! -f "$UBOOT" ]]; then
     exit 1
 fi
 
+# bootfs.img is regenerated every time rather than trusted from the Build stage:
+# it bakes in offsets read from boot.img, and a stale one would point its boot
+# script at the wrong sectors. Its own boot-time check would catch that and refuse
+# to boot, but refusing is still a board that does not boot. build-bootfs.sh has
+# the reason partition 1 exists at all.
+"$(dirname "${BASH_SOURCE[0]}")/build-bootfs.sh" "$TREE"
+
 # ---------------------------------------------------------------------------
 # Read the layout and check every image exists before touching anything. A
 # half-written image is worse than no image: it looks like a product.
@@ -223,7 +256,7 @@ is_sparse() {
 
 readonly TMP="$OUT/image-tmp"
 rm -rf "$TMP"
-cleanup() { rm -rf "$TMP"; }
+cleanup() { rm -rf "$TMP" ${refdir:+"$refdir"}; }
 trap cleanup EXIT
 
 find_simg2img() {

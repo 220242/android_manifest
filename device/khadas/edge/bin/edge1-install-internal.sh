@@ -3,6 +3,7 @@
 # Khadas Edge1 - install the running SD card onto the eMMC or the M.2 NVMe.
 #
 #   sh /vendor/bin/edge1-install-internal.sh <emmc|nvme> [--yes]
+#                                             [--with-bootloader|--keep-bootloader]
 #
 # Run it on the board, as root, from the Android that is running off the card:
 #
@@ -35,10 +36,36 @@
 #     U-Boot on the eMMC or on the card. Install to the eMMC first if the board is
 #     to run from the SSD with no card in it.
 #
-# After an eMMC install the card still wins on the next boot: build-uboot.sh builds
-# a bootcmd that tries the card before the eMMC before the NVMe. Remove the card to
-# boot what was just installed; put it back to get the card again. Nothing here is
-# one-way.
+#   - It does not replace a working bootloader with an untried one. See below.
+#
+# After an eMMC install the card still wins on the next boot, whichever U-Boot is on
+# the eMMC: ours tries the card before the eMMC before the NVMe, and a distro U-Boot
+# (Armbian's) scans the card first and runs its bootfs script. Remove the card to
+# boot what was just installed; put it back to get the card again.
+#
+# ---------------------------------------------------------------------------
+# The bootloader, and why it is not always copied
+#
+# The RK3399 BootROM prefers the eMMC to the card. So on a board whose eMMC already
+# boots something, the Android running now was very likely started by THAT U-Boot,
+# through the boot script on the card's partition 1 - and the U-Boot on the card has
+# never run on this board at all. Copying it onto the eMMC would replace a
+# bootloader that is known to work with one that is not, on the one medium the
+# board cannot boot around without TST mode or a maskrom tool.
+#
+# So the U-Boot that started this system decides, read from
+# /proc/device-tree/chosen/u-boot,version, which every U-Boot writes:
+#
+#   the card's own     it has run here, so it is copied. This is also the case on
+#                      a board with an empty eMMC, or with U-Boot in SPI NOR.
+#   anything else      the eMMC's bootloader area (sectors 64 up to 16MiB) is left
+#                      exactly as it is. That U-Boot's distro boot finds bootfs on
+#                      the eMMC's partition 1 and boots the installed Android the
+#                      same way it booted the card. sgdisk --zap-all rewrites only
+#                      the GPT at the start and end of the disk, so it is not
+#                      touched by repartitioning either.
+#
+# --with-bootloader and --keep-bootloader override the choice.
 # ---------------------------------------------------------------------------
 
 set -u
@@ -51,11 +78,20 @@ die() { echo "error: $*" >&2; exit 1; }
 
 TARGET="${1:-}"
 ASSUME_YES=0
-[ "${2:-}" = "--yes" ] && ASSUME_YES=1
+BOOTLOADER=auto
+[ $# -gt 0 ] && shift
+for arg in "$@"; do
+    case "$arg" in
+        --yes)             ASSUME_YES=1 ;;
+        --with-bootloader) BOOTLOADER=copy ;;
+        --keep-bootloader) BOOTLOADER=keep ;;
+        *) echo "unknown option: $arg" >&2; TARGET= ;;
+    esac
+done
 
 case "$TARGET" in
     emmc|nvme) ;;
-    *) echo "usage: $0 <emmc|nvme> [--yes]" >&2; exit 1 ;;
+    *) echo "usage: $0 <emmc|nvme> [--yes] [--with-bootloader|--keep-bootloader]" >&2; exit 1 ;;
 esac
 
 [ "$(id -u)" = "0" ] || die "must run as root (adb root, or su)"
@@ -149,6 +185,20 @@ NEED_MIB=$(( FIRST_PART_MIB + FIXED_MIB + 1 ))
 REST_MIB=$(( DEV_MIB - NEED_MIB ))
 [ "$REST_MIB" -ge 512 ] || die "$REST_NAME would be ${REST_MIB}MiB, too small for Android to format"
 
+# ---------------------------------------------------------------------------
+# Which U-Boot started this system, and is it the one on the card? The property is
+# the bare version ("2026.07", "2022.07-armbian-..."); the card's U-Boot carries its
+# banner, "U-Boot <version> (<date> ...)", inside u-boot.itb at sector 16384.
+# ---------------------------------------------------------------------------
+RUNNING_UB="$(tr -d '\000' < /proc/device-tree/chosen/u-boot,version 2>/dev/null)"
+CARD_UB="$(dd if="$SRC_DISK" bs=512 skip=16384 count=4096 2>/dev/null \
+           | strings 2>/dev/null | grep '^U-Boot 20' | head -1)"
+UB_PROVEN=0
+case "$CARD_UB" in "U-Boot $RUNNING_UB "*) [ -n "$RUNNING_UB" ] && UB_PROVEN=1 ;; esac
+if [ "$TARGET" = emmc ] && [ "$BOOTLOADER" = auto ]; then
+    if [ "$UB_PROVEN" = 1 ]; then BOOTLOADER=copy; else BOOTLOADER=keep; fi
+fi
+
 echo "=========================================================================="
 echo "  Install the running system onto the $TARGET"
 echo "=========================================================================="
@@ -164,8 +214,15 @@ while IFS="$(printf '\t')" read -r name size image; do
     else src="/dev/block/by-name/$name"; fi
     printf '  %-12s %7sMiB  %s\n' "$name" "$size" "$src"
 done < "$LAYOUT"
-if [ "$TARGET" = emmc ]; then
+echo "  running U-Boot: ${RUNNING_UB:-unknown}"
+echo "  card's U-Boot:  ${CARD_UB:-none found at sector 16384}"
+if [ "$TARGET" = emmc ] && [ "$BOOTLOADER" = copy ]; then
     echo "  bootloader   sector $UBOOT_SEEK_SECTORS, copied from $SRC_DISK"
+    [ "$UB_PROVEN" = 1 ] || echo "               (forced: the card's U-Boot did not start this system)"
+elif [ "$TARGET" = emmc ]; then
+    echo "  bootloader   KEPT as it is on $DEV - it started this system, the card's"
+    echo "               U-Boot did not. It will boot the installed Android through"
+    echo "               bootfs, as it booted the card. --with-bootloader to replace it."
 else
     echo "  bootloader   none - the BootROM cannot boot from PCIe. U-Boot has to stay"
     echo "               on the eMMC or the card; install to the eMMC too if you want"
@@ -206,7 +263,7 @@ while IFS="$(printf '\t')" read -r name size image; do
     n=$(( n + 1 ))
 done < "$LAYOUT"
 
-if [ "$TARGET" = emmc ]; then
+if [ "$TARGET" = emmc ] && [ "$BOOTLOADER" = copy ]; then
     # Sectors 64 up to the first partition, straight off the running disk. That
     # region is the Rockchip ID block plus u-boot.itb, and it is the same
     # u-boot-rockchip.bin build-images.sh wrote to the card.
