@@ -106,8 +106,9 @@ done
 #
 # mmcblk numbering depends on probe order and is not stable, so "the eMMC is
 # mmcblk2" is a guess that silently becomes wrong. The controller address is not a
-# guess: rk3399-base.dtsi names the eMMC controller sdhci@fe330000 and the SD slot
-# mmc@fe320000, and U-Boot's arch/arm/mach-rockchip/rk3399/rk3399.c:27-31 states
+# guess: rk3399-base.dtsi has the eMMC controller at mmc@fe330000 (label sdhci) and
+# the SD slot at mmc@fe320000 (label sdmmc) - measured on the board as fe330000.mmc and
+# fe320000.mmc - and U-Boot's arch/arm/mach-rockchip/rk3399/rk3399.c:27-31 states
 # the same mapping from the BootROM's side. So the eMMC is whatever block device
 # hangs off fe330000.
 # ---------------------------------------------------------------------------

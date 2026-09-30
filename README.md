@@ -3,31 +3,33 @@
 A port of the Khadas Edge1 from its Android 10 (`khadas-edge-Qt`) configuration to
 Android TV 14, on a mainline kernel and with no proprietary blobs.
 
-**The build completes** and produces every image the flash layout names, `super.img`
-included and in raw rather than sparse form, so it can actually be written. The last
-stage assembles those into three whole-disk images — one per medium — and has not yet
-run to the end: the bootloader it needs has still to build. Nothing has been booted, so
-nothing here is claimed to work. [`docs/STATUS.md`](docs/STATUS.md) has the state in
-detail, and [`docs/HARDWARE.md`](docs/HARDWARE.md) has what has been measured on the
-real board rather than assumed.
+**The build completes**, and produces a card image built to boot on this board as it
+is. Android has not booted yet: four earlier cards all came up in the Armbian installed
+on the eMMC, because the RK3399 BootROM tries the **eMMC before the SD card** and so never
+ran the card's bootloader. The card now reaches Android a different way — see below — and
+the three things that would have stopped first-stage init once it got there are fixed.
+[`docs/STATUS.md`](docs/STATUS.md) has the state, [`docs/BOOT.md`](docs/BOOT.md) the boot
+path, [`docs/HARDWARE.md`](docs/HARDWARE.md) what was measured on the real board.
+
+**How the card boots.** Partition 1 of every image is `bootfs`, a small FAT holding a
+`boot.scr`. The U-Boot already on the eMMC — Armbian's here — scans the card first and
+runs it, and the script boots our `boot.img` straight from the card's `boot` partition,
+telling Android which controller it booted from. Nothing on the eMMC is written; pull the
+card and the board is as it was. The card also carries our own mainline U-Boot, which
+runs from an empty eMMC, in Khadas's TST mode (FUNCTION pressed three times within two
+seconds) or, later, from SPI NOR.
 
 **Three media, one layout.**
 
 | | Bootloader | How it is written |
 |---|---|---|
-| `edge1-sdcard.img` | sector 64 | Balena Etcher, from the desktop |
-| `edge1-emmc.img` | sector 64 | from the card, by `edge1-install-internal.sh` |
-| `edge1-nvme.img` | none possible | from the card, by `edge1-install-internal.sh` |
+| `edge1-sdcard.img` | ours at sector 64, plus `bootfs` for the eMMC's | Balena Etcher, from the desktop |
+| `edge1-emmc.img` | ours at sector 64, plus `bootfs` | from the card, by `edge1-install-internal.sh` — which keeps the eMMC's working bootloader unless ours has been seen to run |
+| `edge1-nvme.img` | none possible, `bootfs` only | from the card, by `edge1-install-internal.sh` |
 
-The card is the install, and it stays the escape hatch. It carries its own mainline
-U-Boot, and that U-Boot tries the **card, then the eMMC, then the NVMe** — so a card
-with an Android boot partition always wins, and pulling it out puts the board back on
-whatever is on internal storage. The first attempt is reversible and so is every one
-after it.
-
-The NVMe never holds the bootloader: the RK3399 BootROM can start from NAND, eMMC, SPI
-or SD, but not from PCIe. An SSD install keeps U-Boot on the eMMC or the card and puts
-only Android's partitions on the SSD.
+The NVMe never holds the bootloader: the RK3399 BootROM can start from NAND, eMMC, SPI or
+SD, but not from PCIe. An SSD install keeps U-Boot on the eMMC or the card and puts only
+Android's partitions on the SSD.
 
 ## The shape of the port
 
@@ -60,29 +62,49 @@ loaded at first stage. `PRODUCT_SHIPPING_API_LEVEL` is 29, not 34: declaring 34
 would assert launch-device status and demand a 5.15 kernel and 64-bit-only
 userspace.
 
-**Partitions.** One 96MiB `boot` carrying kernel, ramdisk and dtb together (boot
-image header v2, no `vendor_boot`), a 96MiB `recovery`, and a 4608MiB `super`
-holding system/system_ext/product/vendor/odm as logical partitions, plus `misc`,
-`vbmeta`, `metadata` and `userdata`. Non-A/B. The layout is
+**Partitions.** A 4MiB `bootfs` first (the boot script for a distro U-Boot), then one
+96MiB `boot` carrying kernel, ramdisk and dtb together (boot image header v2, no
+`vendor_boot`), a 96MiB `recovery`, and a 4608MiB `super` holding
+system/system_ext/product/vendor/odm as logical partitions, plus `misc`, `vbmeta`,
+`metadata` and `userdata`. Non-A/B. The layout is
 [`device/khadas/edge/flash/partitions.tsv`](device/khadas/edge/flash/partitions.tsv),
 and it is the single source for all three images, the eMMC flash script and the
 on-device installer — not a Rockchip `update.img`, which needs the BSP bootloader this
 path does not use.
 
 **Bootloader.** Mainline U-Boot at `v2026.07`, `khadas-edge-v-rk3399_defconfig` plus
-Android boot image support, with `BL31` from `rkbin`. It sits in the card's raw
-sectors ahead of the first partition.
+Android boot image support, an HDMI console and a compiled-in environment, with `BL31`
+from `rkbin`. It sits in the raw sectors ahead of the first partition, and tries the
+card, then the eMMC, then the NVMe, then distro boot. Or the eMMC's own U-Boot boots the
+card through `bootfs` — on a board whose eMMC is not empty, that is what actually runs.
+
+**Kernel command line.** `androidboot.boot_devices` comes from whichever bootloader runs,
+per medium (`fe320000.mmc` card, `fe330000.mmc` eMMC); `boot.img` carries
+`androidboot.verifiedbootstate=orange`, since no bootloader here supplies a vbmeta
+digest. A userdebug build adds the kernel log on HDMI, a panic instead of a silent reboot
+on an init failure, and permissive SELinux — this board is being brought up without a
+serial adapter.
 
 ## What is here
 
 | | |
 |---|---|
-| [`manifests/khadas_edge_tv14.xml`](manifests/khadas_edge_tv14.xml) | `repo` local-manifest overlay: upstream AOSP 14 plus the mainline kernel |
-| [`device/khadas/edge/`](device/khadas/edge) | the device tree — TV product, board config, VINTF, fstab, init, SELinux, audio/media/input config, kernel delta, flash layout, Wi-Fi firmware |
-| [`build/`](build) | preflight, sync, kernel build, platform build, and the verifiers |
+| [`manifests/khadas_edge_tv14.xml`](manifests/khadas_edge_tv14.xml) | `repo` local-manifest overlay: upstream AOSP 14, the mainline kernel and U-Boot |
+| [`device/khadas/edge/`](device/khadas/edge) | the device tree — TV product, board config, VINTF, fstab, init, SELinux, audio/media/input config, kernel delta, flash layout and boot script, Wi-Fi firmware |
+| [`build/`](build) | preflight, sync, kernel/U-Boot/platform builds, the image builder, the verifiers |
 | [`build/windows/`](build/windows) | the WSL2 orchestrator this is actually driven from |
-| [`docs/`](docs) | status, kernel, HAL migration, the end-to-end runbook, the Windows host notes |
+| [`build/reference/`](build/reference) | a U-Boot built elsewhere for this board, for comparison |
+| [`docs/`](docs) | see below |
 | `default.xml` | the original Android 10 manifest, untouched for reference |
+
+| Document | |
+|---|---|
+| [`docs/BOOT.md`](docs/BOOT.md) | power-on to first-stage init: BootROM order, both boot paths, what the kernel needs, TST mode, installing |
+| [`docs/STATUS.md`](docs/STATUS.md) | where it is, what is open, and the build-system decisions worth not re-deriving |
+| [`docs/HARDWARE.md`](docs/HARDWARE.md) | what was measured on the real board |
+| [`docs/PORTING.md`](docs/PORTING.md) | the runbook, step by step, on Linux |
+| [`docs/WINDOWS.md`](docs/WINDOWS.md) | the same, driven from Windows through WSL2 |
+| [`docs/KERNEL.md`](docs/KERNEL.md), [`docs/HAL_MIGRATION.md`](docs/HAL_MIGRATION.md) | why mainline, and what replaced each Android 10 HAL |
 
 ## Running it
 
@@ -112,7 +134,9 @@ Each takes the tree as an optional first argument and otherwise finds it:
 one presents as `run sync.sh first` on a tree that is fully synced and built, which is
 why it is resolved rather than assumed.
 
-Then, once the card boots, to move it onto internal storage:
+Write `out/.../edge1-sdcard.img.gz` (or `~/android_khadas/output/` on the Windows
+pipeline) with Etcher, insert it, power on. Then, once the card boots, to move it onto
+internal storage:
 
 ```sh
 adb root && adb shell sh /vendor/bin/edge1-install-internal.sh emmc   # or nvme
@@ -129,6 +153,12 @@ Kati parse time. Step by step in [`docs/PORTING.md`](docs/PORTING.md).
 * **Bluetooth is unresolved.** The kernel's `hci_bcm` and Android's Bluetooth HAL
   both want to own `/dev/ttyS0`. The kernel transport is left out of the config so
   the port stays free until that is decided.
+* **Verified boot is `orange` and SELinux is permissive on userdebug.** No bootloader
+  in the chain computes a vbmeta digest yet (`avb verify` in U-Boot is the fix), and the
+  first boot of a new port is not the moment to enforce policy that has never met a
+  running system.
+* **Our own U-Boot has not run on this board.** The card boots through the eMMC's U-Boot;
+  ours is to be tested in TST mode before it goes onto the eMMC or into SPI NOR.
 * **Not CTS-certifiable.** No TEE is provisioned, so KeyMint and Gatekeeper are the
   software `nonsecure` implementations and hardware key attestation is unavailable.
   Widevine is absent entirely; DRM is clearkey only.

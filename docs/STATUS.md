@@ -4,146 +4,54 @@ Where the port is, what is still open, and the decisions worth not re-deriving.
 
 ## Where the build is
 
-**`m` completes.** `#### build completed successfully ####`, 153 of 153 targets on the
-incremental run that got there, after 167136 on the first. Every image the flash layout
-names now builds, `super.img` included.
+**`m` completes, and the card is built to boot on this board as it is.** Nothing has
+booted Android yet; the next card is the first one that can.
 
-Two things then stood between a successful build and a card that boots, and both were
-invisible from the build's own output: `super.img` was not produced at all until asked
-for, and once produced it was in Android's sparse format, which cannot be written into
-a partition. Both are below.
+Four cards went onto the hardware before this, and all four booted the Armbian on the
+eMMC. The reason was the RK3399 BootROM's order — SPI NOR, then eMMC, then SD card — which
+means a bootloader on the card never runs while the eMMC holds one. The card now carries a
+small FAT as partition 1 with a `boot.scr` that the eMMC's own U-Boot finds and runs, and
+that boots our `boot.img`. [`BOOT.md`](BOOT.md) has the mechanism and the sources.
 
-**The card has been written and booted once, and it did not run.** HDMI gets a signal
-for about ten seconds and then the board comes up on the Armbian that is installed on the
-eMMC. The diagnosis below is what that one observation does and does not establish.
+On the way, three things turned up that would have stopped Android even with the
+bootloader solved, none visible from the build's own output: no
+`androidboot.boot_devices` (first-stage init would find no partitions), no verified-boot
+state (the `avb` mounts would refuse), and a U-Boot `bootcmd` whose card → eMMC → NVMe
+fallback could never run (its hush does not do `a && b || c`). All three are fixed and
+guarded by `verify-tree.sh`.
 
 | Stage | State |
 |---|---|
 | `repo sync` (AOSP `android-14.0.0_r75` + mainline 6.12.111) | works |
 | Kernel: `Image`, `rk3399-khadas-edge-v.dtb` | builds, every fragment symbol verified to take |
 | `lunch edge1_tv-trunk_staging-userdebug`, product config | works |
-| Soong (100% of `Android.bp`), Kati (all `.mk`) | works |
-| Compile — 167136 targets on the first run | works |
-| sepolicy: vendor policy, `precompiled_sepolicy`, `treble_sepolicy_tests` 29.0–34.0 | passes |
-| VINTF: `vendor_manifest.xml`, `check_vintf_all` | passes at `target-level="7"`, no VNDK requirement, kernel-version check disabled |
-| `vendor/build.prop`, `system/build.prop` | generated |
-| `boot.img`, `recovery.img`, `dtb.img`, `vbmeta.img` | build |
-| `system.img`, `vendor.img`, `product.img`, `system_ext.img`, `odm.img` | build |
-| `super.img` | builds, and raw rather than sparse, so it can be written |
-| U-Boot (mainline v2026.07, Android boot image, card→eMMC→NVMe) | **builds**; `u-boot-rockchip.bin` 9.2MB, all three boot targets and the itb placement verified |
-| Images: `edge1-sdcard.img`, `edge1-emmc.img`, `edge1-nvme.img` | **build**, around a real bootloader; none written to hardware |
-| On-device installer (card → eMMC or NVMe) | new; offsets verified against the layout, never run on hardware |
-| Flash pack (`edge1-flash/` + `flash-emmc.sh`, for eMMC) | superseded by the installer, never run |
+| Soong, Kati, compile (167136 targets first run) | works |
+| sepolicy, VINTF, `build.prop` | pass / generated (VINTF at `target-level="7"`) |
+| `boot.img`, `recovery.img`, `vbmeta.img`, `super.img` (raw, not sparse) | build |
+| Kernel command line | now carries `verifiedbootstate=orange`; userdebug adds `console=tty0`, `init_fatal_panic`, `selinux=permissive`. Needs a rebuild to reach `boot.img` |
+| `bootfs.img` (partition 1: `boot.scr` for the eMMC's U-Boot) | new; run in U-Boot's sandbox against a real card image, kernel/ramdisk/dtb byte-exact |
+| U-Boot (mainline v2026.07) | builds; `bootcmd` rewritten with per-medium `boot_devices` and `;`-joined attempts, tested in the sandbox. **Never run on this board** — see TST mode in `BOOT.md` |
+| Images: `edge1-sdcard.img`, `edge1-emmc.img`, `edge1-nvme.img` | build, now with `bootfs` first |
+| On-device installer (card → eMMC or NVMe) | keeps the eMMC's bootloader unless the card's own U-Boot started the system; never run on hardware |
+| Flash pack (`edge1-flash/` + `flash-emmc.sh`) | superseded by the installer, never run |
 
-### Three cards on hardware: the card's U-Boot proper never ran
+### What the hardware attempts established
 
-Symptom: HDMI signal shortly after power-on, about ten seconds, then the board boots
-Armbian off the eMMC.
+Measured on the board — [`HARDWARE.md`](HARDWARE.md) has the readings:
 
-One fact settles most of it. `khadas-edge-v-rk3399_defconfig` enables **no display
-support at all** — no `CONFIG_VIDEO`, no `CONFIG_DM_VIDEO`, no `CONFIG_VIDEO_ROCKCHIP`
-(`CONFIG_DISPLAY_BOARDINFO_LATE` prints to serial, not to a screen). So the U-Boot this
-tree builds **cannot put anything on HDMI**. The signal is not ours, and since the board
-ends up in Armbian, what ran is Armbian's bootloader off the eMMC. The card's U-Boot
-proper was never reached — its TPL and SPL, it turned out, were.
+* SPI NOR is erased; the eMMC and each card carry a valid Rockchip ID block at sector 64,
+  and the FIT sits at sector 16384 as intended. The card's bootloader was correct and was
+  simply never run.
+* The U-Boot that handed off to the kernel was `2022.07-armbian` every time, with every
+  variant of the card in the slot.
+* The controllers are `fe320000.mmc` (card) and `fe330000.mmc` (eMMC) — the names
+  `androidboot.boot_devices` needs.
 
-That is consistent with the ten seconds, too: Armbian's `boot_targets` is
-`"mmc1 mmc0 nvme scsi usb pxe dhcp spi"`, so its U-Boot scans the SD card **first**,
-finds no filesystem it recognises on our raw Android partitions, and falls through to
-the eMMC. What looks like a reboot is the display re-syncing when the kernel takes the
-HDMI port.
-
-Two candidate causes, and they need different fixes, so they are worth separating before
-anything is written:
-
-1. **U-Boot in SPI NOR.** Armbian's board file has `BOOT_SUPPORT_SPI=yes`. The BootROM
-   reads SPI NOR as one of its boot sources, and if a bootloader is there it wins over
-   both eMMC and SD. `cat /proc/mtd` from the running Armbian answers this.
-2. **The card's first stage fails, and the BootROM falls through to the eMMC.** SPI
-   NOR is erased, both the eMMC and the card carry a valid ID block at sector 64, and
-   the board boots the eMMC. I first read that as the BootROM preferring eMMC; the
-   board's owner has the counter-example that settles it — an OpenWrt card on this
-   same board always won over the eMMC. So the card *is* read first and its header
-   *is* accepted. I then read "falls through" as DDR init failing, which the A/B
-   disproved: `EDGE1_ROCKCHIP_TPL=1` substitutes Rockchip's DDR blob as a single
-   variable, and both cards — U-Boot's TPL and the blob — boot Armbian identically.
-
-**Resolved: the BootROM never fell through at all.** Our TPL and SPL run from the card;
-SPL then loads the *second* stage on its own, and it picks the eMMC. Two defects, one
-after the other in the same boot, each sufficient on its own:
-
-- `u-boot,spl-boot-order` lists `&sdhci` (eMMC) before `&sdmmc` (card), and
-  `same-as-spl` is allowed to fail silently (`spl-boot-order.c:140-144`). The eMMC has
-  a valid `u-boot.itb` at sector 16384 because Armbian writes it there too — the same
-  layout this tree uses — so SPL loads Armbian's U-Boot 2022.07 from a card that is
-  entirely correct. `build-uboot.sh` now reorders the property to card-first, which is
-  what Armbian itself ships for the rk3399 board it boots from removable media.
-- `CONFIG_ENV_IS_IN_MMC=y` with `CONFIG_ENV_MMC_DEVICE_INDEX=0` reads the environment
-  off the **eMMC**, and `env_load()` replaces the compiled-in `bootcmd` and `preboot`
-  wholesale rather than merging. That would have taken over the moment the first was
-  fixed. The fragment now turns it off, which selects `ENV_IS_NOWHERE`. It also
-  explains the one observation nothing else did: Ethernet and DHCP running before
-  Armbian loads, which our `bootcmd` never does and Armbian's `boot_targets` always
-  does.
-
-Neither fix touches the eMMC. **Both were built and neither booted the card** — the
-log shows the reordered boot order and `env/nowhere.o`, and the board still reports
-`u-boot,version = 2022.07-armbian`. They stay in: each would have bitten the moment the
-other was fixed, and ruling them out is what narrowed the rest.
-
-What narrowed it much further is a known-good reference. The board's owner built OpenWrt
-for this same Edge-V earlier and **that card wins over the eMMC every time**; its
-bootloader now lives in `build/reference/openwrt-u-boot-2025.10/` with the `.config` it
-was built from. Compared against ours: the ID block is structurally identical
-(`init_offset` 4, `init_size` 136, `init_boot_size` 368 vs our 376), the sectors are
-identical, the FIT has the same shape and also has no `tee` image — and only fifteen
-config symbols differ, eleven of them ours. The four that are not ours are the load
-addresses v2026.07 moved: `CONFIG_TEXT_BASE` 0x00200000 -> 0x00800000 and
-`CONFIG_SPL_LOAD_FIT_ADDRESS` 0x0 -> 0x00200000, with `SYS_BOOTM_LEN` and
-`LNX_KRNL_IMG_TEXT_OFFSET_BASE` following.
-
-The comparison also settles two things: the working OpenWrt build has
-`CONFIG_ENV_IS_IN_MMC=y` with device index 0, so there is no valid environment at eMMC
-sector 8128 on this board; and it does not touch `u-boot,spl-boot-order` and still wins,
-so `same-as-spl` does resolve here. Both of our fixes were therefore correct and neither
-was load-bearing.
-
-Two cards separate what is left: `EDGE1_UBOOT_REV=v2025.10` (the one version known to
-boot this board), and OpenWrt's own bootloader written at the same two sectors via
-`EDGE1_UBOOT_IDB`/`EDGE1_UBOOT_ITB`. The second cannot fail to inform - if `U-Boot
-2025.10` reaches HDMI, the BootROM boots this card layout and the fault is in our
-U-Boot; if it does not, the BootROM is not reading the card at all and the path forward
-is the SPI NOR or the eMMC. [`HARDWARE.md`](HARDWARE.md) has every reading and citation.
-
-**The card itself is proven correct**, which the first check nearly got wrong. From the
-board: the GPT is exactly the seven partitions at exactly the right sectors, and
-`chosen/u-boot,version` reads `2022.07-armbian`, so it really is Armbian's bootloader
-running and not ours.
-
-Sector 64 of the card reads as high-entropy noise, and **that is what a correct ID block
-looks like.** `tools/rkcommon.c:340` RC4-encrypts the whole 512-byte header0 with the
-fixed key at `:178-181` — unconditionally; the `spl_rc4 = false` in the rk3399 entry at
-`:150` applies to the SPL payload, not this header. U-Boot verifies it by calling the
-same function again (`:427`, RC4 being symmetric) and only then checking the magic. So
-expecting to see `55 aa f0 0f` in a hexdump was wrong in both directions: a valid block
-never shows it, and garbage looks identical.
-
-`build/rk-idb-check.py` does it properly — decrypt, then check `0x0ff0aa55` — and it
-confirmed the card. It is also wired into `build-images.sh`, which now refuses to build
-an image around a bootloader that does not begin with a valid ID block; both the valid
-and the invalid case are tested. A truncated or wrong `u-boot-rockchip.bin` would
-otherwise be written into all three images and produce a card the BootROM silently walks
-past, with nothing anywhere to say so.
-
-One consequence worth keeping: **a 16MB SPI NOR is present** (`mtd0`, `spi1.0`), and
-`CONFIG_ROCKCHIP_SPI_IMAGE=y` is already in the Edge-V defconfig, so this build already
-produces `u-boot-rockchip-spi.bin`. If the SPI turns out to hold the bootloader that
-wins, the path to replace it exists with no configuration change.
-
-**The change this produced: U-Boot now outputs on HDMI.** Being invisible on a board with
-no UART adapter is what made ten seconds of signal worth so little, and it is fixed in
-the fragment rather than left to the serial console the board may never get. See
-`build-uboot.sh` for the six symbols and why four of them are not enough on their own.
+What they did not establish, because none of the card's code ever ran: whether our U-Boot,
+our TPL's DDR init, or our SPL work on this board. The DDR-blob A/B, the SPL boot-order
+change and the environment change all tested code that never executed. Those changes
+stay, because each is right for when our U-Boot does run; the account of how the
+diagnosis went wrong is at the end of `BOOT.md`.
 
 ### super.img, twice
 
@@ -233,12 +141,17 @@ partition, and that failure is what moves to the next medium — which is why
 `CONFIG_HUSH_PARSER` is in the fragment; without `&&` and `||` there is no fallback
 and a missing card is a dead board.
 
-Putting the card first is the single most useful property here. Whichever medium the
-BootROM happened to load U-Boot from, a card with an Android boot partition takes
-over — so every install onto internal storage is undone by inserting the card, with
-no serial console and nothing to repair. It also means the port does not depend on
-knowing the BootROM's own preference between SD and eMMC, which is not stated
-anywhere in the sources this tree is verified against.
+Putting the card first is still the most useful property of our `bootcmd`: whichever
+medium the BootROM loaded our U-Boot from, a card with an Android boot partition takes
+over. But this paragraph used to add that the port "does not depend on knowing the
+BootROM's own preference between SD and eMMC". It did depend on it, completely: the
+BootROM prefers the eMMC, so with anything on the eMMC our U-Boot does not run at all.
+The card boots on such a board only because partition 1 carries a script the eMMC's
+U-Boot runs. [`BOOT.md`](BOOT.md).
+
+The `||` that joined the three attempts was also wrong, differently: U-Boot's hush skips
+`||` branches when the `&&` side fails, so the fallback never ran. The attempts are now
+separated with `;`.
 
 `CONFIG_NVME_PCI`, `CONFIG_PCI`, `CONFIG_CMD_NVME` and `CONFIG_CMD_USB_MASS_STORAGE`
 all turned out to be in the Edge-V defconfig already, so the third medium and the
@@ -382,10 +295,18 @@ for. The two image files remain useful for the other route — `ums 0 mmc 0` fro
 U-Boot prompt exposes the target as a USB disk and Etcher writes it — which needs a
 serial console but no Android.
 
+It does not replace a working bootloader with an untried one. On this board the Android
+it runs from was started by the eMMC's U-Boot through `bootfs`, so the card's U-Boot has
+never run here; copying it onto the eMMC would swap a known-good bootloader for an
+unknown one on the medium that is hardest to recover. The installer reads
+`/proc/device-tree/chosen/u-boot,version` and copies the card's bootloader only if that
+is the U-Boot that started the system; otherwise it leaves the eMMC's in place, and that
+U-Boot boots the installed Android through the eMMC's own `bootfs`.
+
 The offsets are the part that had to be right, since a wrong one puts `super` where
 nothing looks for it. They are checked against the layout's own arithmetic, in a
-sandbox with `sgdisk` and `dd` stubbed to log rather than write: the seven partition
-starts and the four `dd` offsets all match, and they match what the generated
+sandbox with `sgdisk` and `dd` stubbed to log rather than write: the partition
+starts and the `dd` offsets all match, and they match what the generated
 `flash-emmc.sh` produces. That test also caught the installer's one real bug —
 `grep -c ... || echo 0` prints `0` **and** exits 1 when nothing matches, so the count
 read `0\n0`, the "something is mounted" check fired on every run, and no install
@@ -410,7 +331,7 @@ none of that work is reusable anywhere else.
 | Decode | `staging/media/rkvdec` (H.264 only) | `external/v4l2_codec2` |
 | Wi-Fi | `brcmfmac` over SDIO | AOSP `wpa_supplicant` |
 | Audio | `simple-audio-card` → HDMI | AOSP AIDL audio HAL over ALSA |
-| Boot | mainline U-Boot + TF-A | ordinary GPT, images written from Linux |
+| Boot | mainline U-Boot + TF-A, or the eMMC's own U-Boot via `boot.scr` | ordinary GPT, Android boot image v2 |
 
 No proprietary blob is involved. What made this credible rather than hopeful is
 that the board is already proven on this kernel: it runs OpenWrt with Linux 6.12.94
@@ -431,59 +352,46 @@ Rockchip's own gralloc did.
 
 ## What is still open
 
-1. **Nothing has been booted.** Everything below is secondary to that. The install
-   path is now an SD card written with Balena Etcher rather than the eMMC script: the
-   RK3399 BootROM reads the card before the eMMC, so the card boots on its own with
-   the eMMC untouched, and removing it puts the board back. That makes the first
-   attempt reversible, which the eMMC path is not.
-2. **U-Boot, the image builder and the installer are new and unexercised on hardware.**
-   All three are written against the real sources and verified as far as a host can
-   verify them: the boot sequence is U-Boot's own from `doc/android/boot-image.rst`,
-   the Edge-V defconfig is upstream, `build-images.sh` is tested end to end against
-   fabricated images with every partition's contents checked at its sector and the
-   sparse path exercised with a real sparse image and a reference decoder, the SD
-   image it produces is byte-identical to the single-target script it replaced apart
-   from sgdisk's random GUIDs, and the installer's offsets are checked against the
-   layout's own arithmetic with `sgdisk` and `dd` stubbed. But no U-Boot has been
-   compiled all the way through yet — the first attempt stopped on missing host
-   packages — and nothing has been written to any medium.
-3. **Hardware video decode is not wired up.** `CONFIG_VIDEO_ROCKCHIP_VDEC` is in the
+1. **The first boot of Android.** Rebuild (the command line and sepolicy changed, so
+   `Build` re-runs), write the card, power on with the eMMC as it is. On a userdebug
+   build the kernel log is on HDMI and an init failure stays on screen; `BOOT.md` has
+   what each stage looks like.
+2. **Our own U-Boot has never run on this board.** It runs only from an empty eMMC, in
+   TST mode, or from SPI NOR. TST mode with the card in is the test; the
+   `U-Boot 2026.07` banner on HDMI is the pass. Nothing should write our U-Boot to the
+   eMMC or SPI NOR before that — which is why the installer keeps the eMMC's bootloader.
+3. **Verified boot is `orange`.** No bootloader in the chain computes a vbmeta digest,
+   so the device declares itself unlocked; dm-verity still runs. Lifting that for a
+   `user` build means `CONFIG_AVB_VERIFY` and `avb verify` in U-Boot, and a bootfs
+   script that does the same or is retired in favour of our U-Boot in SPI NOR.
+4. **SELinux is permissive on userdebug.** Deliberately, for the first boot: the denials
+   are logged and can be collected with `adb shell dmesg | grep avc` and fixed. The
+   boot medium's partitions are now labelled; nothing else in the policy has met a
+   running system yet.
+5. **Hardware video decode is not wired up.** `CONFIG_VIDEO_ROCKCHIP_VDEC` is in the
    kernel and `external/v4l2_codec2` is in the tree, with
    `android.hardware.media.c2@1.2-service-v4l2` available — but it is not in
    `PRODUCT_PACKAGES`, and it needs a codec2 store config and a `media_codecs_c2.xml`
    beside it. Until then the software codecs carry playback: 1080p yes, 4K no.
-   6.12's rkvdec is H.264 only in any case (`rkvdec-h264.c` and nothing else), so
-   HEVC and VP9 stay in software regardless.
-4. **Bluetooth is unresolved, and the framing was wrong.** This was written as the
-   kernel's `hci_bcm` and Android's HAL both wanting `/dev/ttyS0`. Measured on the
-   board: **there is no `/dev/ttyS0`** — `ttyS1` through `ttyS7` exist and uart0 is
-   not presented as a tty at all. What is now known is the firmware name,
-   `BCM4359C0.hcd`, which this tree does not ship. See
-   [`HARDWARE.md`](HARDWARE.md).
-5. **The device targets FCM level 7, not 8.** That was forced rather than chosen —
-   see below — and it is worth knowing when reading anything that says this is an
-   Android 14 device: the vendor image's HAL surface is Android-13-era.
-6. **Codec performance numbers are placeholders.** `media/media_codecs_performance.xml`
+   6.12's rkvdec is H.264 only in any case, so HEVC and VP9 stay in software regardless.
+6. **Bluetooth is unresolved.** Measured on the board: there is no `/dev/ttyS0` —
+   `ttyS1` through `ttyS7` exist and uart0 is not presented as a tty. The firmware name
+   is `BCM4359C0.hcd`, which this tree does not ship. See [`HARDWARE.md`](HARDWARE.md).
+7. **The device targets FCM level 7, not 8.** Forced rather than chosen — see below.
+   The vendor image's HAL surface is Android-13-era.
+8. **Codec performance numbers are placeholders.** `media/media_codecs_performance.xml`
    holds datasheet ceilings, not measurements from this board.
-7. **ART's userfaultfd GC is off, and no longer for the original reason.** It was
-   off because the 4.19 BSP kernel lacked the feature; 6.12 has all of it, and by
-   AOSP's own rule this board qualifies. It stays off for the first boot on purpose
-   — a different garbage collector is an untested variable in the one attempt that
-   matters, and it would fail inside ART during zygote startup. Flip
-   `PRODUCT_ENABLE_UFFD_GC` to `true` once the device boots; it is a memory win on a
-   4GB board, not a requirement.
-8. **`kmsro` in `BOARD_GPU_DRIVERS` is confirmed valid, and now known to be the right
-   shape.** It is in the driver-name list `external/mesa3d/Android.mk` accepts
-   (`kmsro.HAVE_GALLIUM_KMSRO`), and the board confirms the split it exists for:
-   `card0` is the display controller (`display-subsystem`, with `card0-HDMI-A-1`) and
-   `card1`/`renderD128` are panfrost at `ff9a0000.gpu`. Two devices, which is exactly
-   what kmsro bridges.
-9. **`/dev/dri/card1` is not labelled by our `file_contexts`.** Measured: card1 is
-   panfrost's primary node. AOSP is believed to carry a generic `/dev/dri/card[0-9]*`
-   spec that would cover it, but that is not measured, and the probe should settle it.
-   See [`HARDWARE.md`](HARDWARE.md).
-10. **The M.2 slot is empty**, so `edge1-nvme.img` and the installer's `nvme` target
-    cannot be tested at all yet. Everything about them is reasoned from the silicon.
+9. **ART's userfaultfd GC is off for the first boot.** 6.12 supports it and the board
+   qualifies; it stays off so the one attempt that matters has one variable fewer. Flip
+   `PRODUCT_ENABLE_UFFD_GC` to `true` once the device boots.
+10. **`/dev/dri/card1` is not labelled by our `file_contexts`.** It is panfrost's primary
+    node. AOSP is believed to carry a generic `/dev/dri/card[0-9]*` spec that covers it;
+    the probe should settle it. `kmsro` in `BOARD_GPU_DRIVERS` is confirmed valid and is
+    the right shape for this `card0` (display) / `card1` (GPU) split.
+11. **The M.2 slot is empty**, so `edge1-nvme.img`, the installer's `nvme` target and the
+    `f8000000.pcie` boot device cannot be tested yet.
+12. **SPI NOR is empty and unused.** Our U-Boot there would make the board independent
+    of what is on the eMMC. After item 2.
 
 ## Honest expectation
 
@@ -784,12 +692,19 @@ table of (file, state key, stages):
 
 | Input | Un-completes |
 |---|---|
-| `manifests/khadas_edge_tv14.xml` | `Sync`, `Kernel` |
+| `manifests/khadas_edge_tv14.xml` | `Sync`, `Kernel`, `Uboot` |
 | `build/windows/apt-packages.txt` | `Provision` |
 | `device/khadas/edge/**` | `Build` |
+| `device/khadas/edge/kernel/edge1_mainline.config` | `Kernel`, `Build` |
 | `build/build-kernel.sh` | `Kernel` |
 | `build/build-uboot.sh` | `Uboot` |
 | `build/build.sh` | `Build` |
+
+`Uboot` joined the manifest row when `build-uboot.sh` started editing the U-Boot checkout
+that a sync resets. The kernel fragment got a row of its own later, found in the audit
+rather than by a failure: it lives under `device/khadas/edge`, so its hash re-ran only
+`Build` - which packs whatever `Image` the `Kernel` stage left behind. A fragment change
+would have shipped the previous kernel with nothing in any log to say so.
 
 The last three rows are the same lesson again, and the third time it cost a cycle:
 **a stage's own script is an input to it.** `build-uboot.sh` was rewritten to try the

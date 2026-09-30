@@ -199,6 +199,12 @@ $script:TrackedInputs = @(
               '2>/dev/null | sort -z | xargs -0 sha256sum 2>/dev/null | sha256sum | cut -c1-16') }
     @{ Key='kernelScriptHash'; Path='build/build-kernel.sh';
        Stages=@('Kernel'); Label="the kernel build script" }
+    # The kernel fragment lives under device/khadas/edge, so deviceHash already re-runs
+    # Build when it moves - but Build only packs the Image the Kernel stage left behind.
+    # Without this entry a fragment change rebuilt boot.img around the OLD kernel, with
+    # nothing in any log to say so.
+    @{ Key='kernelFragmentHash'; Path='device/khadas/edge/kernel/edge1_mainline.config';
+       Stages=@('Kernel', 'Build'); Label="the kernel config fragment" }
     @{ Key='ubootScriptHash';  Path='build/build-uboot.sh';
        Stages=@('Uboot'); Label="the U-Boot build script" }
     @{ Key='buildScriptHash';  Path='build/build.sh';

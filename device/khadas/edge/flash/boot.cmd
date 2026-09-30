@@ -18,7 +18,7 @@
 # ours (from the card, via TST mode or an empty eMMC; or from SPI NOR) or the one
 # already on the eMMC. Only commands every U-Boot of the last several years has are
 # used: part, mmc/nvme read, setexpr, booti. In particular it does not need
-# CONFIG_ANDROID_BOOT_IMAGE, which Armbian's U-Boot does not enable.
+# CONFIG_ANDROID_BOOT_IMAGE, which the defconfig Armbian builds its U-Boot from lacks.
 #
 # What distro boot hands us
 # -------------------------

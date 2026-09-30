@@ -65,20 +65,24 @@ Reach it from Explorer at `\\wsl.localhost\Edge1Build\home\builder\android_khada
 | `Aidl` | Dumps the real AIDL method surface of every HAL this board speaks to `aidl-surface.txt` |
 | `Probe` | Checks the device tree against the synced tree and **stops the run** on anything it can answer in a minute that the build would take hours to reach |
 | `Kernel` | Builds mainline 6.12 LTS with the Android 14 config delta, and stages the board dtb |
-| `Uboot` | Builds mainline U-Boot with Android boot image support, so the SD card boots on its own |
+| `Uboot` | Builds mainline U-Boot with Android boot image support, for the card, the eMMC and SPI NOR (the BootROM runs it only when nothing on the eMMC is bootable - see `BOOT.md`) |
 | `Build` | `lunch edge1_tv-trunk_staging-userdebug`, `m`, then the eMMC flash pack |
-| `Images` | Assembles the three whole-disk images (SD card, eMMC, NVMe) and copies them to `android_khadas\output` |
+| `Images` | Builds `bootfs.img` (partition 1, the boot script the eMMC's U-Boot runs) from `boot.img`, assembles the three whole-disk images (SD card, eMMC, NVMe) and copies them to `android_khadas\output` |
 
 Run one on its own with `-Stage Build`. Re-run a completed stage with `-Force`.
 
-Three inputs are hashed into the state file, and a stage whose input moved is
+Seven inputs are hashed into the state file, and a stage whose input moved is
 un-completed by itself:
 
 | Input | Un-completes | Because |
 |---|---|---|
-| `manifests/khadas_edge_tv14.xml` | `Sync`, `Kernel` | a tree synced against a different manifest is not synced |
+| `manifests/khadas_edge_tv14.xml` | `Sync`, `Kernel`, `Uboot` | a tree synced against a different manifest is not synced; a sync also resets the U-Boot checkout the Uboot stage edits |
 | `build/windows/apt-packages.txt` | `Provision` | a distro provisioned against a shorter package list is missing packages |
 | `device/khadas/edge/**` | `Build` | images built from an older device tree are stale |
+| `build/build-kernel.sh` | `Kernel` | a stage's own script is an input to it |
+| `device/khadas/edge/kernel/edge1_mainline.config` | `Kernel`, `Build` | the device tree hash re-runs only `Build`, which packs whatever `Image` the `Kernel` stage left - so a fragment change used to ship the old kernel |
+| `build/build-uboot.sh` | `Uboot` | the same |
+| `build/build.sh` | `Build` | the same |
 
 The device tree's hash is the sorted hash of every file under it, so any edit counts.
 Re-running `Build` with `out/` intact and ccache warm is an incremental rebuild, not a
@@ -188,19 +192,20 @@ powercfg /change hibernate-timeout-ac 0
 ## What you get at the end
 
 `android_khadas\output\edge1-sdcard.img.gz` — one file, written to an SD card with
-Balena Etcher, which reads `.gz` directly. The raw `.img` is beside it in the tree if
-you want that instead; the compressed copy exists because 7GiB over
-`\\wsl.localhost` is slow.
+Balena Etcher, which reads `.gz` directly. The raw `.img` is beside it in the tree if you
+want that instead; the compressed copy exists because 7GiB over `\\wsl.localhost` is slow.
 
-**The eMMC is not touched.** The RK3399 BootROM reads the SD card before the eMMC, so
-a card with a bootloader in its raw sectors takes over the boot and whatever is
-installed on the eMMC stays there. Pull the card out and the board is back as it was.
-That is why this is the install path and not the flash script.
+**Insert it and power on; the eMMC is not written.** The RK3399 BootROM tries the eMMC
+before the card, so with Armbian (or anything bootable) on the eMMC it is the eMMC's
+U-Boot that runs — and it scans the card first and runs the `boot.scr` on the card's
+partition 1, which boots our Android. Pull the card and the board is as it was.
+[`BOOT.md`](BOOT.md) has the mechanism, what each stage looks like on HDMI, and TST
+mode for running the card's own U-Boot.
 
 `out/target/product/edge/edge1-flash/` also exists — the same images plus a generated
-`flash-emmc.sh` that partitions and writes the **eMMC**, from a Linux already running
-on the board. It erases the eMMC, it has never been run, and it is for later.
-`PORTING.md` step 6 has both.
+`flash-emmc.sh` that partitions and writes the **eMMC** from a Linux already running on
+the board. It erases the eMMC, it has never been run, and the on-device installer
+supersedes it. `PORTING.md` step 6 has both.
 
 Every HAL in the image is an AOSP one talking to a mainline driver rather than a
 half-ported Rockchip HIDL one:
@@ -217,6 +222,26 @@ software KeyMint, no attestation, clearkey DRM only. `STATUS.md` is the full pic
 
 The honest test of the first image is whether it boots to a leanback launcher on HDMI
 with a working remote and network. Everything after that is configuration.
+
+## Running one command by hand
+
+Some steps — trying another bootloader, rebuilding one image — are run directly in the
+distro rather than as a stage. From PowerShell:
+
+```powershell
+wsl -d Edge1Build -e bash -lc 'cd ~/android_khadas/android_manifest && build/build-images.sh sdcard'
+```
+
+Three things make that reliable, and each was a failed command first:
+
+* **`-e`** runs `bash` directly. Without it wsl hands the line to a shell of its own,
+  which expands `$VAR` before the `bash -lc` it was meant for ever runs — a `$R` set
+  earlier in the same line arrives empty.
+* **No `""`.** PowerShell 5.1 does not pass an empty quoted argument to a native program.
+  `build-images.sh` takes the target as its first argument for this reason, and the
+  tree is found without being named.
+* **No `~/aosp-14-edge1`.** The tree is `~/android_khadas/aosp-14-edge1`; the scripts
+  find it themselves (`build/lib-tree.sh`) when no path is given.
 
 ## Caveat on the script itself
 

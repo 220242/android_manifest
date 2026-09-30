@@ -117,3 +117,22 @@ before `m`:
   is globbed for `*.dtb` and everything found is concatenated, so it points at a
   directory `build-kernel.sh` stages with exactly one dtb - not at the kernel's
   own dts output, which holds about ninety.
+
+## The command line
+
+`BOARD_KERNEL_CMDLINE` in `BoardConfig.mk` goes into `boot.img`'s header:
+`console=ttyS2,1500000n8`, `androidboot.hardware=edge1`, `firmware_class.path`, and
+`androidboot.verifiedbootstate=orange`, without which the `avb` mounts in the fstab refuse
+to proceed with no vbmeta digest from the bootloader. A userdebug build adds
+`console=tty0` — the kernel log on HDMI through fbcon, which the fragment states
+explicitly (`CONFIG_VT`, `CONFIG_VT_CONSOLE`, `CONFIG_FRAMEBUFFER_CONSOLE`) rather than
+trusting to defaults — plus `androidboot.init_fatal_panic=true` and
+`androidboot.selinux=permissive`.
+
+What `boot.img` must **not** carry is `androidboot.boot_devices`: it names the storage
+controller the system booted from, differs per medium, and is added by whichever
+bootloader starts the kernel. [`BOOT.md`](BOOT.md#what-the-kernel-has-to-be-told) has the
+AOSP source lines behind both arguments.
+
+A change to `kernel/edge1_mainline.config` re-runs both the `Kernel` and the `Build`
+stage; before that was tracked, a fragment change re-packed the old `Image`.

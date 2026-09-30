@@ -31,7 +31,8 @@
 # Why the offsets are baked in rather than read at boot
 #
 # The script has to run on whatever U-Boot is on the eMMC, which here is Armbian's
-# 2022.07. That rules out abootimg (CONFIG_ANDROID_BOOT_IMAGE is not in its config)
+# 2022.07. That rules out abootimg (CONFIG_ANDROID_BOOT_IMAGE is not in the
+# khadas-edge-v-rk3399_defconfig Armbian builds it from)
 # and makes it unwise to lean on anything newer than part, mmc read, setexpr and
 # booti. Parsing a header in hush needs arithmetic on memory reads; reading the
 # header here, in Python, needs none. The script still checks at boot that the
