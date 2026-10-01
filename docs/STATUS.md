@@ -5,13 +5,18 @@ Where the port is, what is still open, and the decisions worth not re-deriving.
 ## Where the build is
 
 **`m` completes, and the card is built to boot on this board as it is.** Nothing has
-booted Android yet; the next card is the first one that can.
+booted Android yet.
 
-Four cards went onto the hardware before this, and all four booted the Armbian on the
-eMMC. The reason was the RK3399 BootROM's order — SPI NOR, then eMMC, then SD card — which
-means a bootloader on the card never runs while the eMMC holds one. The card now carries a
-small FAT as partition 1 with a `boot.scr` that the eMMC's own U-Boot finds and runs, and
-that boots our `boot.img`. [`BOOT.md`](BOOT.md) has the mechanism and the sources.
+Five cards went onto the hardware before this, and all five booted the Armbian on the
+eMMC. For the first four the reason was the RK3399 BootROM's order — SPI NOR, then eMMC,
+then SD card — which means a bootloader on the card never runs while the eMMC holds one.
+The card now carries a FAT as partition 1 with a `boot.scr` that the eMMC's own U-Boot
+finds and runs. On the fifth card that script did run, and declined: it used `setexpr`,
+which Armbian's U-Boot 2022.07 is not built with. It now loads `Image`, `ramdisk.img`
+and `edge1.dtb` as files with commands that U-Boot has, was run on a U-Boot 2022.07
+sandbox with this board's command set and distro-boot environment, and writes
+`edge1-boot.log` to the card at every attempt. [`BOOT.md`](BOOT.md) has the mechanism,
+the sources and how to read the log and the LED.
 
 On the way, three things turned up that would have stopped Android even with the
 bootloader solved, none visible from the build's own output: no
@@ -23,13 +28,13 @@ guarded by `verify-tree.sh`.
 | Stage | State |
 |---|---|
 | `repo sync` (AOSP `android-14.0.0_r75` + mainline 6.12.111) | works |
-| Kernel: `Image`, `rk3399-khadas-edge-v.dtb` | builds, every fragment symbol verified to take |
+| Kernel: `Image`, `rk3399-khadas-edge-v.dtb` | builds, every fragment symbol verified to take; the staged dtb marks `sys_led` as panic indicator |
 | `lunch edge1_tv-trunk_staging-userdebug`, product config | works |
 | Soong, Kati, compile (167136 targets first run) | works |
 | sepolicy, VINTF, `build.prop` | pass / generated (VINTF at `target-level="7"`) |
 | `boot.img`, `recovery.img`, `vbmeta.img`, `super.img` (raw, not sparse) | build |
 | Kernel command line | now carries `verifiedbootstate=orange`; userdebug adds `console=tty0`, `init_fatal_panic`, `selinux=permissive`. Needs a rebuild to reach `boot.img` |
-| `bootfs.img` (partition 1: `boot.scr` for the eMMC's U-Boot) | new; run in U-Boot's sandbox against a real card image, kernel/ramdisk/dtb byte-exact |
+| `bootfs.img` (partition 1: `boot.scr` + `Image`/`ramdisk.img`/`edge1.dtb` for the eMMC's U-Boot) | 128MiB; script limited to 2022.07's commands (checked at build time) and run through distro boot on a v2022.07 sandbox: files byte-exact, `bootargs` right, log written, fallback to the eMMC intact. `booti` itself not exercised (ARM-only) |
 | U-Boot (mainline v2026.07) | builds; `bootcmd` rewritten with per-medium `boot_devices` and `;`-joined attempts, tested in the sandbox. **Never run on this board** — see TST mode in `BOOT.md` |
 | Images: `edge1-sdcard.img`, `edge1-emmc.img`, `edge1-nvme.img` | build, now with `bootfs` first |
 | On-device installer (card → eMMC or NVMe) | keeps the eMMC's bootloader unless the card's own U-Boot started the system; never run on hardware |

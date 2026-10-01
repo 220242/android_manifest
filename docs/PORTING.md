@@ -210,11 +210,14 @@ One layout — `flash/partitions.tsv` — and three media. Each image is a GPT b
 file with every partition image `dd`'d into place, plus a `.img.gz` beside it that Etcher
 reads directly.
 
-**Partition 1 of every image is `bootfs`**, a 4MiB FAT built by `build/build-bootfs.sh`
+**Partition 1 of every image is `bootfs`**, a 128MiB FAT built by `build/build-bootfs.sh`
 from `boot.img` (it runs again on every `build-images.sh`, so it always matches). It holds
-`boot.scr`, which boots the Android boot image from the `boot` partition of whatever
-device it is on. A distro U-Boot — Armbian's, on this board's eMMC — scans the card first
-and runs it; that is how the card boots on a board whose eMMC is not empty.
+`boot.scr` and copies of the kernel, ramdisk and dtb out of `boot.img`, which the script
+`load`s and `booti`s. A distro U-Boot — Armbian's, on this board's eMMC — scans the card
+first and runs it; that is how the card boots on a board whose eMMC is not empty. The
+script may use only what Armbian's U-Boot 2022.07 has (no `setexpr`, among others):
+`build/check-uboot-script.py` enforces the list. It writes `edge1-boot.log` next to
+itself on every attempt, and on the card the partition is typed so Windows mounts it.
 
 **The NVMe image has no bootloader and cannot have one**: the BootROM's boot sources
 (`arch/arm/include/asm/arch-rockchip/bootrom.h:47-59`) do not include PCIe.

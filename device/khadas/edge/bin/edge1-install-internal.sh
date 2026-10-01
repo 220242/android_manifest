@@ -33,8 +33,10 @@
 #   - For nvme it does not write a bootloader, because it cannot. The RK3399
 #     BootROM's boot sources are NAND, eMMC, SPI NOR, SPI NAND, SD, UFS, I2C, SPI
 #     and USB - PCIe is not one of them. An NVMe install therefore still needs
-#     U-Boot on the eMMC or on the card. Install to the eMMC first if the board is
-#     to run from the SSD with no card in it.
+#     U-Boot on the eMMC or on the card - and it has to be this project's, which
+#     tries the NVMe: Armbian's 2022.07 for this board has no NVMe support at all
+#     (no CMD_NVME in its config, so no nvme in its boot_targets). Install to the
+#     eMMC first if the board is to run from the SSD with no card in it.
 #
 #   - It does not replace a working bootloader with an untried one. See below.
 #
@@ -228,6 +230,12 @@ else
     echo "  bootloader   none - the BootROM cannot boot from PCIe. U-Boot has to stay"
     echo "               on the eMMC or the card; install to the eMMC too if you want"
     echo "               the board to run with no card in it."
+    if [ "$UB_PROVEN" != 1 ]; then
+        echo "  WARNING      and it has to be this project's U-Boot: the one that started"
+        echo "               this system ($RUNNING_UB) may not read an NVMe at all."
+        echo "               Armbian's 2022.07 for this board does not - its config has"
+        echo "               no CMD_NVME, and its distro boot never looks there."
+    fi
 fi
 echo
 echo "  EVERYTHING ON $DEV WILL BE LOST."

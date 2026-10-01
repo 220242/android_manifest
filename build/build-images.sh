@@ -199,10 +199,9 @@ if (( need_uboot == 0 )) && [[ -z "$EXT_IDB" ]] && [[ ! -f "$UBOOT" ]]; then
     exit 1
 fi
 
-# bootfs.img is regenerated every time rather than trusted from the Build stage:
-# it bakes in offsets read from boot.img, and a stale one would point its boot
-# script at the wrong sectors. Its own boot-time check would catch that and refuse
-# to boot, but refusing is still a board that does not boot. build-bootfs.sh has
+# bootfs.img is regenerated every time rather than trusted from the Build stage: it
+# carries copies of the kernel, ramdisk and dtb out of boot.img, and a stale one would
+# boot an older build than the boot partition next to it holds. build-bootfs.sh has
 # the reason partition 1 exists at all.
 "$(dirname "${BASH_SOURCE[0]}")/build-bootfs.sh" "$TREE"
 
@@ -458,6 +457,13 @@ build_target() {
         printf '    %-12s %6sMiB  part %d\n' "$name" "$size" "$n"
         n=$(( n + 1 ))
     done
+    # bootfs as "Microsoft basic data" (0700), not the default "Linux filesystem"
+    # (8300): Windows gives a drive letter only to the former, and edge1-boot.log on
+    # it is how a boot attempt is read back without a serial console. The legacy
+    # BIOS-bootable attribute (bit 2) is what distro boot's "part list -bootable"
+    # looks for; it falls back to partition 1 without it, but this way partition 1
+    # is chosen, not defaulted to.
+    sgdisk --typecode=1:0700 --attributes=1:set:2 "$img" >/dev/null
 
     if target_wants_bootloader "$target"; then
         if [[ -n "$EXT_IDB" ]]; then

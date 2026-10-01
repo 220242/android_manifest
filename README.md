@@ -4,18 +4,21 @@ A port of the Khadas Edge1 from its Android 10 (`khadas-edge-Qt`) configuration 
 Android TV 14, on a mainline kernel and with no proprietary blobs.
 
 **The build completes**, and produces a card image built to boot on this board as it
-is. Android has not booted yet: four earlier cards all came up in the Armbian installed
-on the eMMC, because the RK3399 BootROM tries the **eMMC before the SD card** and so never
-ran the card's bootloader. The card now reaches Android a different way — see below — and
-the three things that would have stopped first-stage init once it got there are fixed.
+is. Android has not booted yet: five earlier cards all came up in the Armbian installed
+on the eMMC — four because the RK3399 BootROM tries the **eMMC before the SD card** and so
+never ran the card's bootloader, the fifth because the boot script that works around that
+used `setexpr`, which Armbian's U-Boot 2022.07 does not have. The script now uses only
+what 2022.07 has (checked at build time, and run on a 2022.07 sandbox), and the three
+things that would have stopped first-stage init once it got there are fixed.
 [`docs/STATUS.md`](docs/STATUS.md) has the state, [`docs/BOOT.md`](docs/BOOT.md) the boot
 path, [`docs/HARDWARE.md`](docs/HARDWARE.md) what was measured on the real board.
 
-**How the card boots.** Partition 1 of every image is `bootfs`, a small FAT holding a
-`boot.scr`. The U-Boot already on the eMMC — Armbian's here — scans the card first and
-runs it, and the script boots our `boot.img` straight from the card's `boot` partition,
-telling Android which controller it booted from. Nothing on the eMMC is written; pull the
-card and the board is as it was. The card also carries our own mainline U-Boot, which
+**How the card boots.** Partition 1 of every image is `bootfs`, a FAT holding a
+`boot.scr` and the kernel, ramdisk and dtb out of `boot.img`. The U-Boot already on the
+eMMC — Armbian's here — scans the card first and runs it, and the script loads those
+three and starts the kernel, telling Android which controller it booted from. It leaves
+`edge1-boot.log` on that partition, readable on any PC. Nothing on the eMMC is written;
+pull the card and the board is as it was. The card also carries our own mainline U-Boot, which
 runs from an empty eMMC, in Khadas's TST mode (FUNCTION pressed three times within two
 seconds) or, later, from SPI NOR.
 
@@ -62,7 +65,8 @@ loaded at first stage. `PRODUCT_SHIPPING_API_LEVEL` is 29, not 34: declaring 34
 would assert launch-device status and demand a 5.15 kernel and 64-bit-only
 userspace.
 
-**Partitions.** A 4MiB `bootfs` first (the boot script for a distro U-Boot), then one
+**Partitions.** A 128MiB `bootfs` first (a boot script, and the kernel, ramdisk and dtb
+as files, for a distro U-Boot), then one
 96MiB `boot` carrying kernel, ramdisk and dtb together (boot image header v2, no
 `vendor_boot`), a 96MiB `recovery`, and a 4608MiB `super` holding
 system/system_ext/product/vendor/odm as logical partitions, plus `misc`, `vbmeta`,

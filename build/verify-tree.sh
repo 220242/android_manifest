@@ -387,7 +387,7 @@ echo "[3g] bootfs: partition 1, and the script that lives on it"
 bootfs_bad=0
 first_row="$(awk -F'\t' '$1 !~ /^#/ && NF >= 3 { print $1; exit }' "$TSV")"
 if [[ "$first_row" == bootfs ]]; then
-    ok "bootfs is partition 1 (distro boot scans partition 1 when none is flagged)"
+    ok "bootfs is partition 1 (flagged bootable on the card; distro boot defaults to 1 anyway)"
 else
     err "the first row of partitions.tsv is '$first_row', not bootfs; distro boot on the"
     err "  eMMC's U-Boot would not find the boot script"
@@ -404,16 +404,26 @@ if [[ -f "$bootcmd_tpl" && -f "$bootfs_sh" ]]; then
         grep -qx "$ph" <<< "$emitted" || { err "boot.cmd uses @$ph@, which build-bootfs.sh never sets"; unfilled=$((unfilled+1)); }
     done < <(grep -oE '@[A-Z0-9_]+@' "$bootcmd_tpl" | tr -d @ | sort -u)
     (( unfilled )) && bootfs_bad=$((bootfs_bad+unfilled)) || ok "every placeholder in boot.cmd is filled from boot.img"
-    # hush's && / || trap applies to the script as much as to the bootcmd.
-    if grep -vE '^\s*#' "$bootcmd_tpl" | grep -qE '&&.*\|\|'; then
-        err "boot.cmd chains '&& ... ||'; U-Boot's hush skips the || branch when the &&"
-        err "  side fails (see build-uboot.sh). Use if/then/else."
-        bootfs_bad=$((bootfs_bad+1))
+    # The script runs on the eMMC's U-Boot - Armbian's 2022.07 on this board - so
+    # it may use only what that U-Boot has. The first version used setexpr, which
+    # 2022.07's khadas-edge-v config does not build, and declined to boot on the
+    # board every time. The checker also refuses hush's '&& ... ||' trap.
+    if chk_out="$(python3 "$ROOT/build/check-uboot-script.py" "$bootcmd_tpl" 2>&1)"; then
+        ok "boot.cmd: ${chk_out#*: }"
     else
-        ok "boot.cmd uses if/then/else, not '&& ... ||'"
+        while IFS= read -r l; do err "$l"; done <<< "$chk_out"
+        bootfs_bad=$((bootfs_bad+1))
     fi
 else
     err "missing $bootcmd_tpl or $bootfs_sh"
+    bootfs_bad=$((bootfs_bad+1))
+fi
+# Windows gives a drive letter only to a "Microsoft basic data" partition, and the
+# boot script's log on bootfs is read back on a PC.
+if grep -q 'typecode=1:0700' "$ROOT/build/build-images.sh"; then
+    ok "the card image types bootfs 0700, so a PC mounts it and edge1-boot.log is readable"
+else
+    err "build-images.sh no longer types partition 1 as 0700; Windows would hide bootfs"
     bootfs_bad=$((bootfs_bad+1))
 fi
 for caller in build/build.sh build/build-images.sh; do

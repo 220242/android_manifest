@@ -256,6 +256,22 @@ function Invalidate-OnInputChange {
     }
 }
 
+# What each stage's output feeds. A stage that runs makes these run again after it:
+# the state file only records that Build once completed, not which kernel it packed,
+# so a Kernel re-run - from its script or its fragment changing, or -Force - would
+# otherwise leave boot.img around the old Image and dtb. That is how the sys_led
+# panic-indicator, added to the dtb by build-kernel.sh, would have missed the card.
+# Uboot and Build feed Images, which always runs.
+$script:Feeds = @{
+    Sync   = @('Kernel', 'Uboot', 'Build')
+    Kernel = @('Build')
+}
+function Clear-Done { param([string[]] $Names)
+    $s = Get-State
+    $s.completed = @(@($s.completed) | Where-Object { $_ -notin $Names })
+    $s | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $script:StatePath -Encoding UTF8
+}
+
 function Set-Done { param([string] $Name)
     # Reads the whole state and writes the whole state, so the manifest hash that
     # now lives alongside 'completed' survives.
@@ -1052,6 +1068,7 @@ try {
             }
             Write-Warn2 "$($s.Name) is marked complete but its output is missing; re-running it"
         }
+        if ($script:Feeds.ContainsKey($s.Name)) { Clear-Done $script:Feeds[$s.Name] }
         & $s.Fn
     }
     $elapsed = (Get-Date) - $started

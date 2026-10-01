@@ -20,7 +20,10 @@ It works because of partition 1 of the card, not because of the bootloader on it
 | Nothing, or TST mode is used | **our U-Boot**, from the card's sector 64 |
 | Our U-Boot in SPI NOR (not done yet) | **our U-Boot**, from SPI |
 
-The kernel log appears on HDMI on a userdebug build, so each stage can be watched.
+The screen stays dark until a kernel starts — Armbian's U-Boot has no video — and then
+shows the kernel log on a userdebug build. What happened before that is written to
+`edge1-boot.log` on the card, which any PC can read; [Watching it boot](#watching-it-boot)
+has the details.
 
 ## The BootROM goes SPI NOR, then eMMC, then SD card
 
@@ -50,53 +53,95 @@ both carry a valid ID block. So the eMMC wins, and a bootloader on the card neve
 ## Path A: the eMMC's U-Boot boots the card
 
 What the eMMC's U-Boot does after it starts is run *distro boot*, and on Rockchip
-distro boot looks at the SD card first:
+distro boot looks at the SD card first. On this board that U-Boot is 2022.07, and its
+list comes from `BOOT_TARGET_DEVICES` in that release's
+`include/configs/rockchip-common.h` ("First try to boot from SD (index 1), then eMMC
+(index 0)"); preprocessed against `khadas-edge-v-rk3399_defconfig` it is
 
 ```
-include/configs/rockchip-common.h:17    #define BOOT_TARGETS "mmc1 mmc0 nvme scsi usb pxe dhcp spi"
+boot_targets=mmc1 mmc0 usb0 pxe dhcp sf0
 ```
 
-`mmc1` is the card (`&sdmmc`, `mmc@fe320000`), `mmc0` the eMMC. For each device it
-lists the partitions flagged bootable and, if there are none, **uses partition 1**
+`mmc1` is the card (`&sdmmc`, `mmc@fe320000`), `mmc0` the eMMC. There is no `nvme`: that
+config has no `CMD_NVME` (current U-Boot's list does have it). For each device it lists
+the partitions flagged bootable and, if there are none, **uses partition 1**
 (`include/config_distro_bootcmd.h`, `scan_dev_for_boot_part`); on that partition it
-looks for `extlinux/extlinux.conf`, then `boot.scr`.
+looks for `extlinux/extlinux.conf`, then `boot.scr.uimg`, then `boot.scr`, first in `/`
+and then in `/boot/`.
 
 That is how the owner's OpenWrt card "won" over the eMMC: its partition 1 holds a
 `boot.scr`, and Armbian's U-Boot ran it. Our first four cards had `misc` — raw, no
 filesystem — as partition 1, so distro boot found nothing on the card and went on to the
 eMMC.
 
-So every image now begins with **`bootfs`: a 4MiB FAT that is partition 1**, holding
-`boot.scr` and the `boot.cmd` it was made from.
+So every image now begins with **`bootfs`: a 128MiB FAT that is partition 1**. On the
+card it is typed *Microsoft basic data* (so Windows mounts it, as `EDGE1BOOT`) and
+flagged legacy-BIOS-bootable (so distro boot picks it rather than defaulting to it). It
+holds:
+
+| File | |
+|---|---|
+| `boot.scr`, `boot.cmd` | the boot script, and its source |
+| `Image`, `ramdisk.img`, `edge1.dtb` | byte-for-byte copies of what `boot.img` carries, taken out of it in the same build step |
+| `edge1-boot.log` | rewritten by the script on every boot: how far it got |
+| `README.txt` | the above, for whoever opens the card on a PC |
 
 ### What the boot script does
 
 [`device/khadas/edge/flash/boot.cmd`](../device/khadas/edge/flash/boot.cmd) is a template;
-[`build/build-bootfs.sh`](../build/build-bootfs.sh) fills it from `boot.img`'s header,
-wraps it with `mkimage` and builds the FAT. At boot the script:
+[`build/build-bootfs.sh`](../build/build-bootfs.sh) takes `boot.img` apart, fills in its
+command line, wraps the script with `mkimage` and builds the FAT. At boot the script:
 
 1. works out which controller it is on from `devtype`/`devnum` — card `fe320000.mmc`,
    eMMC `fe330000.mmc`, NVMe `f8000000.pcie` — for `androidboot.boot_devices`;
-2. finds the `boot` partition by name (`part start`) and reads its first page;
-3. checks the header: magic `ANDROID!`, and the first word of the SHA1 `id` against the
-   one it was built for — a `boot` partition rewritten on its own is reported, not
-   booted with stale offsets;
-4. reads the kernel, the ramdisk and the dtb straight out of the `boot` partition to
-   `0x02200000`, `0x0a200000` and `0x01f00000`;
-5. sets `bootargs` to `androidboot.boot_devices=<controller>` plus `boot.img`'s own
-   command line, and runs `booti`.
+2. `load`s `Image`, `edge1.dtb` and `ramdisk.img` from its own partition to
+   `0x02200000`, `0x01f00000` and `0x0a200000`;
+3. sets `bootargs` to `androidboot.boot_devices=<controller>` plus `boot.img`'s own
+   command line;
+4. writes `edge1-boot.log` (`edge1_stage=booti`) and runs
+   `booti 0x02200000 0x0a200000:<size> 0x01f00000` — a raw ramdisk, `addr:size`.
 
-It uses only `part`, `mmc read`/`nvme read`, `setexpr` and `booti`, because it has to
-run on Armbian's U-Boot 2022.07, which almost certainly has no `abootimg`:
-`CONFIG_ANDROID_BOOT_IMAGE` is not in `khadas-edge-v-rk3399_defconfig`, which Armbian
-builds it from (`config/boards/khadas-edge.csc`). That is also why the offsets are baked in by the build rather
-than parsed at boot.
+If anything fails it writes the stage it reached to the log and returns, and distro
+boot carries on to the eMMC: the board boots Armbian as if the card were not there.
 
-It was run in U-Boot's own sandbox (the same source tree, the old hush parser that
-2022.07 has) against a real card image built by `build-images.sh`, with the real Edge-V
-dtb in `boot.img`: distro-boot discovery found it on partition 1, the kernel, ramdisk
-and dtb landed byte-for-byte at their addresses, `bootargs` came out right, and the
-id-mismatch and not-a-boot-image paths stopped with their messages.
+### What it may use: only what 2022.07 has
+
+The script runs on the eMMC's U-Boot, so it can use only the commands **that** U-Boot
+was built with — and `khadas-edge-v-rk3399_defconfig` at v2022.07 is narrow:
+
+* built: `booti`, `bootm`, `load` (`CMD_FS_GENERIC`), `fatwrite` (`FAT_WRITE`),
+  `env export`, `part`, `mmc`, `itest`, `source`, and `test` (built with `HUSH_PARSER`),
+  plus `LEGACY_IMAGE_FORMAT` for `boot.scr` itself and `SUPPORT_RAW_INITRD` for
+  `addr:size`;
+* **not built: `setexpr`**, `read`, `gpio`, `nvme`, `abootimg`, `led`; no video, no
+  watchdog, no `ver` variable (`VERSION_VARIABLE`).
+
+The first version of the script read the three pieces straight out of the raw `boot`
+partition and checked its header, which needed `setexpr` for the arithmetic. On the
+board `setexpr` was an unknown command, the header check failed, and the script
+declined — every time, with nothing on the screen to say so; the board went on to boot
+Armbian. The sandbox run that "verified" it was current U-Boot, which has `setexpr`.
+
+Now the script uses eight commands — `echo test setenv run load env fatwrite booti` —
+and [`build/check-uboot-script.py`](../build/check-uboot-script.py) refuses anything
+else at build time (it is also check 3g of `verify-tree.sh`), along with hush's
+`&& … ||` trap. The pieces are files because `load` is what every distro boot script
+uses, Armbian's own included; the price is 55MB duplicated on a 7GB card.
+
+It was then run on **U-Boot v2022.07 itself**: a sandbox build with that config's
+command set (`setexpr`, `read`, `gpio`, `nvme`, `abootimg`, `led` removed, legacy
+images on) and the distro-boot environment preprocessed from the 2022.07 headers for
+`khadas-edge-v-rk3399_defconfig`, with the card image from `build-images.sh` as the
+first boot target and a stand-in "Armbian" disk as the second. `run distro_bootcmd`
+found `/boot.scr` on partition 1, loaded the three files byte-for-byte (compared with
+`cmp.b`), set `bootargs`, wrote `edge1-boot.log`, and — `booti` being ARM-only, so
+missing in a sandbox — recorded `booti-returned` and fell through to the "Armbian"
+disk's script, which is exactly what the board does when the script declines. With a
+`poweroff` put where `booti` is, the log on the card read `edge1_stage=booti`; with
+`ramdisk.img` deleted, `no-ramdisk` and on to "Armbian". `fsck.vfat` found the FAT
+clean after each write. `booti` itself is the one step not exercised; its raw-initrd
+parsing (`boot/image-board.c:434-443` in 2022.07) was read, and it is the same call
+every extlinux distro makes.
 
 ## Path B: our own U-Boot
 
@@ -197,6 +242,33 @@ What the screen shows on a userdebug card, in order:
    whose last lines mention `first_stage_mount`, `fs_mgr` or `avb` is the part of this
    document that failed; photograph it.
 
+No HDMI patch is involved in any of this: the screen is dark during U-Boot because
+Armbian's U-Boot has no video at all, and the kernel drives HDMI with the same mainline
+dtb Armbian and OpenWrt use (`DRM_ROCKCHIP`, `ROCKCHIP_DW_HDMI` and fbcon are built in).
+
+**The sys LED.** Before HDMI is up it is the kernel's only signal. `sys_led` has the
+`heartbeat` trigger in the dtb, and `build-kernel.sh` marks it `panic-indicator`:
+
+| LED | Means |
+|---|---|
+| heartbeat: two short blinks, a pause | a kernel is running — Armbian's does this too |
+| an even blink, about 2.5 per second | **our kernel panicked** (`kernel/panic.c` toggles panic-indicator LEDs every 200ms); the panic text is on HDMI if DRM got that far |
+| neither | no kernel started, or it hung before the LED driver probed |
+
+**`edge1-boot.log`.** When the board ends up in Armbian anyway, put the card in a PC
+and open `edge1-boot.log` on the `EDGE1BOOT` drive (or, from Armbian itself,
+`mount -L EDGE1BOOT /mnt && cat /mnt/edge1-boot.log; umount /mnt`):
+
+| `edge1_stage` | Means |
+|---|---|
+| file unchanged since the build | the script never ran: the eMMC's U-Boot did not get to the card |
+| `no-kernel`, `no-dtb`, `no-ramdisk` | that file could not be loaded |
+| `booti-returned` | U-Boot refused to start the kernel |
+| `booti` | everything loaded and the kernel was started; from here on it is the kernel's story, on HDMI and the LED |
+
+`edge1_where` is the device and partition the script ran from, `boot_targets` and
+`fdtfile` are the eMMC U-Boot's own, and the sizes are hex.
+
 To tell afterwards which U-Boot started a running system (Armbian or Android):
 
 ```sh
@@ -244,6 +316,8 @@ running system, read from `/proc/device-tree/chosen/u-boot,version`:
 
 `--with-bootloader` and `--keep-bootloader` override the choice. The NVMe never gets a
 bootloader: the BootROM has no PCIe (`arch/arm/include/asm/arch-rockchip/bootrom.h:47-59`).
+And an NVMe install needs **our** U-Boot somewhere ahead of it — Armbian's 2022.07 has
+no NVMe support at all, so its distro boot never looks there. The installer says so.
 
 ## SPI NOR, later
 
@@ -278,3 +352,9 @@ the eMMC's U-Boot could read. The fixes from steps 3 and 4 stay — each is righ
 our U-Boot does run. The three things that would have stopped Android even with the
 bootloader solved — `boot_devices`, the verified-boot state, and the `&& ||` fallback —
 were found on the way.
+
+6. **"The boot script works."** It did — on the U-Boot it was tested on, the current
+   release. The board's is 2022.07 without `setexpr`, and the script declined silently
+   (above). Since then the script is checked against the 2022.07 command set at build
+   time and was run on a 2022.07 sandbox, and it leaves `edge1-boot.log` behind, so the
+   next failure on the board says where it happened.

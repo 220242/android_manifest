@@ -77,7 +77,8 @@ pigz
 
 # ---- bootfs.img, partition 1 of every image ----
 #
-# A 4MiB FAT holding a boot script, for the U-Boot already on the eMMC to find
+# A 128MiB FAT holding a boot script, the kernel, ramdisk and dtb, for the U-Boot
+# already on the eMMC to find
 # (build/build-bootfs.sh). mkfs.vfat makes the filesystem and mcopy writes into it
 # without mounting anything, which a WSL build user could not do.
 dosfstools

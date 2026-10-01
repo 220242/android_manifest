@@ -67,7 +67,7 @@ Reach it from Explorer at `\\wsl.localhost\Edge1Build\home\builder\android_khada
 | `Kernel` | Builds mainline 6.12 LTS with the Android 14 config delta, and stages the board dtb |
 | `Uboot` | Builds mainline U-Boot with Android boot image support, for the card, the eMMC and SPI NOR (the BootROM runs it only when nothing on the eMMC is bootable - see `BOOT.md`) |
 | `Build` | `lunch edge1_tv-trunk_staging-userdebug`, `m`, then the eMMC flash pack |
-| `Images` | Builds `bootfs.img` (partition 1, the boot script the eMMC's U-Boot runs) from `boot.img`, assembles the three whole-disk images (SD card, eMMC, NVMe) and copies them to `android_khadas\output` |
+| `Images` | Builds `bootfs.img` (partition 1: the boot script the eMMC's U-Boot runs, and the kernel, ramdisk and dtb it loads) from `boot.img`, assembles the three whole-disk images (SD card, eMMC, NVMe) and copies them to `android_khadas\output` |
 
 Run one on its own with `-Stage Build`. Re-run a completed stage with `-Force`.
 
@@ -83,6 +83,12 @@ un-completed by itself:
 | `device/khadas/edge/kernel/edge1_mainline.config` | `Kernel`, `Build` | the device tree hash re-runs only `Build`, which packs whatever `Image` the `Kernel` stage left - so a fragment change used to ship the old kernel |
 | `build/build-uboot.sh` | `Uboot` | the same |
 | `build/build.sh` | `Build` | the same |
+
+And a stage that runs un-completes the stages that consume its output: `Kernel` →
+`Build`, `Sync` → `Kernel`, `Uboot`, `Build` (`$script:Feeds`). The state file records
+that `Build` once completed, not which kernel it packed, so without this a re-run of
+`Kernel` - its script changed, or `-Force` - left `boot.img` holding the old `Image` and
+dtb. `Uboot` and `Build` feed `Images`, which always runs.
 
 The device tree's hash is the sorted hash of every file under it, so any edit counts.
 Re-running `Build` with `out/` intact and ccache warm is an incremental rebuild, not a
@@ -198,7 +204,9 @@ want that instead; the compressed copy exists because 7GiB over `\\wsl.localhost
 **Insert it and power on; the eMMC is not written.** The RK3399 BootROM tries the eMMC
 before the card, so with Armbian (or anything bootable) on the eMMC it is the eMMC's
 U-Boot that runs — and it scans the card first and runs the `boot.scr` on the card's
-partition 1, which boots our Android. Pull the card and the board is as it was.
+partition 1, which boots our Android. Pull the card and the board is as it was. If it
+ends up in Armbian anyway, the card's `EDGE1BOOT` drive on the PC has `edge1-boot.log`,
+which says how far the script got.
 [`BOOT.md`](BOOT.md) has the mechanism, what each stage looks like on HDMI, and TST
 mode for running the card's own U-Boot.
 

@@ -142,6 +142,27 @@ rm -rf "$DTB_STAGE"
 mkdir -p "$DTB_STAGE"
 cp "out/arch/arm64/boot/dts/rockchip/${DTB}.dtb" "$DTB_STAGE/"
 
+# sys_led as a panic indicator, in the staged copy (the kernel tree is not touched).
+# The board is brought up without a UART adapter, and until HDMI is up the LED is all
+# the kernel can say: heartbeat, its DT default, while it runs; with panic-indicator,
+# an even 2.5Hz blink once it has panicked (kernel/panic.c toggles those LEDs every
+# 200ms while it waits). Mainline sets it on rock960, pinebook-pro and puma, not on
+# the Edge. The fragment's LEDS_TRIGGER_PANIC is what acts on it.
+readonly SYS_LED=/leds/led-0
+staged="$DTB_STAGE/${DTB}.dtb"
+command -v fdtput >/dev/null 2>&1 || {
+    echo "fdtput not found - it is in device-tree-compiler, which build/windows/" >&2
+    echo "apt-packages.txt lists; re-run the Provision stage, or apt-get install it." >&2
+    exit 1; }
+if [[ "$(fdtget "$staged" "$SYS_LED" label 2>/dev/null)" == "sys_led" ]]; then
+    fdtput "$staged" "$SYS_LED" panic-indicator
+    fdtget "$staged" "$SYS_LED" panic-indicator >/dev/null
+    echo "    $SYS_LED (sys_led): panic-indicator set"
+else
+    echo "==> WARNING: ${DTB}.dtb has no sys_led at $SYS_LED any more; the LED will" >&2
+    echo "    not signal a kernel panic. Find the node with: fdtget -l $staged /leds" >&2
+fi
+
 echo
 echo "Image:  $KERNEL/out/arch/arm64/boot/Image  ($(du -h out/arch/arm64/boot/Image | cut -f1))"
 echo "dtb:    $DTB_STAGE/${DTB}.dtb  ($(du -h "$DTB_STAGE/${DTB}.dtb" | cut -f1))"
