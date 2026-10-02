@@ -250,6 +250,15 @@ PRODUCT_PACKAGES += \
 PRODUCT_PACKAGES += \
     android.hardware.audio.service-aidl.example \
     android.hardware.audio.effect.service-aidl.example
+# The two binaries alone did not give a running HAL on the ninth card: audioserver's
+# "start vendor.audio-hal-aidl" found no such service and servicemanager found no
+# android.hardware.audio.core.IModule/default in VINTF - the service's .rc and VINTF
+# fragment ship in the vendor APEX com.android.hardware.audio, which is how Android
+# 14 packages the default AIDL HAL. Added only if the tree has it, so a release that
+# renamed it does not stop the build.
+ifneq ($(wildcard hardware/interfaces/audio/aidl/default/apex/com.android.hardware.audio/Android.bp),)
+PRODUCT_PACKAGES += com.android.hardware.audio
+endif
 
 PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/audio/audio_policy_configuration.xml:$(TARGET_COPY_OUT_VENDOR)/etc/audio_policy_configuration.xml \
@@ -490,6 +499,17 @@ PRODUCT_PACKAGES += \
 
 
 # ---------------------------------------------------------------------------
+# Task profiles. PRODUCT_SHIPPING_API_LEVEL is 29, so libprocessgroup also loads
+# /system/etc/task_profiles/task_profiles_29.json, which re-points eleven profiles
+# (HighPerformance, MaxPerformance, ...) at the schedtune controller - an Android
+# common kernel feature mainline never had. The ninth card logged "failed to open
+# /dev/stune/top-app/cgroup.procs" for every process that asked for one. The vendor
+# file is loaded last (TaskProfiles::TaskProfiles) and replaces profiles by name, so
+# this one restores those eleven exactly as the base task_profiles.json of this
+# release defines them: the cpu controller and uclamp attributes 6.12 does have.
+PRODUCT_COPY_FILES += \
+    $(LOCAL_PATH)/task_profiles.json:$(TARGET_COPY_OUT_VENDOR)/etc/task_profiles.json
+
 # init / fstab.
 # ---------------------------------------------------------------------------
 # These are plain files installed by PRODUCT_COPY_FILES below, not Soong
@@ -555,6 +575,7 @@ PRODUCT_PROPERTY_OVERRIDES += \
 # builder, the generated eMMC flash script and this installer all read that one file.
 PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/bin/edge1-install-internal.sh:$(TARGET_COPY_OUT_VENDOR)/bin/edge1-install-internal.sh \
+    $(LOCAL_PATH)/bin/edge1-bootwatch.sh:$(TARGET_COPY_OUT_VENDOR)/bin/edge1-bootwatch.sh \
     $(LOCAL_PATH)/flash/partitions.tsv:$(TARGET_COPY_OUT_VENDOR)/etc/edge1-partitions.tsv
 
 # sgdisk writes the GPT on the target. It is not assumed to be present: it comes

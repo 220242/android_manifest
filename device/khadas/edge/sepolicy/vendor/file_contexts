@@ -70,5 +70,23 @@
 # brcmfmac's firmware and the board NVRAM live here, and the kernel firmware
 # loader reads them on behalf of the driver.
 /vendor/firmware(/.*)?              u:object_r:vendor_firmware_file:s0
+/vendor/bin/edge1-bootwatch\.sh      u:object_r:edge1_bootwatch_exec:s0
+
+# minigbm and Mesa. The allocator service needs an exec type to get a domain: the
+# ninth card's init refused to start it - "File /vendor/bin/hw/android.hardware.
+# graphics.allocator-service.minigbm (labeled u:object_r:vendor_file:s0) has incorrect
+# label or no domain transition", which init enforces even in permissive - and with
+# no allocator nothing can draw. The libraries below are loaded into every process
+# that draws (the mapper by gralloc clients, Mesa by every GL user), so they are
+# same_process_hal_file, as AOSP already labels /vendor/lib*/egl. Names as minigbm
+# and Mesa install them; GloDroid labels its minigbm variant the same way.
+/vendor/bin/hw/android\.hardware\.graphics\.allocator-service\.minigbm  u:object_r:hal_graphics_allocator_default_exec:s0
+/vendor/lib(64)?/hw/mapper\.minigbm\.so      u:object_r:same_process_hal_file:s0
+/vendor/lib(64)?/hw/gralloc\.minigbm\.so     u:object_r:same_process_hal_file:s0
+/vendor/lib(64)?/libminigbm.*\.so            u:object_r:same_process_hal_file:s0
+/vendor/lib(64)?/libdrm\.so                  u:object_r:same_process_hal_file:s0
+/vendor/lib(64)?/libglapi\.so                u:object_r:same_process_hal_file:s0
+/vendor/lib(64)?/libgallium.*\.so            u:object_r:same_process_hal_file:s0
+/vendor/lib(64)?/dri(/.*)?                   u:object_r:same_process_hal_file:s0
 # No /vendor/lib/modules: this kernel builds every driver it needs in, so there is
 # no vendor_dlkm and nothing to load.

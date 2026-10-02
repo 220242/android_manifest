@@ -78,6 +78,19 @@ Measured on the board — [`HARDWARE.md`](HARDWARE.md) has the readings:
   only with `CPUSETS_V1` (added); init's own log lines were being rate-limited away
   (`printk.devkmsg=on` on userdebug now); and `ro.hdmi.cec.source.send_standby_on_sleep`
   is an enum (`to_tv`), not a boolean.
+* **`/data` mounts; the framework starts.** Card 9b (photos; the board was powered off, so
+  no capture): `/data` formatted and mounted with its FBE v2 policy, `init_user0`
+  succeeded, apexd activated, netbpfload loaded netd's BPF programs, zygote, netd,
+  surfaceflinger and the HALs started — then a restart loop. Three causes visible:
+  init refused `vendor.graphics.allocator` (the minigbm service binary had no SELinux
+  exec label, which init enforces even in permissive) so nothing could draw;
+  `PRODUCT_SHIPPING_API_LEVEL 29` pulled in `task_profiles_29.json`, whose profiles
+  write to schedtune, which mainline lacks; and no audio HAL service existed. Fixed:
+  labels for minigbm and Mesa, a vendor `task_profiles.json` restoring the eleven
+  profiles, the `com.android.hardware.audio` APEX, and `edge1-bootwatch` — a
+  userdebug-only service that reboots warm if boot has not completed in 600s, so a
+  stuck boot leaves its log instead of needing the power switch.
+  [`HANDOFF.md`](HANDOFF.md) has the loop, the tools and the open list.
 * **Known next: Wi-Fi.** brcmfmac is built in, so it asks for
   `brcm/brcmfmac4359-sdio.bin` 1.8s into boot, long before `/vendor` is mounted, and
   gets -2. Armbian loads it as a module, after its rootfs is up. Not a boot blocker;

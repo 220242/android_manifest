@@ -10,6 +10,7 @@ never ran the card's bootloader, the fifth because the boot script that works ar
 used `setexpr`, which Armbian's U-Boot 2022.07 does not have. The script now uses only
 what 2022.07 has (checked at build time, and run on a 2022.07 sandbox), and the three
 things that would have stopped first-stage init once it got there are fixed.
+[`docs/HANDOFF.md`](docs/HANDOFF.md) is the working loop and where it stands,
 [`docs/STATUS.md`](docs/STATUS.md) has the state, [`docs/BOOT.md`](docs/BOOT.md) the boot
 path, [`docs/HARDWARE.md`](docs/HARDWARE.md) what was measured on the real board.
 

@@ -1,0 +1,10 @@
+# Khadas Edge1 - the bring-up boot watchdog (bin/edge1-bootwatch.sh).
+#
+# A domain of its own so init can start it: a vendor executable needs a domain to
+# transition into. init.edge1.rc starts it only when ro.debuggable=1, where the whole
+# policy runs permissive (androidboot.selinux=permissive), so no allow rules are
+# granted here - the getprop, setprop sys.powerctl and /dev/kmsg write it does are
+# logged, not refused. On a user build it never runs.
+type edge1_bootwatch, domain;
+type edge1_bootwatch_exec, exec_type, vendor_file_type, file_type;
+init_daemon_domain(edge1_bootwatch)

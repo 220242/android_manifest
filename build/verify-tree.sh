@@ -799,7 +799,8 @@ if [[ -d "$SEDIR" ]]; then
                 vendor_configs_file sysfs_type sysfs_gpu sysfs_leds
                 sysfs_thermal sysfs_devices_system_cpu video_device
                 super_block_device metadata_block_device userdata_block_device
-                misc_block_device boot_block_device recovery_block_device"
+                misc_block_device boot_block_device recovery_block_device
+                hal_graphics_allocator_default_exec same_process_hal_file"
     missing_types=0
     while read -r t; do
         [[ -n "$t" ]] || continue

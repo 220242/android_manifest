@@ -22,6 +22,18 @@ on fs
 on late-fs
     mount_all /vendor/etc/fstab.${ro.hardware} --late
 
+# Bring-up only: reboot warm if boot never completes, so the ramoops log survives
+# for the card's boot script to save. bin/edge1-bootwatch.sh has the why.
+service edge1_bootwatch /vendor/bin/edge1-bootwatch.sh
+    class late_start
+    user root
+    group root
+    oneshot
+    disabled
+
+on boot && property:ro.debuggable=1
+    start edge1_bootwatch
+
 on early-init
     # Mali-T860 (Midgard) devfreq governor. simple_ondemand is what the
     # Rockchip 4.19 BSP validates the T860 OPP table against.
