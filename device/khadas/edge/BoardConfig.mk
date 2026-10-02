@@ -198,6 +198,12 @@ BOARD_KERNEL_CMDLINE := console=tty0 $(BOARD_KERNEL_CMDLINE)
 BOARD_KERNEL_CMDLINE += androidboot.init_fatal_panic=true
 BOARD_KERNEL_CMDLINE += androidboot.selinux=permissive
 BOARD_KERNEL_CMDLINE += panic=20
+#   printk.devkmsg=on
+#                  no rate limit on what userspace writes to /dev/kmsg. init logs
+#                  there, and the eighth card's log lost init's own lines to it
+#                  ("printk: init: 22 output lines suppressed due to ratelimiting")
+#                  exactly where it mounted, or failed to mount, the partitions.
+BOARD_KERNEL_CMDLINE += printk.devkmsg=on
 endif
 
 BOARD_KERNEL_BASE := 0x00200000

@@ -7,6 +7,21 @@
 
 import /vendor/etc/init/hw/init.edge1.usb.rc
 
+# The fstab is mounted from here, by the device - rootdir/init.rc only triggers the
+# stages ("Mount fstab in init.{$device}.rc by mount_all command"). First-stage init
+# mounts just the first_stage_mount entries (system, system_ext, product, vendor,
+# odm); everything else - /metadata, and /data with latemount - is this. Without
+# these two lines nothing mounted /data at all: the eighth card got as far as
+# keystore2, which aborted on "unable to open database:
+# /data/misc/keystore/persistent.sqlite", and apexd, finding no /data/apex,
+# rebooted with "apexd-failed". On the first boot both partitions are blank and
+# mount_all formats them, because the fstab marks them formattable.
+on fs
+    mount_all /vendor/etc/fstab.${ro.hardware} --early
+
+on late-fs
+    mount_all /vendor/etc/fstab.${ro.hardware} --late
+
 on early-init
     # Mali-T860 (Midgard) devfreq governor. simple_ondemand is what the
     # Rockchip 4.19 BSP validates the T860 OPP table against.

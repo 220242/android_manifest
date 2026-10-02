@@ -317,7 +317,7 @@ PRODUCT_COPY_FILES += \
 
 PRODUCT_PROPERTY_OVERRIDES += \
     ro.hdmi.device_type=4 \
-    ro.hdmi.cec.source.send_standby_on_sleep=true \
+    ro.hdmi.cec.source.send_standby_on_sleep=to_tv \
     persist.sys.hdmi.keep_awake=false
 
 # ---------------------------------------------------------------------------

@@ -280,7 +280,10 @@ SELinux was built but not in `CONFIG_LSM` ([`KERNEL.md`](KERNEL.md#the-lsm-list)
 init then rebooted to "bootloader", a warm reset, and the next run of the boot script
 saved the whole console log to `edge1-pstore.bin`. Card eight: SELinux up, first-stage init
 read the fstab and stopped at `Missing vbmeta partitions` — the fstab's bare `avb` names no
-vbmeta partition; it says `avb=vbmeta` now.
+vbmeta partition; it says `avb=vbmeta` now. Card nine: past first stage, through the SELinux
+policy load and into second stage, where keystore2 and apexd found no `/data` — the
+device's init rc never ran `mount_all`. From here on the log ends in logcat as well:
+`edge1-pstore.bin`'s pmsg zone carried 130 lines of it.
 
 **`edge1-pstore.bin`: the previous kernel's log.** The kernel keeps a 1MiB
 [ramoops](https://docs.kernel.org/admin-guide/ramoops.html) region at `0x30100000`

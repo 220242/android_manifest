@@ -468,6 +468,20 @@ for dev in fe320000.mmc fe330000.mmc f8000000.pcie; do
     done
 done
 (( cl_bad )) || ok "both boot paths set boot_devices for the card, the eMMC and the NVMe"
+# Second stage mounts what first stage did not - /metadata, and /data (latemount) -
+# only when the device's init rc says mount_all; rootdir/init.rc just triggers the
+# stages. Without it the eighth card ran with no /data: keystore2 aborted and apexd
+# rebooted the board.
+init_rc="$DEV/init/init.edge1.rc"
+for mode in early late; do
+    if grep -vE '^\s*#' "$init_rc" | grep -qE "^\s*mount_all\s+/vendor/etc/fstab\.\\\$\{ro\.hardware\}\s+--$mode"; then
+        ok "init.edge1.rc runs mount_all --$mode on the fstab"
+    else
+        err "init.edge1.rc has no 'mount_all /vendor/etc/fstab.\${ro.hardware} --$mode'; /data"
+        err "  (and /metadata) would never be mounted"
+        cl_bad=$((cl_bad+1))
+    fi
+done
 # First-stage init takes the vbmeta partitions to read from the DT's
 # /firmware/android/vbmeta/parts or from "avb=<partition>" in the fstab; a bare "avb"
 # names nothing. With avb on a first_stage_mount entry and no name anywhere, it stops

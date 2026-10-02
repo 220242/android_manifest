@@ -67,6 +67,17 @@ Measured on the board — [`HARDWARE.md`](HARDWARE.md) has the readings:
   arm64 defconfig leaves IPv6, iptables and conntrack as modules netd cannot use. The
   fragment now carries Android's own base requirements (`KERNEL.md`), every line checked
   to take on 6.12.
+* **Second-stage init runs.** Card nine: AVB passed, super's five logical partitions
+  mounted, the SELinux policy loaded, ueventd, apexd, servicemanager, logd, vold, KeyMint
+  and keystore2 all started — and `edge1-pstore.bin` brought back logcat as well as the
+  kernel log. Then keystore2 aborted (`unable to open database:
+  /data/misc/keystore/persistent.sqlite`) and apexd rebooted the board (`apexd-failed`):
+  nothing had mounted `/data`, because `init.edge1.rc` never ran `mount_all`. It does
+  now, `--early` on `fs` and `--late` on `late-fs`, guarded by `verify-tree`. Same log:
+  Android's cpuset cgroup is v1, mounted as filesystem type `cpuset`, which 6.12 builds
+  only with `CPUSETS_V1` (added); init's own log lines were being rate-limited away
+  (`printk.devkmsg=on` on userdebug now); and `ro.hdmi.cec.source.send_standby_on_sleep`
+  is an enum (`to_tv`), not a boolean.
 * **Known next: Wi-Fi.** brcmfmac is built in, so it asks for
   `brcm/brcmfmac4359-sdio.bin` 1.8s into boot, long before `/vendor` is mounted, and
   gets -2. Armbian loads it as a module, after its rootfs is up. Not a boot blocker;
