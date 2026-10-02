@@ -1,0 +1,3 @@
+Placeholder installed by edge1_no_configstore (device/khadas/edge/Android.mk).
+Its only job is LOCAL_OVERRIDES_MODULES: it keeps the deprecated
+android.hardware.configstore@1.1-service out of the image. See Android.mk.

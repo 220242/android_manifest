@@ -71,5 +71,12 @@ odm          /odm          ext4  ro,barrier=1  wait,logical,first_stage_mount,av
 #
 # vold's match is fnmatch without FNM_PATHNAME, so * crosses / and one pattern
 # covers the controller, the hub and the block device below it.
-/devices/platform/fe320000.mmc/mmc_host*        /storage/sdcard1  vfat  nosuid,nodev  wait,voldmanaged=sdcard1:auto
+#
+# No entry for the SD slot (fe320000.mmc) while Android boots FROM the card. vold
+# would take the boot card for removable storage: it mounts any "basic data" GPT
+# partition as a public volume, and bootfs is one (type 0700, so the eMMC's U-Boot
+# finds it) - a second mount of the FAT that edge1-bootwatch writes logs to - and
+# Settings would offer to format the card the system runs from. Once it runs from
+# the eMMC, the slot is a real removable slot again and this line comes back:
+#   /devices/platform/fe320000.mmc/mmc_host*  /storage/sdcard1  vfat  nosuid,nodev  wait,voldmanaged=sdcard1:auto
 /devices/platform/*.usb*                        /storage/usbotg   vfat  nosuid,nodev  wait,voldmanaged=usbotg:auto

@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Khadas Edge1 - audio effects, for the AIDL effect HAL
+     (android.hardware.audio.effect.service-aidl.example, from the vendor APEX
+     com.android.hardware.audio).
+
+     The name matters: the AIDL service looks for audio_effects_config.xml, first in
+     its APEX and then in /odm/etc, /vendor/etc and /system/etc, and exits when it
+     finds none - "main: config file audio_effects_config.xml not found!" on the
+     tenth card, which took audioserver down with it on every start. This file was
+     audio_effects.xml, the HIDL effect HAL's name, which nothing reads any more.
+
+     The library paths are the AIDL builds of the same two effects (lib*aidl.so,
+     installed in the APEX); the HIDL ones (libdownmix.so, libdynproc.so) are not
+     loadable by this service. A library it cannot find is logged and skipped, not
+     fatal.
+
+     Downmix and dynamics processing only: downmix is what turns multichannel
+     content into the HDMI sink's channel count, and the legacy 3A/voice-processing
+     effects were for the tablet's mic array, which this SKU does not have. -->
+<audio_effects_conf version="2.0" xmlns="http://schemas.android.com/audio/audio_effects_conf/v2_0">
+    <libraries>
+        <library name="downmix" path="libdownmixaidl.so"/>
+        <library name="dynamics_processing" path="libdynamicsprocessingaidl.so"/>
+    </libraries>
+    <effects>
+        <effect name="downmix" library="downmix" uuid="93f04452-e4fe-41cc-91f9-e475b6d1d69f"/>
+        <effect name="dynamics_processing" library="dynamics_processing"
+                uuid="e0e6539b-1781-7261-676f-6d7573696340"/>
+    </effects>
+</audio_effects_conf>

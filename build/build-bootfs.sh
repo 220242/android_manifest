@@ -282,7 +282,13 @@ by itself after 20 seconds on a userdebug build; a power cut loses it), and
 edge1_prev in edge1-boot.log says whether it held one: "found" or "none".
 build/edge1-pstore.py in the source tree turns it into text.
 
-Do not edit these files on a PC; rebuild the image instead.
+edge1-logs/ appears once Android has run on a userdebug build: edge1-bootwatch
+writes logcat, dmesg, getprop and ps there 120 seconds into the boot, again when
+the boot completes or after 10 minutes if it never does (and then reboots the board
+warm, so edge1-pstore.bin is saved too). boot-0 is the latest boot, boot-1 the one
+before it. These are plain text, and they are the most complete record of a boot.
+
+Do not edit the other files on a PC; rebuild the image instead.
 EOF
 
 rm -f "$RESULT"

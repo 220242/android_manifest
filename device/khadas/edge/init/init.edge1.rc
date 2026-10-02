@@ -22,8 +22,9 @@ on fs
 on late-fs
     mount_all /vendor/etc/fstab.${ro.hardware} --late
 
-# Bring-up only: reboot warm if boot never completes, so the ramoops log survives
-# for the card's boot script to save. bin/edge1-bootwatch.sh has the why.
+# Bring-up only: write logcat/dmesg snapshots to the card's EDGE1BOOT partition, and
+# reboot warm if boot never completes, so the ramoops log survives for the card's
+# boot script to save. bin/edge1-bootwatch.sh has the why.
 service edge1_bootwatch /vendor/bin/edge1-bootwatch.sh
     class late_start
     user root

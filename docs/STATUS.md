@@ -91,6 +91,17 @@ Measured on the board — [`HARDWARE.md`](HARDWARE.md) has the readings:
   userdebug-only service that reboots warm if boot has not completed in 600s, so a
   stuck boot leaves its log instead of needing the power switch.
   [`HANDOFF.md`](HANDOFF.md) has the loop, the tools and the open list.
+* **The first log of Android itself.** Card 10: the watchdog rebooted warm and the
+  capture came back. zygote aborted at every start while preloading
+  `android.media.CamcorderProfile` — MediaProfiles requires a camera in
+  `media_profiles_V1_0.xml`, and ours had none; SurfaceFlinger could not present a
+  frame because the composer's command queue lives in ashmem, which mainline does not
+  have (`sys.use_memfd=true` switches libcutils to memfd); the AIDL effect HAL exited
+  for want of `audio_effects_config.xml`; and the configstore HAL that shipping level
+  29 installs crash-looped, undeclared. All fixed, plus tracefs (`CONFIG_FTRACE`),
+  system properties moved from `/vendor/build.prop` to `/product`, and vold kept off the
+  boot card. `edge1-bootwatch` now also writes logcat, dmesg, getprop and ps to the
+  card's FAT (`EDGE1BOOT\edge1-logs`), minutes of log instead of seconds.
 * **Known next: Wi-Fi.** brcmfmac is built in, so it asks for
   `brcm/brcmfmac4359-sdio.bin` 1.8s into boot, long before `/vendor` is mounted, and
   gets -2. Armbian loads it as a module, after its rootfs is up. Not a boot blocker;

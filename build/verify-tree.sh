@@ -496,6 +496,81 @@ if grep -vE '^\s*#' "$fstab_f" | grep -E 'first_stage_mount' | grep -qE '(^|[ ,]
         cl_bad=$((cl_bad+1))
     fi
 fi
+# What the tenth card (the first to run zygote) died of or crash-looped on.
+dmk="$DEV/device.mk"; tvmk="$DEV/edge1_tv.mk"
+# zygote preloads CamcorderProfile, and MediaProfiles CHECKs that the XML names a camera.
+mp_src=$(grep -oE '\$\(LOCAL_PATH\)/[^ :]+:\$\(TARGET_COPY_OUT_VENDOR\)/etc/media_profiles_V1_0\.xml' "$dmk" | head -1 | sed -E 's#^\$\(LOCAL_PATH\)/##; s#:.*##')
+if [[ -n "$mp_src" ]] && ! grep -q '<CamcorderProfiles' "$DEV/$mp_src"; then
+    err "$mp_src has no CamcorderProfiles; zygote aborts in MediaProfiles"
+    err "  (CHECK(cameraIds.size() > 0)) while preloading android.media.CamcorderProfile"
+    cl_bad=$((cl_bad+1))
+else
+    ok "media profiles name a camera, as MediaProfiles requires"
+fi
+# 6.12 has no ashmem; libcutils uses memfd only when sys.use_memfd is true.
+if ! grep -qE '^CONFIG_ASHMEM=y' "$DEV/kernel/edge1_mainline.config" \
+   && ! grep -qE '^PRODUCT_PRODUCT_PROPERTIES \+= sys\.use_memfd=true' "$dmk"; then
+    err "no ashmem in the kernel and sys.use_memfd is not set as a product property;"
+    err "  every ashmem region fails, and SurfaceFlinger cannot talk to the composer"
+    cl_bad=$((cl_bad+1))
+else
+    ok "shared memory: memfd (sys.use_memfd=true) on a kernel without ashmem"
+fi
+# PRODUCT_PROPERTY_OVERRIDES lands in /vendor/build.prop, loaded as vendor_init,
+# which may not set these system properties.
+vendor_sys=$(python3 - "$dmk" "$tvmk" <<'EOF'
+import re, sys
+bad = {"ro.adb.secure", "persist.sys.usb.config", "sys.use_memfd", "ro.logd.size",
+       "service.adb.tcp.port"}
+for f in sys.argv[1:]:
+    block = False
+    for line in open(f):
+        code = line.split("#", 1)[0].rstrip()
+        if re.match(r"\s*PRODUCT_PROPERTY_OVERRIDES\s*\+?=", code):
+            block = True
+            code = code.split("=", 1)[1]
+        elif not block:
+            continue
+        for word in code.replace("\\", " ").split():
+            if word.split("=", 1)[0] in bad:
+                print(f.rsplit("/", 1)[-1] + ": " + word)
+        block = code.endswith("\\") or line.rstrip().endswith("\\")
+EOF
+)
+if [[ -n "$vendor_sys" ]]; then
+    err "system properties set through PRODUCT_PROPERTY_OVERRIDES (vendor_init may not"
+    err "  set them; use PRODUCT_PRODUCT_PROPERTIES): $(echo $vendor_sys)"
+    cl_bad=$((cl_bad+1))
+else
+    ok "no system-owned property is set from /vendor/build.prop"
+fi
+# The AIDL effect HAL exits without audio_effects_config.xml, taking audioserver along.
+if grep -q 'android.hardware.audio.effect.service-aidl' "$dmk" \
+   && ! grep -q 'TARGET_COPY_OUT_VENDOR)/etc/audio_effects_config.xml' "$dmk"; then
+    err "the AIDL effect HAL is installed but no /vendor/etc/audio_effects_config.xml"
+    cl_bad=$((cl_bad+1))
+else
+    ok "the AIDL audio effect HAL has its audio_effects_config.xml"
+fi
+# Shipping level <= 29 installs configstore, which no manifest declares.
+ship=$(sed -nE 's/^PRODUCT_SHIPPING_API_LEVEL\s*:?=\s*([0-9]+).*/\1/p' "$tvmk" | head -1)
+if [[ -n "$ship" ]] && (( ship <= 29 )); then
+    if grep -qE '^LOCAL_OVERRIDES_MODULES\s*:=.*android\.hardware\.configstore@1\.1-service' "$DEV/Android.mk" 2>/dev/null \
+       && grep -qE '^PRODUCT_PACKAGES \+= edge1_no_configstore' "$dmk"; then
+        ok "configstore (installed for shipping level $ship) is overridden away"
+    else
+        err "shipping level $ship installs android.hardware.configstore@1.1-service, which no"
+        err "  VINTF manifest declares; it crash-loops. Android.mk's edge1_no_configstore removes it."
+        cl_bad=$((cl_bad+1))
+    fi
+fi
+# vold must not manage the card Android boots from.
+if grep -vE '^\s*#' "$fstab_f" | grep -E 'voldmanaged=' | grep -q 'fe320000\.mmc'; then
+    err "fstab.edge1 hands the SD slot (fe320000.mmc), the boot card, to vold"
+    cl_bad=$((cl_bad+1))
+else
+    ok "vold does not manage the boot card"
+fi
 # The bootcmd's attempts are joined with ';'. '||' there made every fallback dead.
 if grep -qE '^BOOTCMD="\$BOOTCMD \|\| ' "$uboot_sh"; then
     err "build-uboot.sh joins boot attempts with '||'; hush then skips every later attempt"

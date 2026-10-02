@@ -196,13 +196,21 @@ PRODUCT_PROPERTY_OVERRIDES += \
 
 # adb over TCP is convenient on a headless-ish TV box during bring-up and is
 # gated to non-user builds.
+#
+# Product properties, not PRODUCT_PROPERTY_OVERRIDES: that writes /vendor/build.prop,
+# which init loads with vendor_init's permissions, and these are system properties -
+# the board logged "avc: denied { set } for property=ro.adb.secure
+# scontext=u:r:vendor_init:s0" for the old lines. ro.adb.secure and
+# persist.sys.usb.config are gone rather than moved: core/main.mk sets
+# ro.adb.secure=1 on user builds and leaves it unset (no adb authentication) on
+# userdebug, and post_process_props.py adds adb to persist.sys.usb.config on every
+# debuggable build.
+#
+# ro.logd.size: logd's buffers default to 256KiB each, which a bring-up boot fills in
+# seconds. edge1-bootwatch copies them to the card, so make them worth copying: 2MiB,
+# written as a plain number, which every parser of it accepts.
 ifneq ($(TARGET_BUILD_VARIANT),user)
-PRODUCT_PROPERTY_OVERRIDES += \
+PRODUCT_PRODUCT_PROPERTIES += \
     service.adb.tcp.port=5555 \
-    ro.adb.secure=0
-PRODUCT_PROPERTY_OVERRIDES += persist.sys.usb.config=mtp,adb
-else
-PRODUCT_PROPERTY_OVERRIDES += \
-    ro.adb.secure=1 \
-    persist.sys.usb.config=mtp
+    ro.logd.size=2097152
 endif

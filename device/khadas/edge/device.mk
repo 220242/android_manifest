@@ -264,7 +264,7 @@ PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/audio/audio_policy_configuration.xml:$(TARGET_COPY_OUT_VENDOR)/etc/audio_policy_configuration.xml \
     $(LOCAL_PATH)/audio/audio_policy_volumes.xml:$(TARGET_COPY_OUT_VENDOR)/etc/audio_policy_volumes.xml \
     $(LOCAL_PATH)/audio/mixer_paths.xml:$(TARGET_COPY_OUT_VENDOR)/etc/mixer_paths.xml \
-    $(LOCAL_PATH)/audio/audio_effects.xml:$(TARGET_COPY_OUT_VENDOR)/etc/audio_effects.xml
+    $(LOCAL_PATH)/audio/audio_effects_config.xml:$(TARGET_COPY_OUT_VENDOR)/etc/audio_effects_config.xml
 
 # The shared parts of the audio policy: installed as modules, not copied from
 # AOSP source paths.
@@ -509,6 +509,31 @@ PRODUCT_PACKAGES += \
 # release defines them: the cpu controller and uclamp attributes 6.12 does have.
 PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/task_profiles.json:$(TARGET_COPY_OUT_VENDOR)/etc/task_profiles.json
+
+# The same shipping level also installs android.hardware.configstore@1.1-service,
+# which no VINTF manifest declares and which crash-looped on the tenth card.
+# Android.mk in this directory has the module that overrides it away.
+PRODUCT_PACKAGES += edge1_no_configstore
+
+# ---------------------------------------------------------------------------
+# Shared memory: memfd, not ashmem.
+#
+# ashmem is an Android common kernel driver; mainline removed it from staging in
+# 5.18, and 6.12 has no /dev/ashmem. libcutils' ashmem_create_region uses memfd
+# instead, but only when sys.use_memfd is true (libcutils/ashmem-dev.cpp,
+# __has_memfd_support; it defaults to false in this release). Without it every
+# region failed, and the first casualty was the display: the composer's command
+# queue is an FMQ in such a region, so SurfaceFlinger logged
+#   E ashmem: Unable to open ashmem device /dev/ashmem<boot id> ... and /dev/ashmem
+#   E HwcComposer: failed to prepare a new message queue
+#   E HWComposer: presentAndGetReleaseFences: present failed for display 0: NoResources
+# for every frame (tenth card). memfd needs only MEMFD_CREATE and F_SEAL_FUTURE_WRITE,
+# both in 6.12.
+#
+# A product property, not PRODUCT_PROPERTY_OVERRIDES: that goes to /vendor/build.prop,
+# and init loads vendor property files with vendor_init's permissions, which do not
+# cover system properties like this one. /product/etc/build.prop loads as init.
+PRODUCT_PRODUCT_PROPERTIES += sys.use_memfd=true
 
 # init / fstab.
 # ---------------------------------------------------------------------------

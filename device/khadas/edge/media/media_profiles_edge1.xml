@@ -3,6 +3,7 @@
 <!ELEMENT MediaSettings (CamcorderProfiles*, EncoderOutputFileFormat+, VideoEncoderCap+,
                          AudioEncoderCap+, VideoDecoderCap, AudioDecoderCap)>
 <!ELEMENT CamcorderProfiles (EncoderProfile+, ImageEncoding+, ImageDecoding, Camera)>
+<!ATTLIST CamcorderProfiles cameraId CDATA #REQUIRED>
 <!ELEMENT EncoderProfile (Video, Audio)>
 <!ATTLIST EncoderProfile quality CDATA #REQUIRED>
 <!ATTLIST EncoderProfile fileFormat CDATA #REQUIRED>
@@ -57,15 +58,39 @@
 <!--
   Khadas Edge1 - media profiles.
 
-  No CamcorderProfiles: PRODUCT_HAS_CAMERA is false on the TV SKU and the
-  excluded-hardware permissions declare android.hardware.camera unavailable.
-  Declaring camcorder profiles for a device with no camera makes CameraService
-  log errors at every boot.
+  One CamcorderProfiles block, for a camera this TV box does not have. It is not
+  optional: the first file this tree shipped had none, because
+  android.hardware.camera is declared unavailable, and zygote aborted on every
+  start while preloading android.media.CamcorderProfile -
+    F MediaProfiles: frameworks/av/media/libmedia/MediaProfiles.cpp:794
+      CHECK(cameraIds.size() > 0) failed.
+  (MediaProfiles::initRequiredProfileRefs, tenth card). The block below is the
+  shape AOSP's emulator ships: one ordinary profile and one time-lapse profile for
+  camera 0, from which MediaProfiles derives the required low/high and
+  time-lapse low/high profiles. Nothing records with it - there is no camera HAL -
+  it only satisfies the parser.
 
-  The encoder caps are still declared because screen recording and Cast mirroring
+  The encoder caps are declared because screen recording and Cast mirroring
   use the H.264 encoder without any camera involved.
 -->
 <MediaSettings>
+    <CamcorderProfiles cameraId="0">
+        <EncoderProfile quality="qvga" fileFormat="mp4" duration="60">
+            <Video codec="h264" bitRate="384000" width="320" height="240" frameRate="30" />
+            <Audio codec="aac" bitRate="96000" sampleRate="44100" channels="1" />
+        </EncoderProfile>
+        <EncoderProfile quality="timelapseqcif" fileFormat="mp4" duration="30">
+            <Video codec="h264" bitRate="192000" width="176" height="144" frameRate="30" />
+            <!-- audio is ignored for time-lapse, but the parser wants the element -->
+            <Audio codec="aac" bitRate="96000" sampleRate="44100" channels="1" />
+        </EncoderProfile>
+        <ImageEncoding quality="90" />
+        <ImageEncoding quality="80" />
+        <ImageEncoding quality="70" />
+        <ImageDecoding memCap="20000000" />
+        <Camera previewFrameWidth="320" previewFrameHeight="240" />
+    </CamcorderProfiles>
+
     <EncoderOutputFileFormat name="mp4" />
     <EncoderOutputFileFormat name="3gp" />
 

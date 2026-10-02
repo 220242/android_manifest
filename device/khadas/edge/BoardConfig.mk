@@ -204,6 +204,11 @@ BOARD_KERNEL_CMDLINE += panic=20
 #                  ("printk: init: 22 output lines suppressed due to ratelimiting")
 #                  exactly where it mounted, or failed to mount, the partitions.
 BOARD_KERNEL_CMDLINE += printk.devkmsg=on
+#   log_buf_len=4M
+#                  the kernel's log buffer, 128KiB by default. With init logging to
+#                  /dev/kmsg it held the last twenty seconds of a boot; edge1-bootwatch
+#                  copies it to the card as dmesg.txt, so it should hold the whole one.
+BOARD_KERNEL_CMDLINE += log_buf_len=4M
 endif
 
 BOARD_KERNEL_BASE := 0x00200000
