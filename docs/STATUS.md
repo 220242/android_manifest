@@ -58,6 +58,15 @@ Measured on the board — [`HARDWARE.md`](HARDWARE.md) has the readings:
   its selinuxfs mount: SELinux was built but not in `CONFIG_LSM` (`KERNEL.md`, "The LSM
   list"). Fixed. The whole log came back in `edge1-pstore.bin` — RAM survives the warm
   reset, so every failed boot from now on reports itself.
+* **First-stage init runs.** Card eight: `lsm=capability,selinux`, selinuxfs mounted,
+  init read `/fstab.edge1` from the ramdisk and stopped at `Missing vbmeta partitions`:
+  the fstab said a bare `avb`, and first-stage init only learns which partition holds
+  vbmeta from `avb=<partition>` (or the DT). Now `avb=vbmeta`, guarded by `verify-tree`.
+  Found while reading ahead, before the board could hit them: the kernel fragment set
+  `CONFIG_ANDROID_BINDER_DEVICES=""`, which would have left `/dev/binder` dangling, and
+  arm64 defconfig leaves IPv6, iptables and conntrack as modules netd cannot use. The
+  fragment now carries Android's own base requirements (`KERNEL.md`), every line checked
+  to take on 6.12.
 * **Known next: Wi-Fi.** brcmfmac is built in, so it asks for
   `brcm/brcmfmac4359-sdio.bin` 1.8s into boot, long before `/vendor` is mounted, and
   gets -2. Armbian loads it as a module, after its rootfs is up. Not a boot blocker;

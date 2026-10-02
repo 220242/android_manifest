@@ -468,6 +468,20 @@ for dev in fe320000.mmc fe330000.mmc f8000000.pcie; do
     done
 done
 (( cl_bad )) || ok "both boot paths set boot_devices for the card, the eMMC and the NVMe"
+# First-stage init takes the vbmeta partitions to read from the DT's
+# /firmware/android/vbmeta/parts or from "avb=<partition>" in the fstab; a bare "avb"
+# names nothing. With avb on a first_stage_mount entry and no name anywhere, it stops
+# with "Missing vbmeta partitions" - which is what the board did.
+fstab_f="$DEV/fstab.edge1"
+if grep -vE '^\s*#' "$fstab_f" | grep -E 'first_stage_mount' | grep -qE '(^|[ ,])avb([ ,=]|$)'; then
+    if grep -vE '^\s*#' "$fstab_f" | grep -E 'first_stage_mount' | grep -qE '(^|[ ,])avb=[a-z_]+'; then
+        ok "fstab names its vbmeta partition (avb=...), as first-stage init needs"
+    else
+        err "fstab.edge1 uses a bare 'avb' on first_stage_mount entries and names no"
+        err "  vbmeta partition (avb=vbmeta); first-stage init stops: Missing vbmeta partitions"
+        cl_bad=$((cl_bad+1))
+    fi
+fi
 # The bootcmd's attempts are joined with ';'. '||' there made every fallback dead.
 if grep -qE '^BOOTCMD="\$BOOTCMD \|\| ' "$uboot_sh"; then
     err "build-uboot.sh joins boot attempts with '||'; hush then skips every later attempt"
@@ -622,6 +636,18 @@ if [[ -f "$FRAG" ]]; then
     # merged, without selinux, and olddefconfig keeps it; the first kernel on the
     # board printed "LSM: initializing lsm=capability" and first-stage init died
     # mounting selinuxfs. So the fragment must state the list, with selinux in it.
+    # binderfs creates, at each mount, exactly the devices this names; init.rc only
+    # symlinks /dev/binder, /dev/hwbinder and /dev/vndbinder into it. Empty, all three
+    # dangle and no service manager can start.
+    bdev="$(sed -n 's/^CONFIG_ANDROID_BINDER_DEVICES="\(.*\)"$/\1/p' "$FRAG")"
+    missing_b=""
+    for b in binder hwbinder vndbinder; do [[ ",$bdev," == *,$b,* ]] || missing_b+=" $b"; done
+    if [[ -z "$missing_b" ]]; then
+        ok "CONFIG_ANDROID_BINDER_DEVICES lists binder, hwbinder and vndbinder"
+    else
+        err "$FRAG: CONFIG_ANDROID_BINDER_DEVICES=\"$bdev\" lacks$missing_b; binderfs would"
+        err "  not create them and init.rc's /dev symlinks would dangle"
+    fi
     lsm="$(sed -n 's/^CONFIG_LSM="\(.*\)"$/\1/p' "$FRAG")"
     if [[ ",$lsm," == *,selinux,* ]]; then
         ok "CONFIG_LSM names selinux ($lsm)"

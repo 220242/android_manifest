@@ -278,7 +278,9 @@ booted with its log on HDMI, ran `/init`, and first-stage init stopped at its th
 mount — `mount("selinuxfs", "/sys/fs/selinux") failed Invalid argument` — because
 SELinux was built but not in `CONFIG_LSM` ([`KERNEL.md`](KERNEL.md#the-lsm-list)).
 init then rebooted to "bootloader", a warm reset, and the next run of the boot script
-saved the whole console log to `edge1-pstore.bin`.
+saved the whole console log to `edge1-pstore.bin`. Card eight: SELinux up, first-stage init
+read the fstab and stopped at `Missing vbmeta partitions` — the fstab's bare `avb` names no
+vbmeta partition; it says `avb=vbmeta` now.
 
 **`edge1-pstore.bin`: the previous kernel's log.** The kernel keeps a 1MiB
 [ramoops](https://docs.kernel.org/admin-guide/ramoops.html) region at `0x30100000`

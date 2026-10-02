@@ -11,11 +11,20 @@
 # <src>  <mnt_point>  <type>  <mnt_flags,options>  <fs_mgr_flags>
 
 # ---- logical partitions in super ----
-system       /system       ext4  ro,barrier=1  wait,logical,first_stage_mount,avb
-system_ext   /system_ext   ext4  ro,barrier=1  wait,logical,first_stage_mount,avb
-product      /product      ext4  ro,barrier=1  wait,logical,first_stage_mount,avb
-vendor       /vendor       ext4  ro,barrier=1  wait,logical,first_stage_mount,avb
-odm          /odm          ext4  ro,barrier=1  wait,logical,first_stage_mount,avb
+#
+# avb=vbmeta, not a bare avb. First-stage init builds its list of vbmeta partitions
+# from the device tree's /firmware/android/vbmeta/parts or, failing that, from the
+# partition named after "avb=" in this fstab (init/first_stage_mount.cpp, the
+# FirstStageMountVBootV2 constructor). This board has no such DT node and a bare
+# "avb" names nothing, so the list was empty and the first boot that got this far
+# stopped with "Failed to read vbmeta partitions" / "Missing vbmeta partitions".
+# There is one vbmeta partition and it carries every hashtree descriptor
+# (BoardConfig.mk chains nothing), so all five name it.
+system       /system       ext4  ro,barrier=1  wait,logical,first_stage_mount,avb=vbmeta
+system_ext   /system_ext   ext4  ro,barrier=1  wait,logical,first_stage_mount,avb=vbmeta
+product      /product      ext4  ro,barrier=1  wait,logical,first_stage_mount,avb=vbmeta
+vendor       /vendor       ext4  ro,barrier=1  wait,logical,first_stage_mount,avb=vbmeta
+odm          /odm          ext4  ro,barrier=1  wait,logical,first_stage_mount,avb=vbmeta
 
 # ---- metadata: required by dynamic partitions, holds the FBE keys ----
 /dev/block/by-name/metadata  /metadata  ext4  noatime,nosuid,nodev,discard  wait,formattable,first_stage_mount
@@ -33,7 +42,11 @@ odm          /odm          ext4  ro,barrier=1  wait,logical,first_stage_mount,av
 # Metadata encryption (keydirectory=, dm-default-key) is still omitted. That is a
 # choice, not a limitation: 6.12 has dm-default-key only in the Android common
 # kernels, not upstream, so /metadata would have to be left unencrypted anyway.
-/dev/block/by-name/userdata  /data  f2fs  noatime,nosuid,nodev,discard,reserve_root=32768,resgid=1065,fsync_mode=nobarrier  latemount,wait,check,fileencryption=aes-256-xts:aes-256-cts:v2,quota,formattable,resize
+#
+# No "resize": Android 14's libfstab does not know it ("[libfstab] Warning: unknown
+# flag: resize" on the board) and ignores it. userdata fills its partition anyway:
+# it is formatted on the device, at whatever size the partition is.
+/dev/block/by-name/userdata  /data  f2fs  noatime,nosuid,nodev,discard,reserve_root=32768,resgid=1065,fsync_mode=nobarrier  latemount,wait,check,fileencryption=aes-256-xts:aes-256-cts:v2,quota,formattable
 
 # ---- misc ----
 #

@@ -166,3 +166,21 @@ cannot be honoured), and `verify-tree.sh` check 7 refuses a fragment whose `CONF
 lacks `selinux`. Reproduced off the board with the kernel's own Kconfig and
 `scripts/dummy-tools`: `make defconfig` gives the list above, the fragment merge gives one
 with `selinux`, and every symbol in the fragment takes.
+
+## Android's base requirements, and the binder devices
+
+The fragment ends with the list Android's `kernel/configs` keeps as `android-base.config`
+for 6.1 — the one VTS checks — as GloDroid carries it for Android 14 on mainline kernels.
+arm64 defconfig on its own leaves IPv6, iptables and conntrack as modules and most `xt_`
+matches out, and netd builds its chains from exactly those; with no module loading here, a
+module is a missing driver. What the list names that upstream 6.12 does not have
+(`ASHMEM`, `UID_SYS_STATS`, `DM_DEFAULT_KEY`, `xt_quota2`, the Android-only USB configfs
+functions) or that cannot take on this build (toolchain facts, `HID_PLAYSTATION` held at
+`m`) is left out, with the reason in the fragment. The rest was merged with the kernel's own
+tools — `make defconfig`, `merge_config.sh -m`, `olddefconfig`, against `scripts/dummy-tools`
+— and every symbol in the fragment takes; `build-kernel.sh` checks the same on the real build.
+
+`CONFIG_ANDROID_BINDER_DEVICES` was `""`. With binderfs that is not "use the default": each
+mount of binderfs creates exactly the devices it names (`binderfs_fill_super`), and init.rc
+only symlinks `/dev/binder`, `/dev/hwbinder` and `/dev/vndbinder` into the mount. It is now
+`"binder,hwbinder,vndbinder"`, and `verify-tree.sh` check 7 holds it there.
