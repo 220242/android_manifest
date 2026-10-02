@@ -19,7 +19,7 @@
 #    SurfaceFlinger) in a subdirectory named for when it was taken:
 #      120s       two minutes after "boot", whatever state Android is in
 #      completed  30s after sys.boot_completed, if it ever gets there
-#      timeout    TIMEOUT seconds after "boot" without sys.boot_completed
+#      timeout    TIMEOUT (300) seconds after "boot" without sys.boot_completed
 #    The boot before is kept as boot-1, so after a watchdog reboot the card holds
 #    both the hung boot and the one that followed.
 #
@@ -28,9 +28,17 @@
 #    script saves it as edge1-pstore.bin. Before this, the only way out of a hung
 #    boot was the power switch, which empties RAM and the log with it.
 #
-# 600s is long enough for a first boot that formats /data on an SD card.
-# setprop persist.vendor.edge1.bootwatch 0 disables the reboot (not the logs).
-TIMEOUT=600
+# 300s: system_server reaches the package manager about 60s after power-on and the
+# first boot of a preopted build completes in a few minutes, so a boot that has not
+# finished by then is stuck, and five minutes of its log say why. (It was 600s;
+# halving it halves the wait for each card.) For a boot that needs longer - a
+# first boot that compiles apps, say - setprop persist.vendor.edge1.bootwatch.timeout
+# <seconds>; setprop persist.vendor.edge1.bootwatch 0 disables the reboot (not the
+# logs).
+TIMEOUT=300
+t_prop="$(getprop persist.vendor.edge1.bootwatch.timeout)"
+case "$t_prop" in ''|*[!0-9]*) ;; *) [ "$t_prop" -ge 60 ] && TIMEOUT=$t_prop ;; esac
+TIMEOUT=$(( (TIMEOUT + 9) / 10 * 10 ))
 SYNC=10
 DEV=/dev/block/by-name/bootfs
 MNT=/mnt/vendor/edge1-bootfs

@@ -286,7 +286,7 @@ edge1-logs/ appears once Android has run on a userdebug build. edge1-bootwatch
 writes the whole boot there as it happens: logcat.txt and dmesg.txt, from the first
 line, for as long as the board runs. Beside them, folders 120s, completed and
 timeout hold a snapshot of the system's state (getprop, ps, services, the display).
-If Android has not finished booting after 10 minutes, the board reboots by itself,
+If Android has not finished booting after 5 minutes, the board reboots by itself,
 warm, so edge1-pstore.bin is saved too. boot-0 is the latest boot, boot-1 the one
 before it. Plain text, and the most complete record of a boot there is.
 Send the whole edge1-logs folder (zip it), with edge1-boot.log and edge1-pstore.bin.

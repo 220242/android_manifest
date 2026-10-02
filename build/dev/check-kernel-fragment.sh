@@ -3,6 +3,7 @@
 # Offline check of the kernel config fragment: does every symbol in it take?
 #
 #   usage: build/dev/check-kernel-fragment.sh <linux-6.12-tree> [fragment]
+#   (also checks that device/khadas/edge/kernel/patches/ applies to the tree)
 #
 # The same merge build-kernel.sh does - make defconfig, merge_config.sh -m,
 # olddefconfig - and the same contract check, but with scripts/dummy-tools instead
@@ -19,6 +20,21 @@ L="$(cd "${1:?usage: $0 <linux-tree> [fragment]}" && pwd)"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 F="$(realpath "${2:-$HERE/device/khadas/edge/kernel/edge1_mainline.config}")"
 DT="$L/scripts/dummy-tools/"
+
+# The kernel patches build-kernel.sh applies must apply to this tree (or already be
+# applied to it).
+bad_patch=0
+for p in "$HERE"/device/khadas/edge/kernel/patches/*.patch; do
+    [[ -f "$p" ]] || continue
+    if git -C "$L" apply --reverse --check "$p" 2>/dev/null; then
+        echo "patch $(basename "$p"): already applied here"
+    elif git -C "$L" apply --check "$p" 2>/dev/null; then
+        echo "patch $(basename "$p"): applies"
+    else
+        echo "patch $(basename "$p"): DOES NOT APPLY" >&2
+        bad_patch=1
+    fi
+done
 K="$(mktemp -d)"; trap 'rm -rf "$K"' EXIT
 cd "$L"
 make ARCH=arm64 CROSS_COMPILE="$DT" O="$K" defconfig >/dev/null 2>&1 || { echo "defconfig failed" >&2; exit 2; }
@@ -40,4 +56,4 @@ while IFS= read -r line; do
     fi
 done < "$F"
 echo "$miss symbol(s) did not take"
-(( miss == 0 ))
+(( miss == 0 && bad_patch == 0 ))

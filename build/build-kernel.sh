@@ -50,6 +50,48 @@ readonly DTB_STAGE="$KERNEL/out/android-dtb"
 
 cd "$KERNEL"
 
+# Patches on top of the release tag, from device/khadas/edge/kernel/patches/, in name
+# order. Each says in its header why it exists; upstream 6.12 is used as is apart
+# from them. They are applied to the working tree, and a copy of the set that is
+# applied is kept in .edge1-patches/, so a changed or removed patch is reverted from
+# its old copy before the new set goes on - the tree is always the tag plus exactly
+# the current set. Nothing is re-applied (and nothing recompiled) while the set is
+# unchanged. A patch that does not apply stops the build here.
+readonly PATCH_DIR="$DEVICE_DIR/kernel/patches"
+readonly APPLIED_DIR="$KERNEL/.edge1-patches"
+want=()
+[[ -d "$PATCH_DIR" ]] && while IFS= read -r p; do want+=("$p"); done \
+    < <(find "$PATCH_DIR" -maxdepth 1 -name '*.patch' | sort)
+same=1
+have=()
+[[ -d "$APPLIED_DIR" ]] && while IFS= read -r p; do have+=("$p"); done \
+    < <(find "$APPLIED_DIR" -maxdepth 1 -name '*.patch' | sort)
+if (( ${#want[@]} != ${#have[@]} )); then
+    same=0
+else
+    for i in "${!want[@]}"; do
+        [[ "$(basename "${want[$i]}")" == "$(basename "${have[$i]}")" ]] \
+            && cmp -s "${want[$i]}" "${have[$i]}" || same=0
+    done
+fi
+if (( same )); then
+    (( ${#want[@]} )) && echo "==> kernel patches: ${#want[@]} applied, unchanged"
+else
+    for (( i=${#have[@]}-1; i>=0; i-- )); do
+        echo "==> reverting $(basename "${have[$i]}")"
+        git apply -R "${have[$i]}" || {
+            echo "could not revert ${have[$i]}; restore the kernel tree (git -C $KERNEL checkout .)" >&2
+            exit 1; }
+    done
+    rm -rf "$APPLIED_DIR"
+    mkdir -p "$APPLIED_DIR"
+    for p in "${want[@]}"; do
+        echo "==> applying $(basename "$p")"
+        git apply "$p" || { echo "$(basename "$p") does not apply to $KERNEL" >&2; exit 1; }
+        cp "$p" "$APPLIED_DIR/"
+    done
+fi
+
 readonly CROSS=aarch64-linux-gnu-
 if ! command -v "${CROSS}gcc" >/dev/null 2>&1; then
     echo "${CROSS}gcc not found." >&2

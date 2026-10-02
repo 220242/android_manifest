@@ -91,6 +91,20 @@ would claim the port and do the firmware patch itself - while Android's Bluetoot
 HAL expects to open the tty and patch it from userspace. Leaving the transport out
 keeps `/dev/ttyS0` free until that is decided. See `STATUS.md`.
 
+## Patches
+
+The kernel is v6.12.111 as tagged, plus the patches in
+`device/khadas/edge/kernel/patches/`, applied in name order by `build-kernel.sh`. The
+script keeps a copy of the applied set in `kernel/mainline/.edge1-patches/` and reverts
+it before applying a changed set, so the tree is always the tag plus exactly what is in
+the directory; an unchanged set is left alone and nothing recompiles. A patch that does
+not apply stops the Kernel stage. The orchestrator re-runs Kernel and Build when the
+directory changes (`kernelPatchesHash`).
+
+| Patch | Why |
+|---|---|
+| `0001-drm-master-to-the-client-that-asks` | The kernel makes the first opener of `/dev/dri/card0` DRM master. On this board that is minigbm's allocator (rockchip-drm has no render node), not drm_hwcomposer, which opens the device only when SurfaceFlinger registers with it - so the composer could not get master and ran headless (cards 12 and 13). With the patch, opening gives no master; the composer's `SET_MASTER` does. `drm.master_on_open=1` restores upstream. |
+
 ## Toolchain
 
 The distro cross GCC, `aarch64-linux-gnu-` from Ubuntu's

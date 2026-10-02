@@ -1,0 +1,104 @@
+drm: let the client that asks become master, not the first to open the node
+
+Khadas Edge1, Android 14 on mainline 6.12. Applied to kernel/mainline by
+build/build-kernel.sh before every build (device/khadas/edge/kernel/patches/).
+
+drm_master_open() makes the first process to open a primary node its master,
+and drm_setmaster_ioctl() refuses everyone else while that master exists, and
+anyone without CAP_SYS_ADMIN regardless. On this board the first process to open
+/dev/dri/card0 is not the display server: minigbm, the gralloc allocator service
+(and the mapper inside every process), opens card0 because rockchip-drm has no
+render node - renderD128 is panfrost - and the allocator starts in "class_start
+hal" before drm_hwcomposer opens the device. drm_hwcomposer does that only when
+SurfaceFlinger registers its callback, so starting the composer earlier does not
+help (card 13: composer up at 14.7s, card0 opened at 52.98s, allocator at 48s).
+The allocator never drops the master it was handed, the composer's SET_MASTER
+fails, and drm_hwcomposer runs headless:
+
+  E hwc-drm-device: DRM/KMS master access required
+  I hwc-drm-two: No pipelines available. Creating null-display for headless mode
+
+With drm.master_on_open=0 (the default this patch sets), opening the node gives
+the client a master object of its own that is not the device's, so no client is
+ever master by accident, and SET_MASTER succeeds for any client while the device
+has no master. The composer is the one process on Android that calls it.
+
+file_priv->master stays non-NULL for every primary client, as GET_UNIQUE and
+GET_MAGIC (flags 0, no master check) dereference it; SET_MASTER replaces the
+private object with a real master through the existing drm_new_set_master() path.
+drm.master_on_open=1 restores the upstream behaviour.
+
+diff --git a/drivers/gpu/drm/drm_auth.c b/drivers/gpu/drm/drm_auth.c
+index 22aa015d..a03253c9 100644
+--- a/drivers/gpu/drm/drm_auth.c
++++ b/drivers/gpu/drm/drm_auth.c
+@@ -28,6 +28,7 @@
+  * OTHER DEALINGS IN THE SOFTWARE.
+  */
+ 
++#include <linux/moduleparam.h>
+ #include <linux/slab.h>
+ 
+ #include <drm/drm_auth.h>
+@@ -38,6 +39,25 @@
+ 
+ #include "drm_internal.h"
+ 
++/*
++ * Android on Rockchip: the display server is not the first process to open the
++ * primary node. minigbm - the gralloc allocator service, and the mapper in every
++ * process - opens card0 too, because rockchip-drm has no render node, and the
++ * allocator starts before drm_hwcomposer opens the device. The implicit master
++ * that drm_master_open() gives the first opener then lands on the allocator,
++ * which never gives it back, and the composer's SET_MASTER fails (no
++ * CAP_SYS_ADMIN, and a master already exists): no display.
++ *
++ * With master_on_open off, the default here, opening the node gives the client a
++ * master object of its own that is not the device's, and SET_MASTER succeeds for
++ * any client while the device has no master - so the composer, the one process
++ * that asks, gets it. drm.master_on_open=1 restores the upstream behaviour.
++ */
++static bool drm_master_on_open;
++module_param_named(master_on_open, drm_master_on_open, bool, 0444);
++MODULE_PARM_DESC(master_on_open,
++		 "Make the first opener of a primary node DRM master (upstream behaviour)");
++
+ /**
+  * DOC: master and authentication
+  *
+@@ -237,6 +257,10 @@ drm_master_check_perm(struct drm_device *dev, struct drm_file *file_priv)
+ 	    rcu_access_pointer(file_priv->pid) == task_tgid(current))
+ 		return 0;
+ 
++	/* Nobody was made master on open: the first to ask while none exists. */
++	if (!drm_master_on_open && !dev->master)
++		return 0;
++
+ 	if (!capable(CAP_SYS_ADMIN))
+ 		return -EACCES;
+ 
+@@ -338,8 +362,23 @@ int drm_master_open(struct drm_file *file_priv)
+ 	 * any master object for render clients
+ 	 */
+ 	mutex_lock(&dev->master_mutex);
+-	if (!dev->master) {
++	if (!dev->master && drm_master_on_open) {
+ 		ret = drm_new_set_master(dev, file_priv);
++	} else if (!dev->master) {
++		/*
++		 * Not the device's master, just an object so that file_priv->master
++		 * is never NULL for a primary client (GET_UNIQUE and GET_MAGIC
++		 * rely on it). SET_MASTER replaces it with a new master.
++		 */
++		struct drm_master *master = drm_master_create(dev);
++
++		if (!master) {
++			ret = -ENOMEM;
++		} else {
++			spin_lock(&file_priv->master_lookup_lock);
++			file_priv->master = master;
++			spin_unlock(&file_priv->master_lookup_lock);
++		}
+ 	} else {
+ 		spin_lock(&file_priv->master_lookup_lock);
+ 		file_priv->master = drm_master_get(dev->master);

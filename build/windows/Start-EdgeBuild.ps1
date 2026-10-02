@@ -205,6 +205,11 @@ $script:TrackedInputs = @(
     # nothing in any log to say so.
     @{ Key='kernelFragmentHash'; Path='device/khadas/edge/kernel/edge1_mainline.config';
        Stages=@('Kernel', 'Build'); Label="the kernel config fragment" }
+    # The kernel patches, like the fragment: Kernel applies them, Build packs the result.
+    @{ Key='kernelPatchesHash'; Path='device/khadas/edge/kernel/patches';
+       Stages=@('Kernel', 'Build'); Label="the kernel patches";
+       Probe=('find ~/android_khadas/android_manifest/device/khadas/edge/kernel/patches -type f -print0 ' +
+              '2>/dev/null | sort -z | xargs -0 sha256sum 2>/dev/null | sha256sum | cut -c1-16') }
     @{ Key='ubootScriptHash';  Path='build/build-uboot.sh';
        Stages=@('Uboot'); Label="the U-Boot build script" }
     @{ Key='buildScriptHash';  Path='build/build.sh';

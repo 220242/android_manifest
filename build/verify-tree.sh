@@ -1015,6 +1015,18 @@ BUILTIN = {"AUDIO_DEVICE_OUT_EARPIECE", "AUDIO_DEVICE_OUT_SPEAKER",
 EXTERNAL = re.compile(r"HDMI|AUX_DIGITAL|USB|WIRED|LINE|SPDIF|BLUETOOTH|BLE_|_IP$|"
                       r"HEARING_AID|REMOTE_SUBMIX|DOCK|BUS$")
 bad = []
+# The IModule instances com.android.hardware.audio declares in its VINTF fragment
+# (hardware/interfaces/audio/aidl/default/android.hardware.audio.service-aidl.xml).
+# audioserver waits for each declared one, the HAL creates only the modules this
+# file names, and servicemanager refuses to register an undeclared one - so the
+# two sets have to match. Card 13 hung on a missing bluetooth.
+DECLARED = {"default", "r_submix", "bluetooth"}
+have = {("default" if m.get("name") == "primary" else m.get("name"))
+        for m in ET.parse(sys.argv[1]).getroot().iter("module")}
+for n in sorted(DECLARED - have):
+    bad.append(f"no module for IModule/{n}, which the APEX declares; audioserver waits for it forever")
+for n in sorted(have - DECLARED):
+    bad.append(f"module {n} is not declared by the APEX; servicemanager will not register IModule/{n}")
 for m in ET.parse(sys.argv[1]).getroot().iter("module"):
     name = m.get("name")
     if name == "r_submix":
@@ -1050,9 +1062,9 @@ print("\n".join(bad))
 sys.exit(1 if bad else 0)
 EOF
     ); then
-        ok "audio policy obeys the HAL's attached-device and route rules"
+        ok "audio policy obeys the HAL's module, attached-device and route rules"
     else
-        err "audio_policy_configuration.xml breaks rules the AIDL HAL aborts on:"
+        err "audio_policy_configuration.xml breaks what the AIDL HAL and audioserver need:"
         while IFS= read -r l; do err "  $l"; done <<< "$apc_rules"
     fi
 fi

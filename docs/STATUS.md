@@ -119,6 +119,14 @@ Measured on the board — [`HARDWARE.md`](HARDWARE.md) has the readings:
   And the display was headless: the minigbm allocator opened `/dev/dri/card0` before
   drm_hwcomposer and the kernel made it DRM master; the composer now starts at
   `late-fs`, first.
+* **Audio up; one more for each.** Card 13: the audio HAL runs, but audioserver
+  waited forever for `IModule/bluetooth` - the HAL's APEX declares it in VINTF and our
+  file had no bluetooth module - so the audio policy never came up and the watchdog
+  kept killing system_server in `AudioService`. The modules now match the declared set
+  exactly. The composer still ran headless: it opens `/dev/dri/card0` only when
+  SurfaceFlinger registers with it, well after the allocator. Since the kernel is
+  ours, it now carries a patch (`device/khadas/edge/kernel/patches/`): opening the
+  node no longer makes the opener DRM master; asking for it does.
 * **Known next: Wi-Fi.** brcmfmac is built in, so it asks for
   `brcm/brcmfmac4359-sdio.bin` 1.8s into boot, long before `/vendor` is mounted, and
   gets -2. Armbian loads it as a module, after its rootfs is up. Not a boot blocker;
