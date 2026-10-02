@@ -91,18 +91,17 @@ not reachable from it.
 | 9b | `/data` mounted (FBE), apexd, netbpfload, zygote; restart loop | allocator had no SELinux exec label (init refuses even permissive); task_profiles_29 → schedtune (vendor task_profiles.json); audio HAL APEX; bootwatch |
 | 10 | first capture of Android itself (bootwatch rebooted warm): zygote aborts, SurfaceFlinger cannot present | zygote: `MediaProfiles CHECK(cameraIds.size() > 0)` → camera-0 profiles; no ashmem in 6.12 → `sys.use_memfd=true` (product prop) fixes the HWC FMQ; effect HAL needs `audio_effects_config.xml`; configstore (API-29 package) overridden away; `CONFIG_FTRACE`; system props moved off vendor; vold off the boot card; bootwatch writes `edge1-logs` to bootfs; `log_buf_len=4M`, `ro.logd.size` 2MiB |
 | 11 | system_server runs, but the watchdog kills it (67s, ×3) in `AudioService` | `sys.use_memfd` was reset to false by `init.rc` post-fs-data → `/product` rc sets it back; the AIDL audio HAL rejected `audio_policy_configuration.xml` (HIDL format, `halVersion="AIDL"`, unresolvable `xi:include`s) and registered no `IModule/default` → self-contained v7 file validated against the HAL's XSD (`build/schema/`); bootwatch streams the whole logcat/dmesg; bootfs 512MiB; ramoops 3.25MiB |
+| 12 | memfd on (no ashmem errors), whole-boot logs on the card; audio HAL aborted 129× and system_server was killed 6×; display headless | the HAL forbids an external device (HDMI, `connection: hdmi`) in `<attachedDevices>` and ModulePrimary cannot connect external ones → the primary output is a built-in "Speaker" that plays to ALSA card 0 = `hdmi-sound`; the minigbm allocator opened card0 first and held DRM master, so drm_hwcomposer made a null display → composer started at `late-fs`; verify-tree checks both |
 
 ## Open, in rough order
 
-* Card 12: `IModule/default` registered (servicemanager "Found ... IModule/default"
-  and no "lazy service" retries), audioserver up, system_server past `AudioService`;
-  `getprop sys.use_memfd` = true and no `ashmem: Unable to open` lines; SurfaceFlinger
-  presents (boot animation), `LocalDisplayAdapter: Can't find display mode with id -1`
-  gone. The primary module plays through ALSA card 0 (`hdmi-sound`).
-* Display mode: card 11's SurfaceFlinger ran display 0 at 1024x768 (hwcId 2, "no
-  identification data") while the kernel's fbcon had 1080p from the same EDID. Look
-  again once the composer's FMQ works (memfd); then check which mode the composer
-  reports as active/preferred.
+* Card 13: the audio HAL stays up (no `convertModuleConfigToAidl` abort), audioserver
+  and system_server get past `AudioService`; the composer logs pipelines instead of
+  "DRM/KMS master access required", and SurfaceFlinger's display 0 has the monitor's
+  mode rather than the null display's 1024x768 (which is what card 11 showed); boot
+  animation on HDMI. Then whatever system_server meets next.
+* Real HDMI audio (hotplug, AUDIO_DEVICE_OUT_HDMI, passthrough) needs a HAL module that
+  connects external devices; ModulePrimary does not. "Speaker" on card 0 until then.
 * system_server's `LowMemDetector` PSI trigger fails with EINVAL (unprivileged
   triggers need a 2s-multiple window on 6.x); `libprocessgroup` AddTidToCgroup EACCES
   on `foreground`; idmap2 fails one auto-generated RRO. None fatal so far.

@@ -111,6 +111,14 @@ Measured on the board — [`HARDWARE.md`](HARDWARE.md) has the readings:
   ashmem was still in use: `init.rc` resets `sys.use_memfd` to false in post-fs-data,
   so a `/product` init file sets it back afterwards. `edge1-bootwatch` now streams the
   whole logcat and dmesg of a boot to the card, and `bootfs` grew to 512MiB for it.
+* **Audio and display, the next two blockers.** Card 12, read from 26MB of logcat:
+  memfd works (no ashmem errors). The audio HAL now parsed its file and aborted on a
+  rule the schema does not carry — an attached device must be built-in, and its
+  primary module cannot connect external ones — so HDMI is declared as the built-in
+  "Speaker" it physically is (the primary module plays to ALSA card 0, `hdmi-sound`).
+  And the display was headless: the minigbm allocator opened `/dev/dri/card0` before
+  drm_hwcomposer and the kernel made it DRM master; the composer now starts at
+  `late-fs`, first.
 * **Known next: Wi-Fi.** brcmfmac is built in, so it asks for
   `brcm/brcmfmac4359-sdio.bin` 1.8s into boot, long before `/vendor` is mounted, and
   gets -2. Armbian loads it as a module, after its rootfs is up. Not a boot blocker;

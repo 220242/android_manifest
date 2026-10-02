@@ -482,6 +482,17 @@ for mode in early late; do
         cl_bad=$((cl_bad+1))
     fi
 done
+# drm_hwcomposer must be DRM master of card0, which the kernel gives to the first
+# process to open it. minigbm opens card0 as well and its allocator starts first in
+# class hal, so card 12 ran headless ("DRM/KMS master access required"). The device rc
+# starts the composer at late-fs, ahead of everything that opens card0.
+if awk '/^on late-fs$/ {f=1; next} /^on / {f=0} f && /^[[:space:]]+start vendor\.hwcomposer-2-4[[:space:]]*$/ {found=1} END {exit !found}' "$init_rc"; then
+    ok "init.edge1.rc starts the composer at late-fs, so it is first to open card0"
+else
+    err "init.edge1.rc does not start vendor.hwcomposer-2-4 at late-fs; the minigbm allocator"
+    err "  opens card0 first, holds DRM master, and the composer runs headless"
+    cl_bad=$((cl_bad+1))
+fi
 # First-stage init takes the vbmeta partitions to read from the DT's
 # /firmware/android/vbmeta/parts or from "avb=<partition>" in the fstab; a bare "avb"
 # names nothing. With avb on a first_stage_mount entry and no name anywhere, it stops
@@ -987,6 +998,62 @@ if [[ -f "$APC" ]]; then
     else
         err "audio_policy_configuration.xml does not validate against $(basename "$APC_XSD"):"
         while IFS= read -r l; do err "  $l"; done < <(grep -v 'fails to validate' <<< "$xmlerr" | head -5)
+    fi
+    # What the schema cannot say but the HAL's converter enforces with an abort
+    # (XsdcConversion.cpp, convertDevicePortsInModuleToAidl / getSourcePortIds), and
+    # what its primary module cannot do (ModulePrimary connects no external device).
+    # Card 12 aborted on the first of these 129 times.
+    if apc_rules=$(python3 - "$APC" <<'EOF'
+import re, sys
+import xml.etree.ElementTree as ET
+# AIDL device types with an empty connection: the only ones <attachedDevices> may
+# hold. Everything external has a connection (hdmi, usb, analog, bt-*, ...).
+BUILTIN = {"AUDIO_DEVICE_OUT_EARPIECE", "AUDIO_DEVICE_OUT_SPEAKER",
+           "AUDIO_DEVICE_OUT_SPEAKER_SAFE", "AUDIO_DEVICE_OUT_TELEPHONY_TX",
+           "AUDIO_DEVICE_IN_BUILTIN_MIC", "AUDIO_DEVICE_IN_BACK_MIC",
+           "AUDIO_DEVICE_IN_ECHO_REFERENCE", "AUDIO_DEVICE_IN_TELEPHONY_RX"}
+EXTERNAL = re.compile(r"HDMI|AUX_DIGITAL|USB|WIRED|LINE|SPDIF|BLUETOOTH|BLE_|_IP$|"
+                      r"HEARING_AID|REMOTE_SUBMIX|DOCK|BUS$")
+bad = []
+for m in ET.parse(sys.argv[1]).getroot().iter("module"):
+    name = m.get("name")
+    if name == "r_submix":
+        continue                       # the HAL ignores its XML (built-in config)
+    attached = {i.text.strip() for i in m.iter("item")}
+    ports = {}
+    for d in m.iter("devicePort"):
+        t = d.get("type")
+        if t in BUILTIN:
+            ext = False
+        elif EXTERNAL.search(t):
+            ext = True
+        else:
+            bad.append(f"{name}: device type {t} is not classified in verify-tree 9c")
+            continue
+        ports[d.get("tagName")] = ext
+        if (d.get("tagName") in attached) == ext:
+            bad.append(f"{name}: \"{d.get('tagName')}\" ({t}) is "
+                       + ("external but listed in <attachedDevices>" if ext
+                          else "built-in but not in <attachedDevices>"))
+        if ext and name == "primary":
+            bad.append(f"{name}: external device \"{d.get('tagName')}\" ({t}); the primary"
+                       " module cannot connect external devices")
+    names = set(ports) | {x.get("name") for x in m.iter("mixPort")}
+    for r in m.iter("route"):
+        for end in [r.get("sink")] + [x.strip() for x in r.get("sources").split(",")]:
+            if end not in names:
+                bad.append(f"{name}: route names \"{end}\", which is no port of this module")
+    dflt = m.find("defaultOutputDevice")
+    if dflt is not None and dflt.text.strip() not in attached:
+        bad.append(f"{name}: defaultOutputDevice \"{dflt.text.strip()}\" is not attached")
+print("\n".join(bad))
+sys.exit(1 if bad else 0)
+EOF
+    ); then
+        ok "audio policy obeys the HAL's attached-device and route rules"
+    else
+        err "audio_policy_configuration.xml breaks rules the AIDL HAL aborts on:"
+        while IFS= read -r l; do err "  $l"; done <<< "$apc_rules"
     fi
 fi
 echo

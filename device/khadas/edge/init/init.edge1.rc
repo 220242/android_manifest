@@ -21,6 +21,17 @@ on fs
 
 on late-fs
     mount_all /vendor/etc/fstab.${ro.hardware} --late
+    # The composer has to open /dev/dri/card0 before anything else does. The kernel
+    # makes the first process to open a DRM primary node its master
+    # (drm_master_open), and a later SET_MASTER needs CAP_SYS_ADMIN and no current
+    # master (drm_setmaster_ioctl). minigbm opens card0 too - rockchip-drm has no
+    # render node, renderD128 is panfrost - and the allocator service starts first in
+    # "class_start hal", 40ms ahead of the composer. So on card 12 the allocator held
+    # master, drm_hwcomposer logged "DRM/KMS master access required" and "No pipelines
+    # available. Creating null-display for headless mode", and SurfaceFlinger drew a
+    # 1024x768 nothing. Started here, at late-fs, the composer is first by 30 seconds;
+    # minigbm's later opens need no master (dumb buffers and PRIME are not DRM_AUTH).
+    start vendor.hwcomposer-2-4
 
 # Bring-up only: write logcat/dmesg snapshots to the card's EDGE1BOOT partition, and
 # reboot warm if boot never completes, so the ramoops log survives for the card's
