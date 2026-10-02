@@ -8,3 +8,4 @@
 # Rockchip build outputs, if a tree is ever built in place.
 /out/
 /rockdev/
+__pycache__/

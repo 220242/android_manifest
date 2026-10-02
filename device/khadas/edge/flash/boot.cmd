@@ -22,7 +22,7 @@
 # script used setexpr to check the boot.img header and to add sector offsets; on
 # the board setexpr was an unknown command, the check failed, and the script
 # declined to boot, every time. So now: echo, test, setenv, run, load, env export,
-# fatwrite and booti - every one of them present in that config, and every one of
+# fatwrite, itest and booti - every one of them present in that config, and most of
 # them what Armbian's own boot script uses. build/check-uboot-script.py enforces
 # the list at build time, and verify-tree.sh does the same.
 #
@@ -56,6 +56,20 @@ if test "${devtype}" = "mmc"; then
 fi
 if test "${devtype}" = "nvme"; then setenv edge1_dev f8000000.pcie; fi
 
+# The previous kernel's log. The kernel keeps a ramoops region (its address is in
+# the dtb; build-bootfs.sh fills it in here) whose contents survive a warm reset - a
+# panic reboots by itself on a userdebug build. Saved to edge1-pstore.bin first,
+# before anything else touches RAM or a new kernel clears it. The first word of a
+# region our kernel has initialised is the ramoops signature "DBGC"; edge1_prev
+# says whether it was there, i.e. whether the file is worth decoding.
+setenv edge1_paddr @PSTORE_ADDR@
+setenv edge1_psize @PSTORE_SIZE@
+setenv edge1_prev none
+if test -n "${edge1_paddr}"; then
+	if itest.l *${edge1_paddr} == 0x43474244; then setenv edge1_prev found; fi
+	fatwrite ${devtype} ${devnum}:${distro_bootpart} ${edge1_paddr} edge1-pstore.bin ${edge1_psize}
+fi
+
 # Load addresses (RK3399 DRAM starts at 0). The kernel on a 2MiB boundary so booti
 # does not have to move it; the ramdisk 128MiB above it, clear of the 50MB Image
 # and its BSS; the dtb below the kernel, where U-Boot's own fdt_addr_r is. The log
@@ -74,7 +88,7 @@ setenv edge1_laddr 0x09f00000
 # CONFIG_VERSION_VARIABLE, which that config does not have.) Sizes are hex, as
 # "load" leaves them in filesize.
 setenv edge1_stage started
-setenv edge1_log 'env export -t ${edge1_laddr} edge1_where edge1_dev edge1_stage edge1_ksize edge1_rsize edge1_dsize bootargs boot_targets fdtfile; fatwrite ${devtype} ${devnum}:${distro_bootpart} ${edge1_laddr} edge1-boot.log ${filesize}'
+setenv edge1_log 'env export -t ${edge1_laddr} edge1_where edge1_dev edge1_prev edge1_stage edge1_ksize edge1_rsize edge1_dsize bootargs boot_targets fdtfile; fatwrite ${devtype} ${devnum}:${distro_bootpart} ${edge1_laddr} edge1-boot.log ${filesize}'
 
 if load ${devtype} ${devnum}:${distro_bootpart} ${edge1_kaddr} Image; then
 	setenv edge1_ksize ${filesize}

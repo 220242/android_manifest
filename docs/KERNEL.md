@@ -126,8 +126,15 @@ before `m`:
 to proceed with no vbmeta digest from the bootloader. A userdebug build adds
 `console=tty0` — the kernel log on HDMI through fbcon, which the fragment states
 explicitly (`CONFIG_VT`, `CONFIG_VT_CONSOLE`, `CONFIG_FRAMEBUFFER_CONSOLE`) rather than
-trusting to defaults — plus `androidboot.init_fatal_panic=true` and
-`androidboot.selinux=permissive`.
+trusting to defaults — plus `androidboot.init_fatal_panic=true`,
+`androidboot.selinux=permissive` and `panic=20`.
+
+Without a UART, two more things carry the kernel's state off the board, both added to
+the dtb by `build-kernel.sh` in its staged copy (the kernel tree is not touched):
+`sys_led` becomes a `panic-indicator` (an even 2.5Hz blink after a panic), and a 1MiB
+ramoops region at `0x30000000` keeps the console log, the panic record and logcat in RAM
+across the reset `panic=20` causes. The boot script saves it to the card as
+`edge1-pstore.bin`; [`BOOT.md`](BOOT.md#watching-it-boot) has how to read both.
 
 What `boot.img` must **not** carry is `androidboot.boot_devices`: it names the storage
 controller the system booted from, differs per medium, and is added by whichever

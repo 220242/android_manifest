@@ -34,7 +34,7 @@ guarded by `verify-tree.sh`.
 | sepolicy, VINTF, `build.prop` | pass / generated (VINTF at `target-level="7"`) |
 | `boot.img`, `recovery.img`, `vbmeta.img`, `super.img` (raw, not sparse) | build |
 | Kernel command line | now carries `verifiedbootstate=orange`; userdebug adds `console=tty0`, `init_fatal_panic`, `selinux=permissive`. Needs a rebuild to reach `boot.img` |
-| `bootfs.img` (partition 1: `boot.scr` + `Image`/`ramdisk.img`/`edge1.dtb` for the eMMC's U-Boot) | 128MiB; script limited to 2022.07's commands (checked at build time) and run through distro boot on a v2022.07 sandbox: files byte-exact, `bootargs` right, log written, fallback to the eMMC intact. `booti` itself not exercised (ARM-only) |
+| `bootfs.img` (partition 1: `boot.scr` + `Image`/`ramdisk.img`/`edge1.dtb` for the eMMC's U-Boot) | 128MiB; script limited to 2022.07's commands (checked at build time) and run through distro boot on a v2022.07 sandbox: files byte-exact, `bootargs` right, log written, fallback to the eMMC intact. **On the board: reached `booti`** (`edge1-boot.log`). Now also saves the previous kernel's ramoops region as `edge1-pstore.bin` |
 | U-Boot (mainline v2026.07) | builds; `bootcmd` rewritten with per-medium `boot_devices` and `;`-joined attempts, tested in the sandbox. **Never run on this board** — see TST mode in `BOOT.md` |
 | Images: `edge1-sdcard.img`, `edge1-emmc.img`, `edge1-nvme.img` | build, now with `bootfs` first |
 | On-device installer (card → eMMC or NVMe) | keeps the eMMC's bootloader unless the card's own U-Boot started the system; never run on hardware |
@@ -51,6 +51,10 @@ Measured on the board — [`HARDWARE.md`](HARDWARE.md) has the readings:
   variant of the card in the slot.
 * The controllers are `fe320000.mmc` (card) and `fe330000.mmc` (eMMC) — the names
   `androidboot.boot_devices` needs.
+* **The boot script works on Armbian's U-Boot.** The sixth card's `edge1-boot.log` read
+  `edge1_stage=booti` from `mmc 1:1`: all three files loaded and the kernel was started.
+  What the kernel did next is not known yet — the next card saves its log across the
+  reset (`edge1-pstore.bin`, see "Watching it boot" in `BOOT.md`).
 
 What they did not establish, because none of the card's code ever ran: whether our U-Boot,
 our TPL's DDR init, or our SPL work on this board. The DDR-blob A/B, the SPL boot-order

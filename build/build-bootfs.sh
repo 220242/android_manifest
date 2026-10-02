@@ -12,6 +12,7 @@
 #   ramdisk.img      the ramdisk      > byte-for-byte out of boot.img
 #   edge1.dtb        the board dtb   /
 #   edge1-boot.log   written by the boot script at boot: how far it got
+#   edge1-pstore.bin the previous kernel's ramoops region, saved by the boot script
 #   README.txt       what all this is, for whoever opens the card on a PC
 #
 # ---------------------------------------------------------------------------
@@ -146,11 +147,50 @@ if "androidboot.boot_devices" in cmdline:
 for name, blob in (("Image", kernel), ("ramdisk.img", ramdisk), ("edge1.dtb", dtb)):
     open(os.path.join(work, name), "wb").write(blob)
 (image_size,) = struct.unpack_from("<Q", kernel, 0x10)
+
+# The ramoops region build-kernel.sh put in the dtb, read back so the boot script
+# saves exactly what the kernel writes. A plain walk of the FDT structure block
+# (devicetree spec, chapter 5): FDT_BEGIN_NODE 1, END_NODE 2, PROP 3, NOP 4, END 9.
+def ramoops_reg(fdt):
+    (off_struct, off_strings) = struct.unpack_from(">II", fdt, 8)
+    def name_at(off):
+        return fdt[off_strings + off:fdt.index(b"\0", off_strings + off)]
+    pos, props = off_struct, [{}]
+    while True:
+        (tok,) = struct.unpack_from(">I", fdt, pos); pos += 4
+        if tok == 1:
+            end = fdt.index(b"\0", pos)
+            pos = (end + 4) & ~3
+            props.append({})
+        elif tok == 3:
+            (ln, nameoff) = struct.unpack_from(">II", fdt, pos); pos += 8
+            props[-1][name_at(nameoff)] = fdt[pos:pos + ln]
+            pos = (pos + ln + 3) & ~3
+        elif tok == 2:
+            node = props.pop()
+            parent = props[-1]
+            ac = struct.unpack(">I", parent.get(b"#address-cells", b"\0\0\0\2"))[0]
+            sc = struct.unpack(">I", parent.get(b"#size-cells", b"\0\0\0\1"))[0]
+            if b"ramoops" in node.get(b"compatible", b"").split(b"\0") and b"reg" in node:
+                words = struct.unpack(">%dI" % (len(node[b"reg"]) // 4), node[b"reg"])
+                addr = sum(w << (32 * (ac - 1 - i)) for i, w in enumerate(words[:ac]))
+                size = sum(w << (32 * (sc - 1 - i)) for i, w in enumerate(words[ac:ac + sc]))
+                return addr, size
+        elif tok == 4:
+            continue
+        elif tok == 9:
+            return None
+        else:
+            sys.exit(f"{path}: unreadable dtb structure (token {tok:#x})")
+
+reg = ramoops_reg(dtb)
 print(f"CMDLINE={cmdline}")
 print(f"KSZ={ksz}")
 print(f"KIMAGE={image_size}")
 print(f"RSZ={rsz}")
 print(f"DSZ={dsz}")
+print(f"PSTORE_ADDR={reg[0]:#x}" if reg else "PSTORE_ADDR=")
+print(f"PSTORE_SIZE={reg[1]:#x}" if reg else "PSTORE_SIZE=")
 PY
 
 declare -A V=()
@@ -195,6 +235,16 @@ python3 "$HERE/check-uboot-script.py" "$WORK/boot.cmd" | sed 's/^/    /'
 # Pre-created so the first fatwrite at boot replaces a file rather than allocating
 # one, the simplest thing U-Boot's FAT writer does.
 printf 'No boot attempt recorded yet. The boot script rewrites this file each time it\nruns: edge1_stage says how far it got.\n' > "$WORK/edge1-boot.log"
+# The same for the RAM copy of the previous kernel's log, at the region's full size,
+# so each save overwrites the file in place.
+extra=()
+if [[ -n "${V[PSTORE_SIZE]}" ]]; then
+    head -c "$(( V[PSTORE_SIZE] ))" /dev/zero > "$WORK/edge1-pstore.bin"
+    extra+=("$WORK/edge1-pstore.bin")
+else
+    echo "    (the dtb has no ramoops region - an older kernel stage? - so the boot" >&2
+    echo "     script will not save the previous kernel's log)" >&2
+fi
 cat > "$WORK/README.txt" <<'EOF'
 Khadas Edge1 - Android TV 14, boot partition
 ============================================
@@ -216,6 +266,12 @@ device and partition it ran from; the sizes are hex):
                   it is the kernel's story, which is on the HDMI screen
   booti-returned  U-Boot refused to start the kernel
 
+edge1-pstore.bin is the previous kernel's log, saved from RAM by boot.scr before
+it starts the next one. It is only meaningful after a warm reset (a panic reboots
+by itself after 20 seconds on a userdebug build; a power cut loses it), and
+edge1_prev in edge1-boot.log says whether it held one: "found" or "none".
+build/edge1-pstore.py in the source tree turns it into text.
+
 Do not edit these files on a PC; rebuild the image instead.
 EOF
 
@@ -224,10 +280,11 @@ rm -f "$RESULT"
 # automounter show when the card is plugged into a desktop.
 mkfs.vfat -n EDGE1BOOT -C "$RESULT" $(( size_mib * 1024 )) >/dev/null
 mcopy -i "$RESULT" "$WORK/boot.scr" "$WORK/boot.cmd" "$WORK/Image" "$WORK/ramdisk.img" \
-      "$WORK/edge1.dtb" "$WORK/edge1-boot.log" "$WORK/README.txt" ::
+      "$WORK/edge1.dtb" "$WORK/edge1-boot.log" "$WORK/README.txt" "${extra[@]}" ::
 
 echo "==> bootfs.img (${size_mib}MiB FAT)"
 printf '    Image        %9s bytes (%s in memory with BSS)\n' "${V[KSZ]}" "${V[KIMAGE]}"
 printf '    ramdisk.img  %9s bytes\n' "${V[RSZ]}"
 printf '    edge1.dtb    %9s bytes\n' "${V[DSZ]}"
+[[ -z "${V[PSTORE_ADDR]}" ]] || printf '    ramoops      %s, %s bytes - saved as edge1-pstore.bin\n' "${V[PSTORE_ADDR]}" "$(( V[PSTORE_SIZE] ))"
 echo "    cmdline      androidboot.boot_devices=<per medium> ${V[CMDLINE]}"

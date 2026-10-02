@@ -62,7 +62,9 @@ list comes from `BOOT_TARGET_DEVICES` in that release's
 boot_targets=mmc1 mmc0 usb0 pxe dhcp sf0
 ```
 
-`mmc1` is the card (`&sdmmc`, `mmc@fe320000`), `mmc0` the eMMC. There is no `nvme`: that
+On the board Armbian's environment has moved USB to the front — `edge1-boot.log` read
+`boot_targets=usb0 mmc1 mmc0 pxe dhcp sf0` — which changes nothing for the card: it is
+still ahead of the eMMC. `mmc1` is the card (`&sdmmc`, `mmc@fe320000`), `mmc0` the eMMC. There is no `nvme`: that
 config has no `CMD_NVME` (current U-Boot's list does have it). For each device it lists
 the partitions flagged bootable and, if there are none, **uses partition 1**
 (`include/config_distro_bootcmd.h`, `scan_dev_for_boot_part`); on that partition it
@@ -122,7 +124,7 @@ board `setexpr` was an unknown command, the header check failed, and the script
 declined — every time, with nothing on the screen to say so; the board went on to boot
 Armbian. The sandbox run that "verified" it was current U-Boot, which has `setexpr`.
 
-Now the script uses eight commands — `echo test setenv run load env fatwrite booti` —
+Now the script uses nine commands — `echo test setenv run load env fatwrite itest booti` —
 and [`build/check-uboot-script.py`](../build/check-uboot-script.py) refuses anything
 else at build time (it is also check 3g of `verify-tree.sh`), along with hush's
 `&& … ||` trap. The pieces are files because `load` is what every distro boot script
@@ -268,6 +270,36 @@ and open `edge1-boot.log` on the `EDGE1BOOT` drive (or, from Armbian itself,
 
 `edge1_where` is the device and partition the script ran from, `boot_targets` and
 `fdtfile` are the eMMC U-Boot's own, and the sizes are hex.
+
+**First result on the board:** `edge1_stage=booti`, `edge1_where=mmc 1:1` — the script
+ran on Armbian's U-Boot, loaded all three files (Image `0x314aa00` bytes, ramdisk
+`0x19777c`, dtb `0xf7bd`) and handed over to our kernel. Everything after that is the
+kernel's, which is what the next part is for.
+
+**`edge1-pstore.bin`: the previous kernel's log.** The kernel keeps a 1MiB
+[ramoops](https://docs.kernel.org/admin-guide/ramoops.html) region at `0x30000000`
+(`build-kernel.sh` adds it to the dtb; `PSTORE_RAM`, `PSTORE_CONSOLE` and `PSTORE_PMSG`
+are built in): its whole console output — `init:` lines included — the log at a panic,
+and on a userdebug build what liblog writes, i.e. logcat. RAM survives a warm reset, and
+a userdebug kernel reboots by itself 20 seconds after a panic (`panic=20`). The boot
+script, before it loads anything, copies the region to `edge1-pstore.bin` on `bootfs`
+and notes in the log whether it held our kernel's signature:
+
+| `edge1_prev` | Means |
+|---|---|
+| `found` | the file holds the previous attempt's logs — decode it |
+| `none` | a cold start, or RAM did not survive the reset; the file is noise |
+
+```sh
+build/edge1-pstore.py edge1-pstore.bin        # console, panic records, logcat
+```
+
+So the routine after a failed boot is: let it reboot once by itself (it loops while
+something panics — the panic stays on screen for 20 seconds), then pull the card and
+send both files. A power cut loses the region; only a reset keeps it. Checked on the
+2022.07 sandbox: with a region left in RAM the saved file was byte-identical to it
+and `edge1_prev=found`; without, `none`. Whether this board's DRAM keeps its contents
+through the TF-A reset is the one thing only the board can say.
 
 To tell afterwards which U-Boot started a running system (Armbian or Android):
 

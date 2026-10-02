@@ -35,6 +35,7 @@ ALLOWED = {
     "env":      "CMD_EXPORTENV=y, for 'env export -t'",
     "fatwrite": "CMD_FAT=y with FAT_WRITE=y",
     "booti":    "CMD_BOOTI=y; raw initrd addr:size needs SUPPORT_RAW_INITRD=y, selected by DISTRO_DEFAULTS",
+    "itest":    "CMD_ITEST=y; itest.l *addr == value is the only way to read memory without setexpr",
 }
 # Measured absent from the 2022.07 khadas-edge-v config - using any of these is not a
 # style question, the script simply stops working on the board.

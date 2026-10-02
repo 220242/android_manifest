@@ -163,6 +163,38 @@ else
     echo "    not signal a kernel panic. Find the node with: fdtget -l $staged /leds" >&2
 fi
 
+# A ramoops region (Documentation/devicetree/bindings/reserved-memory/ramoops.yaml),
+# so the kernel's log - and, through pmsg, Android's - survives a reset in RAM. The
+# boot script on bootfs copies it to the card before it loads the next kernel; it
+# finds the address in this same dtb (build-bootfs.sh reads it back), so the two
+# cannot disagree. 768MiB is clear of everything U-Boot 2022.07 touches on the way:
+# its own relocation and the relocated FDT and ramdisk sit at the top of RAM, the
+# boot script's loads below 0x0a400000, BL31 below 2MiB - on the 2GB board and the
+# 4GB one alike. Layout, in the order ram.c lays the zones out: 2 x 128KiB dmesg
+# records (the log at a panic), 512KiB console, 256KiB pmsg. No ECC: a flipped bit
+# costs a character, and the decoder stays simple.
+readonly RAMOOPS_NODE=/reserved-memory/ramoops@30000000
+if ! fdtget -l "$staged" / | grep -qx reserved-memory; then
+    fdtput -c "$staged" /reserved-memory
+    fdtput -t i "$staged" /reserved-memory '#address-cells' 2
+    fdtput -t i "$staged" /reserved-memory '#size-cells' 2
+    fdtput "$staged" /reserved-memory ranges
+fi
+cells="$(fdtget "$staged" /reserved-memory '#address-cells' 2>/dev/null) $(fdtget "$staged" /reserved-memory '#size-cells' 2>/dev/null)"
+if [[ "$cells" != "2 2" ]]; then
+    echo "==> /reserved-memory in ${DTB}.dtb is not 2/2 cells; not adding ramoops." >&2
+    echo "    The kernel log will not survive a reset. Fix this block." >&2
+else
+    fdtget -l "$staged" /reserved-memory | grep -qx "${RAMOOPS_NODE##*/}" \
+        || fdtput -c "$staged" "$RAMOOPS_NODE"
+    fdtput -t s "$staged" "$RAMOOPS_NODE" compatible ramoops
+    fdtput -t x "$staged" "$RAMOOPS_NODE" reg 0 30000000 0 100000
+    fdtput -t x "$staged" "$RAMOOPS_NODE" record-size 20000
+    fdtput -t x "$staged" "$RAMOOPS_NODE" console-size 80000
+    fdtput -t x "$staged" "$RAMOOPS_NODE" pmsg-size 40000
+    echo "    $RAMOOPS_NODE: 1MiB ramoops (console, pmsg, 2 panic records)"
+fi
+
 echo
 echo "Image:  $KERNEL/out/arch/arm64/boot/Image  ($(du -h out/arch/arm64/boot/Image | cut -f1))"
 echo "dtb:    $DTB_STAGE/${DTB}.dtb  ($(du -h "$DTB_STAGE/${DTB}.dtb" | cut -f1))"

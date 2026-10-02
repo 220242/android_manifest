@@ -186,9 +186,18 @@ BOARD_KERNEL_CMDLINE += androidboot.veritymode=eio
 #                  Permissive logs the same denials and lets boot continue, so they
 #                  can be collected with adb and fixed. init only honours it on a
 #                  non-user build (init/selinux.cpp:98-108, ALLOW_PERMISSIVE_SELINUX).
+#
+#   panic=20       reboot 20 seconds after a panic instead of hanging. The panic
+#                  stays on the screen that long; then the warm reset keeps RAM, so
+#                  the kernel's ramoops region (see the kernel fragment) is still
+#                  there when the boot script runs again and copies it to the card
+#                  as edge1-pstore.bin. A hang would need a power cycle, which loses
+#                  it. The price is a boot loop while something panics - pull the
+#                  card to stop it.
 BOARD_KERNEL_CMDLINE := console=tty0 $(BOARD_KERNEL_CMDLINE)
 BOARD_KERNEL_CMDLINE += androidboot.init_fatal_panic=true
 BOARD_KERNEL_CMDLINE += androidboot.selinux=permissive
+BOARD_KERNEL_CMDLINE += panic=20
 endif
 
 BOARD_KERNEL_BASE := 0x00200000
