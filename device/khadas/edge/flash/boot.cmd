@@ -59,14 +59,19 @@ if test "${devtype}" = "nvme"; then setenv edge1_dev f8000000.pcie; fi
 # The previous kernel's log. The kernel keeps a ramoops region (its address is in
 # the dtb; build-bootfs.sh fills it in here) whose contents survive a warm reset - a
 # panic reboots by itself on a userdebug build. Saved to edge1-pstore.bin first,
-# before anything else touches RAM or a new kernel clears it. The first word of a
-# region our kernel has initialised is the ramoops signature "DBGC"; edge1_prev
-# says whether it was there, i.e. whether the file is worth decoding.
+# before anything else touches RAM or a new kernel clears it. Every zone our kernel
+# has initialised starts with the ramoops signature "DBGC"; edge1_prev says whether
+# the console zone's is there, i.e. whether the file is worth decoding. (Not the
+# region's first word: the DRAM init's capacity probe can overwrite a word at a
+# round address on the way through the reset - see build-kernel.sh.)
 setenv edge1_paddr @PSTORE_ADDR@
 setenv edge1_psize @PSTORE_SIZE@
+setenv edge1_pcons @PSTORE_CONSOLE@
 setenv edge1_prev none
 if test -n "${edge1_paddr}"; then
-	if itest.l *${edge1_paddr} == 0x43474244; then setenv edge1_prev found; fi
+	if test -n "${edge1_pcons}"; then
+		if itest.l *${edge1_pcons} == 0x43474244; then setenv edge1_prev found; fi
+	fi
 	fatwrite ${devtype} ${devnum}:${distro_bootpart} ${edge1_paddr} edge1-pstore.bin ${edge1_psize}
 fi
 

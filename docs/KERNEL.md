@@ -132,7 +132,7 @@ trusting to defaults — plus `androidboot.init_fatal_panic=true`,
 Without a UART, two more things carry the kernel's state off the board, both added to
 the dtb by `build-kernel.sh` in its staged copy (the kernel tree is not touched):
 `sys_led` becomes a `panic-indicator` (an even 2.5Hz blink after a panic), and a 1MiB
-ramoops region at `0x30000000` keeps the console log, the panic record and logcat in RAM
+ramoops region at `0x30100000` keeps the console log, the panic record and logcat in RAM
 across the reset `panic=20` causes. The boot script saves it to the card as
 `edge1-pstore.bin`; [`BOOT.md`](BOOT.md#watching-it-boot) has how to read both.
 
@@ -143,3 +143,26 @@ AOSP source lines behind both arguments.
 
 A change to `kernel/edge1_mainline.config` re-runs both the `Kernel` and the `Build`
 stage; before that was tracked, a fragment change re-packed the old `Image`.
+
+## The LSM list
+
+`CONFIG_SECURITY_SELINUX=y` builds SELinux; it does not turn it on. Only the LSMs named in
+`CONFIG_LSM` are initialised, and `build-kernel.sh` runs `make defconfig` before it merges
+the fragment. arm64 defconfig enables no major LSM, so at that point `CONFIG_LSM` is
+computed as the DAC default, `"landlock,lockdown,yama,loadpin,safesetid,ipe,bpf"`
+(`security/Kconfig`), and a string symbol that already has a value is kept by both
+`merge_config.sh` and `olddefconfig`. The first kernel to boot on the board printed
+
+```
+LSM: initializing lsm=capability
+...
+init: mount("selinuxfs", "/sys/fs/selinux", "selinuxfs", 0, NULL) failed Invalid argument
+init: Init encountered errors starting first stage, aborting
+```
+
+The fragment now sets `CONFIG_LSM="landlock,lockdown,yama,loadpin,safesetid,selinux,bpf"`
+and `CONFIG_SECURITY_SELINUX_DEVELOP=y` (without which `androidboot.selinux=permissive`
+cannot be honoured), and `verify-tree.sh` check 7 refuses a fragment whose `CONFIG_LSM`
+lacks `selinux`. Reproduced off the board with the kernel's own Kconfig and
+`scripts/dummy-tools`: `make defconfig` gives the list above, the fragment merge gives one
+with `selinux`, and every symbol in the fragment takes.

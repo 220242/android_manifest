@@ -175,7 +175,8 @@ def ramoops_reg(fdt):
                 words = struct.unpack(">%dI" % (len(node[b"reg"]) // 4), node[b"reg"])
                 addr = sum(w << (32 * (ac - 1 - i)) for i, w in enumerate(words[:ac]))
                 size = sum(w << (32 * (sc - 1 - i)) for i, w in enumerate(words[ac:ac + sc]))
-                return addr, size
+                u32 = lambda k: struct.unpack(">I", node[k])[0] if k in node else 0
+                return addr, size, u32(b"record-size"), u32(b"console-size"), u32(b"pmsg-size")
         elif tok == 4:
             continue
         elif tok == 9:
@@ -184,13 +185,22 @@ def ramoops_reg(fdt):
             sys.exit(f"{path}: unreadable dtb structure (token {tok:#x})")
 
 reg = ramoops_reg(dtb)
+# Where the console zone starts: fs/pstore/ram.c lays out the dmesg records first, as
+# many whole record-size zones as fit beside console and pmsg. Its header is what the
+# boot script checks, because it is the zone that matters and the first word of the
+# region is the one most exposed (see build-kernel.sh).
+if reg:
+    addr, size, record, console, pmsg = reg
+    dump = size - console - pmsg
+    console_off = (dump // record) * record if record else 0
 print(f"CMDLINE={cmdline}")
 print(f"KSZ={ksz}")
 print(f"KIMAGE={image_size}")
 print(f"RSZ={rsz}")
 print(f"DSZ={dsz}")
-print(f"PSTORE_ADDR={reg[0]:#x}" if reg else "PSTORE_ADDR=")
-print(f"PSTORE_SIZE={reg[1]:#x}" if reg else "PSTORE_SIZE=")
+print(f"PSTORE_ADDR={addr:#x}" if reg else "PSTORE_ADDR=")
+print(f"PSTORE_SIZE={size:#x}" if reg else "PSTORE_SIZE=")
+print(f"PSTORE_CONSOLE={addr + console_off:#x}" if reg and console else "PSTORE_CONSOLE=")
 PY
 
 declare -A V=()

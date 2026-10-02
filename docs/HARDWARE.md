@@ -148,6 +148,18 @@ and plausibly right, but the DRM device itself lives elsewhere.
 Confirms the whole audio approach: `simple-audio-card` bound to the HDMI codec, no
 Rockchip codec HAL. The card is id `hdmisound`, name `hdmi-sound`.
 
+## Our kernel on the board
+
+From the first boot of this tree's kernel (card seven), read out of `edge1-pstore.bin`:
+
+| | Measured | Bearing on the tree |
+|---|---|---|
+| memory as the kernel sees it | `0x00200000-0xf7ffffff`, from U-Boot's fixup | 4GB board; the first 2MiB is BL31's |
+| HDMI | the kernel log on screen through fbcon | Rockchip DRM, dw-hdmi and fbcon work built in |
+| SDIO Wi-Fi | `BCM4359/9` on `fe310000.mmc`, SDR104; firmware load -2 at 1.8s | the chip is the one we ship firmware for; built-in brcmfmac asks before `/vendor` exists |
+| LSM | `lsm=capability` | SELinux was not in `CONFIG_LSM`; fixed |
+| RAM across a warm reset | kept, except one word at `0x30000000` (`0x5aa5f00f`, the DRAM probe's pattern) | ramoops works; the region moved to `0x30100000` |
+
 ## Wi-Fi firmware names are exactly ours — and there is a Bluetooth one
 
 `/lib/firmware/brcm/` on the working board:

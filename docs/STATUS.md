@@ -53,8 +53,15 @@ Measured on the board — [`HARDWARE.md`](HARDWARE.md) has the readings:
   `androidboot.boot_devices` needs.
 * **The boot script works on Armbian's U-Boot.** The sixth card's `edge1-boot.log` read
   `edge1_stage=booti` from `mmc 1:1`: all three files loaded and the kernel was started.
-  What the kernel did next is not known yet — the next card saves its log across the
-  reset (`edge1-pstore.bin`, see "Watching it boot" in `BOOT.md`).
+* **Our kernel boots, and HDMI works.** The seventh card showed the kernel log on the
+  screen through fbcon, reached `Run /init as init process`, and first-stage init died at
+  its selinuxfs mount: SELinux was built but not in `CONFIG_LSM` (`KERNEL.md`, "The LSM
+  list"). Fixed. The whole log came back in `edge1-pstore.bin` — RAM survives the warm
+  reset, so every failed boot from now on reports itself.
+* **Known next: Wi-Fi.** brcmfmac is built in, so it asks for
+  `brcm/brcmfmac4359-sdio.bin` 1.8s into boot, long before `/vendor` is mounted, and
+  gets -2. Armbian loads it as a module, after its rootfs is up. Not a boot blocker;
+  the fix is to re-probe the SDIO host from init once `/vendor` is there.
 
 What they did not establish, because none of the card's code ever ran: whether our U-Boot,
 our TPL's DDR init, or our SPL work on this board. The DDR-blob A/B, the SPL boot-order

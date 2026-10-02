@@ -271,13 +271,17 @@ and open `edge1-boot.log` on the `EDGE1BOOT` drive (or, from Armbian itself,
 `edge1_where` is the device and partition the script ran from, `boot_targets` and
 `fdtfile` are the eMMC U-Boot's own, and the sizes are hex.
 
-**First result on the board:** `edge1_stage=booti`, `edge1_where=mmc 1:1` — the script
-ran on Armbian's U-Boot, loaded all three files (Image `0x314aa00` bytes, ramdisk
-`0x19777c`, dtb `0xf7bd`) and handed over to our kernel. Everything after that is the
-kernel's, which is what the next part is for.
+**First results on the board.** Card six: `edge1_stage=booti`, `edge1_where=mmc 1:1` —
+the script ran on Armbian's U-Boot, loaded all three files (Image `0x314aa00` bytes,
+ramdisk `0x19777c`, dtb `0xf7bd`) and handed over to our kernel. Card seven: the kernel
+booted with its log on HDMI, ran `/init`, and first-stage init stopped at its third
+mount — `mount("selinuxfs", "/sys/fs/selinux") failed Invalid argument` — because
+SELinux was built but not in `CONFIG_LSM` ([`KERNEL.md`](KERNEL.md#the-lsm-list)).
+init then rebooted to "bootloader", a warm reset, and the next run of the boot script
+saved the whole console log to `edge1-pstore.bin`.
 
 **`edge1-pstore.bin`: the previous kernel's log.** The kernel keeps a 1MiB
-[ramoops](https://docs.kernel.org/admin-guide/ramoops.html) region at `0x30000000`
+[ramoops](https://docs.kernel.org/admin-guide/ramoops.html) region at `0x30100000`
 (`build-kernel.sh` adds it to the dtb; `PSTORE_RAM`, `PSTORE_CONSOLE` and `PSTORE_PMSG`
 are built in): its whole console output — `init:` lines included — the log at a panic,
 and on a userdebug build what liblog writes, i.e. logcat. RAM survives a warm reset, and
@@ -287,7 +291,7 @@ and notes in the log whether it held our kernel's signature:
 
 | `edge1_prev` | Means |
 |---|---|
-| `found` | the file holds the previous attempt's logs — decode it |
+| `found` | the console zone carries our kernel's signature — decode it |
 | `none` | a cold start, or RAM did not survive the reset; the file is noise |
 
 ```sh
@@ -296,10 +300,18 @@ build/edge1-pstore.py edge1-pstore.bin        # console, panic records, logcat
 
 So the routine after a failed boot is: let it reboot once by itself (it loops while
 something panics — the panic stays on screen for 20 seconds), then pull the card and
-send both files. A power cut loses the region; only a reset keeps it. Checked on the
-2022.07 sandbox: with a region left in RAM the saved file was byte-identical to it
-and `edge1_prev=found`; without, `none`. Whether this board's DRAM keeps its contents
-through the TF-A reset is the one thing only the board can say.
+send both files. A power cut loses the region; only a reset keeps it.
+
+**Measured on the board: RAM survives the reset.** The first capture came back with
+the console zone intact — 32KB of log, from `Booting Linux` to `reboot: Restarting
+system` — and exactly one word changed: the first, at `0x30000000`, now `0x5aa5f00f`.
+That is `PATTERN` from the Rockchip DRAM init's capacity probe
+(`arch/arm/include/asm/arch-rockchip/sdram_common.h`), which `sdram_detect_row_3_4()`
+writes at 3/4 of a power of two — `0x30000000` for 1GiB. It cost that capture its
+`edge1_prev=found` (the check read that word) and would have cost a panic record its
+header, so the region now starts at `0x30100000` and the check reads the console
+zone's header instead. The board's own capture, replayed through the 2022.07 sandbox at
+the new address, came back byte-identical with `edge1_prev=found`.
 
 To tell afterwards which U-Boot started a running system (Armbian or Android):
 

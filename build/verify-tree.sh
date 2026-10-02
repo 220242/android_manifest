@@ -614,9 +614,21 @@ if [[ -f "$FRAG" ]]; then
                 CONFIG_FS_ENCRYPTION CONFIG_DM_VERITY CONFIG_USERFAULTFD \
                 CONFIG_DRM_PANFROST CONFIG_DRM_ROCKCHIP CONFIG_ROCKCHIP_DW_HDMI \
                 CONFIG_BRCMFMAC CONFIG_BRCMFMAC_SDIO CONFIG_VIDEO_ROCKCHIP_VDEC \
-                CONFIG_SND_SIMPLE_CARD CONFIG_DRM_DW_HDMI_I2S_AUDIO; do
+                CONFIG_SND_SIMPLE_CARD CONFIG_DRM_DW_HDMI_I2S_AUDIO \
+                CONFIG_SECURITY_SELINUX CONFIG_PSTORE_RAM; do
         grep -qE "^${must}=y" "$FRAG" && ok "$must=y" || err "$FRAG is missing ${must}=y"
     done
+    # Built is not enabled. make defconfig fixes the LSM list before the fragment is
+    # merged, without selinux, and olddefconfig keeps it; the first kernel on the
+    # board printed "LSM: initializing lsm=capability" and first-stage init died
+    # mounting selinuxfs. So the fragment must state the list, with selinux in it.
+    lsm="$(sed -n 's/^CONFIG_LSM="\(.*\)"$/\1/p' "$FRAG")"
+    if [[ ",$lsm," == *,selinux,* ]]; then
+        ok "CONFIG_LSM names selinux ($lsm)"
+    else
+        err "$FRAG does not set CONFIG_LSM with selinux in it; SELinux would be built"
+        err "  but never initialised, and first-stage init cannot mount selinuxfs"
+    fi
     # "CONFIG_X=n" is not how Kconfig disables a symbol. merge_config.sh reports
     # the line as redefining the value and then keeps the base setting, so the
     # fragment silently has no effect. The correct form is
