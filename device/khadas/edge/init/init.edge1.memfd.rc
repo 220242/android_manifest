@@ -1,0 +1,17 @@
+# Khadas Edge1 - shared memory through memfd, not ashmem.
+#
+# Installed on /product, not /vendor, on purpose: init runs the commands of product
+# rc files itself, while vendor ones go through vendor_init, which may not set this
+# system property. And init reads /product/etc/init after /system/etc/init/hw/init.rc,
+# so this post-fs-data action runs after init.rc's own - which is the point:
+#
+#   on post-fs-data
+#       # sys.memfd_use set to false by default, ...
+#       setprop sys.use_memfd false
+#
+# That line overrode the build.prop value the tenth card shipped, and getprop on the
+# board read sys.use_memfd=false while every ashmem region kept failing (device.mk,
+# "Shared memory", has the rest). Everything that uses shared memory in earnest -
+# zygote, system_server, SurfaceFlinger and the composer - starts after this.
+on post-fs-data
+    setprop sys.use_memfd true

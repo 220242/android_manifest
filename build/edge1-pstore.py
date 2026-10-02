@@ -23,20 +23,25 @@ import sys
 
 SIG = 0x43474244
 HDR = 12
-# Must match build/build-kernel.sh.
-RECORD, CONSOLE, PMSG = 0x20000, 0x80000, 0x40000
+# The layouts build/build-kernel.sh has used, by total size: (record, console, pmsg).
+# The file is exactly the region, so its size says which one wrote it.
+LAYOUTS = {
+    0x340000: (0x20000, 0x100000, 0x200000),   # since card 11
+    0x100000: (0x20000, 0x80000, 0x40000),     # cards 6-10
+}
 
 PRIO = {2: "V", 3: "D", 4: "I", 5: "W", 6: "E", 7: "F"}
 LOGID = {0: "main", 1: "radio", 3: "system", 4: "crash", 7: "kernel"}
 
 
 def zones(total):
-    dump = total - CONSOLE - PMSG
-    n = dump // RECORD
-    out = [(f"dmesg.{i}", i * RECORD, RECORD) for i in range(n)]
-    off = n * RECORD
-    out.append(("console", off, CONSOLE))
-    out.append(("pmsg", off + CONSOLE, PMSG))
+    record, console, pmsg = LAYOUTS[total]
+    dump = total - console - pmsg
+    n = dump // record
+    out = [(f"dmesg.{i}", i * record, record) for i in range(n)]
+    off = n * record
+    out.append(("console", off, console))
+    out.append(("pmsg", off + console, pmsg))
     return out
 
 
@@ -81,8 +86,9 @@ def main():
     if len(sys.argv) != 2:
         sys.exit(__doc__)
     blob = open(sys.argv[1], "rb").read()
-    if len(blob) < CONSOLE + PMSG + RECORD:
-        sys.exit(f"{sys.argv[1]}: {len(blob)} bytes, smaller than the layout")
+    if len(blob) not in LAYOUTS:
+        sys.exit(f"{sys.argv[1]}: {len(blob):#x} bytes, not a known ramoops layout "
+                 f"({', '.join(hex(k) for k in LAYOUTS)})")
     found = 0
     for name, off, size in zones(len(blob)):
         data, why = old_contents(blob, off, size)

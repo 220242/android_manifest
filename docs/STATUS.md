@@ -34,7 +34,7 @@ guarded by `verify-tree.sh`.
 | sepolicy, VINTF, `build.prop` | pass / generated (VINTF at `target-level="7"`) |
 | `boot.img`, `recovery.img`, `vbmeta.img`, `super.img` (raw, not sparse) | build |
 | Kernel command line | now carries `verifiedbootstate=orange`; userdebug adds `console=tty0`, `init_fatal_panic`, `selinux=permissive`. Needs a rebuild to reach `boot.img` |
-| `bootfs.img` (partition 1: `boot.scr` + `Image`/`ramdisk.img`/`edge1.dtb` for the eMMC's U-Boot) | 128MiB; script limited to 2022.07's commands (checked at build time) and run through distro boot on a v2022.07 sandbox: files byte-exact, `bootargs` right, log written, fallback to the eMMC intact. **On the board: reached `booti`** (`edge1-boot.log`). Now also saves the previous kernel's ramoops region as `edge1-pstore.bin` |
+| `bootfs.img` (partition 1: `boot.scr` + `Image`/`ramdisk.img`/`edge1.dtb` for the eMMC's U-Boot) | 512MiB (boot files + `edge1-logs`); script limited to 2022.07's commands (checked at build time) and run through distro boot on a v2022.07 sandbox: files byte-exact, `bootargs` right, log written, fallback to the eMMC intact. **On the board: reached `booti`** (`edge1-boot.log`). Now also saves the previous kernel's ramoops region as `edge1-pstore.bin` |
 | U-Boot (mainline v2026.07) | builds; `bootcmd` rewritten with per-medium `boot_devices` and `;`-joined attempts, tested in the sandbox. **Never run on this board** — see TST mode in `BOOT.md` |
 | Images: `edge1-sdcard.img`, `edge1-emmc.img`, `edge1-nvme.img` | build, now with `bootfs` first |
 | On-device installer (card → eMMC or NVMe) | keeps the eMMC's bootloader unless the card's own U-Boot started the system; never run on hardware |
@@ -102,6 +102,15 @@ Measured on the board — [`HARDWARE.md`](HARDWARE.md) has the readings:
   system properties moved from `/vendor/build.prop` to `/product`, and vold kept off the
   boot card. `edge1-bootwatch` now also writes logcat, dmesg, getprop and ps to the
   card's FAT (`EDGE1BOOT\edge1-logs`), minutes of log instead of seconds.
+* **system_server starts.** Card 11, and the first one read from the card's own logs:
+  zygote preloads, system_server runs its services — and stalls in `AudioService`
+  until the watchdog kills it (67s, three times). The audio HAL had registered no
+  `IModule/default`: it builds its modules from `audio_policy_configuration.xml` and
+  rejected ours, which was in the HIDL format and leaned on `xi:include`s. Now a
+  self-contained file in the v7 format, validated against the HAL's own schema. And
+  ashmem was still in use: `init.rc` resets `sys.use_memfd` to false in post-fs-data,
+  so a `/product` init file sets it back afterwards. `edge1-bootwatch` now streams the
+  whole logcat and dmesg of a boot to the card, and `bootfs` grew to 512MiB for it.
 * **Known next: Wi-Fi.** brcmfmac is built in, so it asks for
   `brcm/brcmfmac4359-sdio.bin` 1.8s into boot, long before `/vendor` is mounted, and
   gets -2. Armbian loads it as a module, after its rootfs is up. Not a boot blocker;

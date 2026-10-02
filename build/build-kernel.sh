@@ -175,9 +175,14 @@ fi
 # DRAM init writes when it probes capacity (U-Boot has the same constant in
 # arch/arm/include/asm/arch-rockchip/sdram_common.h, and sdram_detect_row_3_4()
 # writes it at 3/4 of a power of two - 0x30000000 for 1GiB). Everything else
-# survived, so the region starts 1MiB higher, off every address that probe uses. Layout, in the order ram.c lays
-# the zones out: 2 x 128KiB dmesg records (the log at a panic), 512KiB console,
-# 256KiB pmsg. No ECC: a flipped bit costs a character, and the decoder stays simple.
+# survived, so the region starts 1MiB higher, off every address that probe uses
+# (the next ones are 0x40000000 and up, far above the 3.25MiB it spans). Layout, in
+# the order ram.c lays the zones out: 2 x 128KiB dmesg records (the log at a panic),
+# 1MiB console, 2MiB pmsg. ram.c rounds each zone down to a power of two, so those
+# are the sizes that hold. pmsg was 256KiB until the tenth card, where a crash loop
+# logged 85KB/s and the capture held three seconds of logcat. No ECC: a flipped bit
+# costs a character, and the decoder stays simple. build/edge1-pstore.py knows this
+# layout and the old 1MiB one.
 readonly RAMOOPS_NODE=/reserved-memory/ramoops@30100000
 if ! fdtget -l "$staged" / | grep -qx reserved-memory; then
     fdtput -c "$staged" /reserved-memory
@@ -193,11 +198,11 @@ else
     fdtget -l "$staged" /reserved-memory | grep -qx "${RAMOOPS_NODE##*/}" \
         || fdtput -c "$staged" "$RAMOOPS_NODE"
     fdtput -t s "$staged" "$RAMOOPS_NODE" compatible ramoops
-    fdtput -t x "$staged" "$RAMOOPS_NODE" reg 0 30100000 0 100000
+    fdtput -t x "$staged" "$RAMOOPS_NODE" reg 0 30100000 0 340000
     fdtput -t x "$staged" "$RAMOOPS_NODE" record-size 20000
-    fdtput -t x "$staged" "$RAMOOPS_NODE" console-size 80000
-    fdtput -t x "$staged" "$RAMOOPS_NODE" pmsg-size 40000
-    echo "    $RAMOOPS_NODE: 1MiB ramoops (console, pmsg, 2 panic records)"
+    fdtput -t x "$staged" "$RAMOOPS_NODE" console-size 100000
+    fdtput -t x "$staged" "$RAMOOPS_NODE" pmsg-size 200000
+    echo "    $RAMOOPS_NODE: 3.25MiB ramoops (1MiB console, 2MiB pmsg, 2 panic records)"
 fi
 
 echo

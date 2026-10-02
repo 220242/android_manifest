@@ -76,7 +76,7 @@ That is how the owner's OpenWrt card "won" over the eMMC: its partition 1 holds 
 filesystem — as partition 1, so distro boot found nothing on the card and went on to the
 eMMC.
 
-So every image now begins with **`bootfs`: a 128MiB FAT that is partition 1**. On the
+So every image now begins with **`bootfs`: a 512MiB FAT that is partition 1**. On the
 card it is typed *Microsoft basic data* (so Windows mounts it, as `EDGE1BOOT`) and
 flagged legacy-BIOS-bootable (so distro boot picks it rather than defaulting to it). It
 holds:

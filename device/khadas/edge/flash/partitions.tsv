@@ -13,7 +13,7 @@
 # Columns: name <TAB> size in MiB ("rest" = fill the device) <TAB> image file, or
 # "-" for a partition that is created empty and formatted by Android.
 #
-# bootfs       a 128MiB FAT holding boot.scr plus the kernel, ramdisk and dtb as
+# bootfs       a 512MiB FAT holding boot.scr plus the kernel, ramdisk and dtb as
 #              files, all built by build/build-bootfs.sh from boot.img. It is FIRST on
 #              purpose: the RK3399 BootROM prefers the eMMC to the SD card, so on a
 #              board with anything bootable on its eMMC the card's own U-Boot never
@@ -21,8 +21,10 @@
 #              first and, with no partition flagged bootable, looks in partition 1 for
 #              boot.scr. The files are there, rather than read out of the boot
 #              partition, because that U-Boot (Armbian's 2022.07) cannot do the sector
-#              arithmetic: it has no setexpr. 128MiB holds what the 96MiB boot
-#              partition holds, with room. See boot.cmd next to this file.
+#              arithmetic: it has no setexpr. See boot.cmd next to this file.
+#              512MiB rather than the 128 the boot files need: on a userdebug build
+#              edge1-bootwatch streams the whole logcat and dmesg of every boot into
+#              edge1-logs/ here, and a crash loop logs 50MB in ten minutes.
 # misc         the bootloader control block: recovery and the boot reason live
 #              here, and Android will write to it whether or not we flash it.
 # vbmeta       AVB metadata. Present and flashed even though verification is not
@@ -38,7 +40,7 @@
 # BOARD_BOOTIMAGE_PARTITION_SIZE and BOARD_RECOVERYIMAGE_PARTITION_SIZE; the sizes
 # here and there have to agree, or an image that the build accepted will not fit
 # the partition it is written to.
-bootfs	128	bootfs.img
+bootfs	512	bootfs.img
 misc	4	-
 boot	96	boot.img
 recovery	96	recovery.img

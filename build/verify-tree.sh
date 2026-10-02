@@ -509,8 +509,11 @@ else
 fi
 # 6.12 has no ashmem; libcutils uses memfd only when sys.use_memfd is true.
 if ! grep -qE '^CONFIG_ASHMEM=y' "$DEV/kernel/edge1_mainline.config" \
-   && ! grep -qE '^PRODUCT_PRODUCT_PROPERTIES \+= sys\.use_memfd=true' "$dmk"; then
-    err "no ashmem in the kernel and sys.use_memfd is not set as a product property;"
+   && ! { grep -qE '^PRODUCT_PRODUCT_PROPERTIES \+= sys\.use_memfd=true' "$dmk" \
+          && grep -qE 'init\.edge1\.memfd\.rc:\$\(TARGET_COPY_OUT_PRODUCT\)/etc/init/' "$dmk" \
+          && grep -qE '^\s+setprop sys\.use_memfd true' "$DEV/init/init.edge1.memfd.rc"; }; then
+    err "no ashmem in the kernel, and sys.use_memfd is not forced true after init.rc's"
+    err "  post-fs-data resets it (product property + /product init.edge1.memfd.rc);"
     err "  every ashmem region fails, and SurfaceFlinger cannot talk to the composer"
     cl_bad=$((cl_bad+1))
 else
@@ -956,46 +959,35 @@ done
 (( dangling )) || ok "no list continues into a comment or a blank line"
 echo
 
-# --- 9c. audio policy includes ------------------------------------------------
-# Every xi:include in the audio policy has to resolve on the device, or the parse
-# fails and takes the whole policy with it - not just the section that could not be
-# found. So each href must be either a file this tree installs or one of the AOSP
-# modules device.mk asks for, under the name that module installs.
+# --- 9c. audio policy: self-contained, valid against the HAL's schema -------
+# The AIDL audio HAL builds its modules from /vendor/etc/audio_policy_configuration.xml
+# and treats a file it cannot parse as having none: no IModule/default, audioserver
+# waits for it forever, system_server's AudioService waits for audioserver, and the
+# watchdog kills system_server (the tenth card, three times). The file it rejected was
+# in the old HIDL format and leaned on xi:include for files from AOSP modules whose
+# install location this tree does not control.
 #
-# This is not hypothetical: bluetooth_audio_policy_configuration.xml was included
-# under that name while AOSP's file is bluetooth_audio_policy_configuration_7_0.xml,
-# and it only resolved because a PRODUCT_COPY_FILES line renamed it on the way in.
-# Installing the module instead would have kept the suffix and broken the include.
-echo "[9c] audio policy xi:include targets"
+# So: no xi:include at all, and the file must validate against the HAL's own schema
+# (build/schema/audio_policy_configuration.xsd, from
+# hardware/interfaces/audio/aidl/default/config/audioPolicy).
+echo "[9c] audio policy: self-contained and schema-valid"
 readonly APC="$DEV/audio/audio_policy_configuration.xml"
+readonly APC_XSD="$ROOT/build/schema/audio_policy_configuration.xsd"
 if [[ -f "$APC" ]]; then
-    # Names AOSP modules install, as filenames. Extend this when adding a module.
-    aosp_installed="r_submix_audio_policy_configuration.xml
-usb_audio_policy_configuration.xml
-default_volume_tables.xml
-audio_policy_engine_configuration.xml"
-    bad_inc=0
-    while read -r href; do
-        [[ -n "$href" ]] || continue
-        if [[ -f "$DEV/audio/$href" ]]; then
-            ok "$href (ours)"
-        elif grep -qxF "$href" <<< "$aosp_installed"; then
-            # And the module that provides it must actually be requested.
-            mod="${href%.xml}"
-            # Backslashes stripped first: these are continuation lines in a
-            # PRODUCT_PACKAGES list, so the module name is followed by " \\" and a
-            # pattern anchored at end-of-line never matches it.
-            if tr -d '\\' < "$DEV/device.mk" | grep -qxE "[[:space:]]*$mod[[:space:]]*"; then
-                ok "$href (AOSP module $mod, installed)"
-            else
-                err "$href is an AOSP config but device.mk does not install $mod"
-                bad_inc=$((bad_inc+1))
-            fi
-        else
-            err "$href resolves to nothing this tree installs; the policy parse will fail"
-            bad_inc=$((bad_inc+1))
-        fi
-    done < <(grep -oE 'xi:include href="[^"]+"' "$APC" | sed -E 's/.*href="([^"]+)"/\1/')
+    if grep -q '<xi:include' "$APC"; then
+        err "audio_policy_configuration.xml uses xi:include; an include that does not resolve on"
+        err "  the device makes the HAL reject the whole file. Inline it."
+    else
+        ok "audio_policy_configuration.xml includes nothing"
+    fi
+    if ! command -v xmllint >/dev/null; then
+        wrn "xmllint not installed; audio_policy_configuration.xml not checked against the schema"
+    elif xmlerr=$(xmllint --noout --schema "$APC_XSD" "$APC" 2>&1); then
+        ok "audio_policy_configuration.xml validates against the AIDL HAL's schema"
+    else
+        err "audio_policy_configuration.xml does not validate against $(basename "$APC_XSD"):"
+        while IFS= read -r l; do err "  $l"; done < <(grep -v 'fails to validate' <<< "$xmlerr" | head -5)
+    fi
 fi
 echo
 

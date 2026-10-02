@@ -66,7 +66,7 @@ loaded at first stage. `PRODUCT_SHIPPING_API_LEVEL` is 29, not 34: declaring 34
 would assert launch-device status and demand a 5.15 kernel and 64-bit-only
 userspace.
 
-**Partitions.** A 128MiB `bootfs` first (a boot script, and the kernel, ramdisk and dtb
+**Partitions.** A 512MiB `bootfs` first (a boot script, and the kernel, ramdisk and dtb
 as files, for a distro U-Boot), then one
 96MiB `boot` carrying kernel, ramdisk and dtb together (boot image header v2, no
 `vendor_boot`), a 96MiB `recovery`, and a 4608MiB `super` holding

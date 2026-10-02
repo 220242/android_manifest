@@ -210,7 +210,7 @@ One layout — `flash/partitions.tsv` — and three media. Each image is a GPT b
 file with every partition image `dd`'d into place, plus a `.img.gz` beside it that Etcher
 reads directly.
 
-**Partition 1 of every image is `bootfs`**, a 128MiB FAT built by `build/build-bootfs.sh`
+**Partition 1 of every image is `bootfs`**, a 512MiB FAT (boot files, and room for `edge1-logs`) built by `build/build-bootfs.sh`
 from `boot.img` (it runs again on every `build-images.sh`, so it always matches). It holds
 `boot.scr` and copies of the kernel, ramdisk and dtb out of `boot.img`, which the script
 `load`s and `booti`s. A distro U-Boot — Armbian's, on this board's eMMC — scans the card

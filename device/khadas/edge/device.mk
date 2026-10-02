@@ -262,31 +262,17 @@ endif
 
 PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/audio/audio_policy_configuration.xml:$(TARGET_COPY_OUT_VENDOR)/etc/audio_policy_configuration.xml \
-    $(LOCAL_PATH)/audio/audio_policy_volumes.xml:$(TARGET_COPY_OUT_VENDOR)/etc/audio_policy_volumes.xml \
     $(LOCAL_PATH)/audio/mixer_paths.xml:$(TARGET_COPY_OUT_VENDOR)/etc/mixer_paths.xml \
     $(LOCAL_PATH)/audio/audio_effects_config.xml:$(TARGET_COPY_OUT_VENDOR)/etc/audio_effects_config.xml
 
-# The shared parts of the audio policy: installed as modules, not copied from
-# AOSP source paths.
-#
-# They were copied by path, and ninja stopped on one of them:
-#
-#   'frameworks/av/services/audiopolicy/config/audio_policy_engine_configuration.xml',
-#   needed by '.../vendor/etc/audio_policy_engine_configuration.xml', missing and no
-#   known rule to make it
-#
-# The file moved; the module did not. Every one of these exists as a module in the
-# tree - checked, not assumed - and a module carries its own source path and install
-# location, so this cannot rot the same way again.
-#
-# Why it matters more than a normal missing file: our audio_policy_configuration.xml
-# pulls these in with xi:include, and an include that does not resolve on the device
-# fails the whole policy parse rather than that one section.
-PRODUCT_PACKAGES += \
-    r_submix_audio_policy_configuration \
-    usb_audio_policy_configuration \
-    default_volume_tables \
-    audio_policy_engine_configuration
+# The shared parts of the audio policy - the r_submix and usb modules, the volume
+# tables - are inlined in audio/audio_policy_configuration.xml, which says why. They
+# were installed here as modules (r_submix_audio_policy_configuration,
+# usb_audio_policy_configuration, default_volume_tables,
+# audio_policy_engine_configuration) and pulled in with xi:include; on the tenth card
+# the AIDL HAL rejected the file and found no engine configuration in /vendor/etc
+# either. The engine configuration is not needed: the HAL reports none, and
+# audioserver then uses its built-in default strategies (EngineBase.cpp).
 
 # bluetooth_audio_policy_configuration was copied here too, renamed on the way in -
 # the AOSP file is bluetooth_audio_policy_configuration_7_0.xml and the copy landed
@@ -533,7 +519,13 @@ PRODUCT_PACKAGES += edge1_no_configstore
 # A product property, not PRODUCT_PROPERTY_OVERRIDES: that goes to /vendor/build.prop,
 # and init loads vendor property files with vendor_init's permissions, which do not
 # cover system properties like this one. /product/etc/build.prop loads as init.
+#
+# The property alone was not enough: rootdir/init.rc sets sys.use_memfd false again
+# in post-fs-data, and the tenth card read false. init/init.edge1.memfd.rc sets it
+# back right after, from /product so that init runs it without vendor_init's limits.
 PRODUCT_PRODUCT_PROPERTIES += sys.use_memfd=true
+PRODUCT_COPY_FILES += \
+    $(LOCAL_PATH)/init/init.edge1.memfd.rc:$(TARGET_COPY_OUT_PRODUCT)/etc/init/init.edge1.memfd.rc
 
 # init / fstab.
 # ---------------------------------------------------------------------------

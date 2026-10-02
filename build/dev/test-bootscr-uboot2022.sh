@@ -100,5 +100,7 @@ echo "==> distro boot on U-Boot v2022.07"
     | grep -av 'erofs superblock\|RNG device\|EFI system partition\|ACPI table\|BootOrder\|EFI boot manager\|^.\[' || true
 echo "==> edge1-boot.log on the card afterwards"
 mtype -i "$W/card.img@@16M" ::edge1-boot.log | tr -d '\0'
-dd if="$W/card.img" of="$W/p1.img" bs=1M skip=16 count=128 status=none
+# bootfs's size from the same table the image was built from.
+P1_MIB="$(awk -F'\t' '$1 == "bootfs" { print $2 }' "$(dirname "${BASH_SOURCE[0]}")/../../device/khadas/edge/flash/partitions.tsv")"
+dd if="$W/card.img" of="$W/p1.img" bs=1M skip=16 count="$P1_MIB" status=none
 fsck.vfat -n "$W/p1.img" >/dev/null 2>&1 && echo "==> fsck.vfat: bootfs clean" || echo "==> fsck.vfat: PROBLEMS"

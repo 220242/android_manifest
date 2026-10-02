@@ -1,120 +1,402 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Khadas Edge1 (RK3399) - audio policy for an Android TV device.
+  Khadas Edge1 (RK3399) - audio policy for an Android TV device, read by the AIDL
+  audio HAL (android.hardware.audio.service-aidl.example).
 
-  Differences from the Android 10 rk3399 tablet policy this replaces:
-    * HDMI is the default and primary sink, not the speaker. The Edge1 has no
-      speaker at all, so a "primary output" routed to AUDIO_DEVICE_OUT_SPEAKER
-      leaves the device silent.
-    * Multichannel (5.1/7.1) PCM and IEC61937 passthrough profiles are
-      declared, which the legacy HAL does support but the tablet policy never
-      exposed. AC3/E-AC3/DTS are NOT declared as formats: the HAL cannot open a
-      stream in them (see the hdmi passthrough mixPort comment).
-    * No builtin mic. Capture exists only over USB and the remote's mic
-      (handled by the Bluetooth/USB modules, not the primary module).
+  That HAL builds its modules from this file: every <module> becomes an
+  IModule/<name> service ("primary" is registered as "default"), and a file it
+  cannot parse gives no modules at all. That is what the tenth card ran into: the
+  HAL logged 'Invalid XML config file: "/vendor/etc/audio_policy_configuration.xml"',
+  never registered IModule/default, audioserver waited for it forever, and
+  system_server's AudioService waited for audioserver until the watchdog killed it
+  (67s, three times). The old file was in the HIDL 5/6 format (comma-separated
+  lists, profile names, halVersion "AIDL" where the schema allows 2.0 or 3.0) and
+  pulled four more files in with xi:include - from AOSP modules whose install
+  location this tree does not control, and an include that does not resolve fails
+  the whole file.
+
+  So this file is self-contained - no xi:include - and valid against the HAL's own
+  schema (hardware/interfaces/audio/aidl/default/config/audioPolicy/
+  audio_policy_configuration.xsd, copied to build/schema/ and checked by
+  build/verify-tree.sh). The r_submix and usb modules and the volume tables are
+  AOSP's, inlined (frameworks/av/services/audiopolicy/config).
+
+  The primary module is HDMI only: the board has one ALSA card, hdmi-sound (card 0,
+  which is the card the HAL's primary module opens), and no speaker, so HDMI is the
+  attached default device. S/PDIF and passthrough (IEC61937) come back when there
+  is a card for them and the HAL work to drive it - see docs/HAL_MIGRATION.md.
 -->
-<audioPolicyConfiguration version="7.0" xmlns:xi="http://www.w3.org/2001/XInclude">
+<audioPolicyConfiguration version="7.0">
     <globalConfiguration speaker_drc_enabled="false" call_screen_mode_supported="false"/>
-
     <modules>
-        <module name="primary" halVersion="AIDL">
+        <module name="primary" halVersion="3.0">
             <attachedDevices>
                 <item>HDMI Out</item>
-                <item>SPDIF Out</item>
             </attachedDevices>
             <defaultOutputDevice>HDMI Out</defaultOutputDevice>
-
             <mixPorts>
-                <!-- Stereo PCM: the default mix for UI and app audio. -->
                 <mixPort name="primary output" role="source" flags="AUDIO_OUTPUT_FLAG_PRIMARY">
-                    <profile name="" format="AUDIO_FORMAT_PCM_16_BIT"
-                             samplingRates="44100,48000"
-                             channelMasks="AUDIO_CHANNEL_OUT_STEREO"/>
-                </mixPort>
-
-                <!-- Multichannel PCM for surround content decoded in the
-                     framework. The ceiling is the HAL's: audio_hw.c accepts up
-                     to 8 channels and special-cases 8ch@192kHz, defaulting an
-                     unspecified mask to AUDIO_CHANNEL_OUT_5POINT1. -->
-                <mixPort name="multichannel output" role="source"
-                         flags="AUDIO_OUTPUT_FLAG_DIRECT">
-                    <profile name="" format="AUDIO_FORMAT_PCM_16_BIT"
-                             samplingRates="44100,48000,88200,96000,176400,192000"
-                             channelMasks="AUDIO_CHANNEL_OUT_STEREO,AUDIO_CHANNEL_OUT_5POINT1,AUDIO_CHANNEL_OUT_7POINT1"/>
-                </mixPort>
-
-                <!-- Compressed passthrough over HDMI.
-                     IEC61937 only, deliberately.
-                     Verified against hardware/rockchip/audio/tinyalsa_hal: the
-                     legacy HAL declares exactly one format,
-                     AUDIO_FORMAT_PCM_16_BIT, and implements passthrough as
-                     SPDIF_PASSTHROUGH_MODE - it takes an already IEC61937-framed
-                     PCM payload and fixes up the channel status bits
-                     (setChanSta / fill_hdmi_bitstream_buf in audio_bitstream.c).
-                     It does not parse or bitstream AC3/E-AC3/DTS as distinct
-                     audio formats. Declaring AUDIO_FORMAT_AC3 or _DTS here
-                     would make the framework offer direct passthrough that
-                     open_output_stream then rejects, which apps surface as
-                     silent playback rather than a clean fallback to PCM.
-                     Adding true AC3/E-AC3/DTS passthrough is HAL work; see
-                     docs/HAL_MIGRATION.md. -->
-                <mixPort name="hdmi passthrough output" role="source"
-                         flags="AUDIO_OUTPUT_FLAG_DIRECT AUDIO_OUTPUT_FLAG_COMPRESS_PASSTHROUGH">
-                    <profile name="" format="AUDIO_FORMAT_IEC61937"
-                             samplingRates="32000,44100,48000"
-                             channelMasks="AUDIO_CHANNEL_OUT_STEREO"/>
-                </mixPort>
-
-                <!-- S/PDIF is stereo PCM or IEC61937-framed data only; the
-                     HAL validates the rate in adev_open_output_stream and
-                     rejects anything outside 32/44.1/48kHz. -->
-                <mixPort name="spdif output" role="source" flags="AUDIO_OUTPUT_FLAG_DIRECT">
-                    <profile name="" format="AUDIO_FORMAT_PCM_16_BIT"
-                             samplingRates="44100,48000"
-                             channelMasks="AUDIO_CHANNEL_OUT_STEREO"/>
-                    <profile name="" format="AUDIO_FORMAT_IEC61937"
-                             samplingRates="32000,44100,48000"
+                    <profile format="AUDIO_FORMAT_PCM_16_BIT"
+                             samplingRates="44100 48000"
                              channelMasks="AUDIO_CHANNEL_OUT_STEREO"/>
                 </mixPort>
             </mixPorts>
-
             <devicePorts>
                 <devicePort tagName="HDMI Out" type="AUDIO_DEVICE_OUT_HDMI" role="sink">
-                    <profile name="" format="AUDIO_FORMAT_PCM_16_BIT"
-                             samplingRates="32000,44100,48000,88200,96000,176400,192000"
-                             channelMasks="AUDIO_CHANNEL_OUT_STEREO,AUDIO_CHANNEL_OUT_5POINT1,AUDIO_CHANNEL_OUT_7POINT1"/>
-                    <profile name="" format="AUDIO_FORMAT_IEC61937"
-                             samplingRates="32000,44100,48000"
-                             channelMasks="AUDIO_CHANNEL_OUT_STEREO"/>
-                </devicePort>
-                <devicePort tagName="SPDIF Out" type="AUDIO_DEVICE_OUT_SPDIF" role="sink">
-                    <profile name="" format="AUDIO_FORMAT_PCM_16_BIT"
-                             samplingRates="32000,44100,48000"
-                             channelMasks="AUDIO_CHANNEL_OUT_STEREO"/>
-                    <profile name="" format="AUDIO_FORMAT_IEC61937"
-                             samplingRates="32000,44100,48000"
+                    <profile format="AUDIO_FORMAT_PCM_16_BIT"
+                             samplingRates="44100 48000"
                              channelMasks="AUDIO_CHANNEL_OUT_STEREO"/>
                 </devicePort>
             </devicePorts>
-
             <routes>
-                <route type="mix" sink="HDMI Out"
-                       sources="primary output,multichannel output,hdmi passthrough output"/>
-                <route type="mix" sink="SPDIF Out" sources="spdif output"/>
+                <route type="mix" sink="HDMI Out" sources="primary output"/>
             </routes>
         </module>
-
-        <!-- Remote submix (Cast) and USB audio come from AOSP's own module configs,
-             installed by device.mk as r_submix_audio_policy_configuration and
-             usb_audio_policy_configuration.
-
-             Bluetooth A2DP was included here as well. It is out until Bluetooth
-             itself comes up on this board: an xi:include that does not resolve on
-             the device fails the whole policy parse, not just its own section. -->
-        <xi:include href="r_submix_audio_policy_configuration.xml"/>
-        <xi:include href="usb_audio_policy_configuration.xml"/>
+        <module name="r_submix" halVersion="2.0">
+                <attachedDevices>
+                    <item>Remote Submix In</item>
+                </attachedDevices>
+                <mixPorts>
+                    <mixPort name="r_submix output" role="source">
+                        <profile format="AUDIO_FORMAT_PCM_16_BIT"
+                                 samplingRates="48000" channelMasks="AUDIO_CHANNEL_OUT_STEREO"/>
+                    </mixPort>
+                    <mixPort name="r_submix input" role="sink">
+                       <profile format="AUDIO_FORMAT_PCM_16_BIT"
+                                samplingRates="48000" channelMasks="AUDIO_CHANNEL_IN_STEREO"/>
+                    </mixPort>
+               </mixPorts>
+               <devicePorts>
+                   <devicePort tagName="Remote Submix Out" type="AUDIO_DEVICE_OUT_REMOTE_SUBMIX"  role="sink">
+                       <profile format="AUDIO_FORMAT_PCM_16_BIT"
+                                samplingRates="48000" channelMasks="AUDIO_CHANNEL_OUT_STEREO"/>
+                   </devicePort>
+                   <devicePort tagName="Remote Submix In" type="AUDIO_DEVICE_IN_REMOTE_SUBMIX"  role="source">
+                       <profile format="AUDIO_FORMAT_PCM_16_BIT"
+                                samplingRates="48000" channelMasks="AUDIO_CHANNEL_IN_STEREO"/>
+                    </devicePort>
+                </devicePorts>
+                <routes>
+                    <route type="mix" sink="Remote Submix Out"
+                           sources="r_submix output"/>
+                    <route type="mix" sink="r_submix input"
+                           sources="Remote Submix In"/>
+                </routes>
+        </module>
+        <module name="usb" halVersion="2.0">
+                <mixPorts>
+                    <mixPort name="usb_accessory output" role="source">
+                        <profile format="AUDIO_FORMAT_PCM_16_BIT"
+                                 samplingRates="44100" channelMasks="AUDIO_CHANNEL_OUT_STEREO"/>
+                    </mixPort>
+                    <mixPort name="usb_device output" role="source"/>
+                    <mixPort name="usb_device input" role="sink"/>
+                </mixPorts>
+                <devicePorts>
+                    <devicePort tagName="USB Host Out" type="AUDIO_DEVICE_OUT_USB_ACCESSORY" role="sink">
+                        <profile format="AUDIO_FORMAT_PCM_16_BIT"
+                                 samplingRates="44100" channelMasks="AUDIO_CHANNEL_OUT_STEREO"/>
+                    </devicePort>
+                    <devicePort tagName="USB Device Out" type="AUDIO_DEVICE_OUT_USB_DEVICE" role="sink"/>
+                    <devicePort tagName="USB Headset Out" type="AUDIO_DEVICE_OUT_USB_HEADSET" role="sink"/>
+                    <devicePort tagName="USB Device In" type="AUDIO_DEVICE_IN_USB_DEVICE" role="source"/>
+                    <devicePort tagName="USB Headset In" type="AUDIO_DEVICE_IN_USB_HEADSET" role="source"/>
+                </devicePorts>
+                <routes>
+                    <route type="mix" sink="USB Host Out"
+                           sources="usb_accessory output"/>
+                    <route type="mix" sink="USB Device Out"
+                           sources="usb_device output"/>
+                    <route type="mix" sink="USB Headset Out"
+                           sources="usb_device output"/>
+                    <route type="mix" sink="usb_device input"
+                           sources="USB Device In,USB Headset In"/>
+                </routes>
+        </module>
     </modules>
-
-    <xi:include href="audio_policy_volumes.xml"/>
-    <xi:include href="default_volume_tables.xml"/>
+    <volumes>
+            <volume stream="AUDIO_STREAM_VOICE_CALL" deviceCategory="DEVICE_CATEGORY_HEADSET">
+                <point>0,-4200</point>
+                <point>33,-2800</point>
+                <point>66,-1400</point>
+                <point>100,0</point>
+            </volume>
+            <volume stream="AUDIO_STREAM_VOICE_CALL" deviceCategory="DEVICE_CATEGORY_SPEAKER">
+                <point>0,-2400</point>
+                <point>33,-1600</point>
+                <point>66,-800</point>
+                <point>100,0</point>
+            </volume>
+            <volume stream="AUDIO_STREAM_VOICE_CALL" deviceCategory="DEVICE_CATEGORY_EARPIECE">
+                <point>0,-2400</point>
+                <point>33,-1600</point>
+                <point>66,-800</point>
+                <point>100,0</point>
+            </volume>
+            <volume stream="AUDIO_STREAM_VOICE_CALL" deviceCategory="DEVICE_CATEGORY_EXT_MEDIA"
+                                                     ref="DEFAULT_MEDIA_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_VOICE_CALL" deviceCategory="DEVICE_CATEGORY_HEARING_AID"
+                                                     ref="DEFAULT_NON_MUTABLE_HEARING_AID_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_SYSTEM" deviceCategory="DEVICE_CATEGORY_HEADSET">
+                <point>1,-3000</point>
+                <point>33,-2600</point>
+                <point>66,-2200</point>
+                <point>100,-1800</point>
+            </volume>
+            <volume stream="AUDIO_STREAM_SYSTEM" deviceCategory="DEVICE_CATEGORY_SPEAKER"
+                                                 ref="DEFAULT_SYSTEM_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_SYSTEM" deviceCategory="DEVICE_CATEGORY_EARPIECE"
+                                                 ref="DEFAULT_SYSTEM_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_SYSTEM" deviceCategory="DEVICE_CATEGORY_EXT_MEDIA"
+                                                 ref="DEFAULT_DEVICE_CATEGORY_EXT_MEDIA_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_SYSTEM" deviceCategory="DEVICE_CATEGORY_HEARING_AID"
+                                                 ref="DEFAULT_HEARING_AID_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_RING" deviceCategory="DEVICE_CATEGORY_HEADSET"
+                                               ref="DEFAULT_DEVICE_CATEGORY_HEADSET_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_RING" deviceCategory="DEVICE_CATEGORY_SPEAKER">
+                <point>1,-2970</point>
+                <point>33,-2010</point>
+                <point>66,-1020</point>
+                <point>100,0</point>
+            </volume>
+            <volume stream="AUDIO_STREAM_RING" deviceCategory="DEVICE_CATEGORY_EARPIECE"
+                                               ref="DEFAULT_DEVICE_CATEGORY_EARPIECE_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_RING" deviceCategory="DEVICE_CATEGORY_EXT_MEDIA"
+                                               ref="DEFAULT_DEVICE_CATEGORY_EXT_MEDIA_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_RING" deviceCategory="DEVICE_CATEGORY_HEARING_AID"
+                                               ref="DEFAULT_HEARING_AID_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_MUSIC" deviceCategory="DEVICE_CATEGORY_HEADSET"
+                                                ref="DEFAULT_MEDIA_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_MUSIC" deviceCategory="DEVICE_CATEGORY_SPEAKER"
+                                                ref="DEFAULT_DEVICE_CATEGORY_SPEAKER_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_MUSIC" deviceCategory="DEVICE_CATEGORY_EARPIECE"
+                                                ref="DEFAULT_MEDIA_VOLUME_CURVE"/>
+            <!-- Edge1: the TV curve, replacing DEFAULT_DEVICE_CATEGORY_EXT_MEDIA_VOLUME_CURVE.
+                 HDMI is an external-media device, and a TV box drives an external amplifier
+                 or the TV's own speakers, so the curve is flatter than a phone's. -->
+            <volume stream="AUDIO_STREAM_MUSIC" deviceCategory="DEVICE_CATEGORY_EXT_MEDIA">
+                <point>0,-4200</point>
+                <point>33,-2400</point>
+                <point>66,-1200</point>
+                <point>100,0</point>
+            </volume>
+            <volume stream="AUDIO_STREAM_MUSIC" deviceCategory="DEVICE_CATEGORY_HEARING_AID"
+                                                ref="DEFAULT_HEARING_AID_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_ALARM" deviceCategory="DEVICE_CATEGORY_HEADSET"
+                                                ref="DEFAULT_NON_MUTABLE_HEADSET_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_ALARM" deviceCategory="DEVICE_CATEGORY_SPEAKER">
+                <point>0,-2970</point>
+                <point>33,-2010</point>
+                <point>66,-1020</point>
+                <point>100,0</point>
+            </volume>
+            <volume stream="AUDIO_STREAM_ALARM" deviceCategory="DEVICE_CATEGORY_EARPIECE"
+                                                ref="DEFAULT_NON_MUTABLE_EARPIECE_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_ALARM" deviceCategory="DEVICE_CATEGORY_EXT_MEDIA"
+                                                ref="DEFAULT_NON_MUTABLE_EXT_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_ALARM" deviceCategory="DEVICE_CATEGORY_HEARING_AID"
+                                                ref="DEFAULT_NON_MUTABLE_HEARING_AID_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_NOTIFICATION" deviceCategory="DEVICE_CATEGORY_HEADSET"
+                                                       ref="DEFAULT_DEVICE_CATEGORY_HEADSET_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_NOTIFICATION" deviceCategory="DEVICE_CATEGORY_SPEAKER">
+                <point>1,-2970</point>
+                <point>33,-2010</point>
+                <point>66,-1020</point>
+                <point>100,0</point>
+            </volume>
+            <volume stream="AUDIO_STREAM_NOTIFICATION" deviceCategory="DEVICE_CATEGORY_EARPIECE"
+                                                       ref="DEFAULT_DEVICE_CATEGORY_EARPIECE_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_NOTIFICATION" deviceCategory="DEVICE_CATEGORY_EXT_MEDIA"
+                                                       ref="DEFAULT_DEVICE_CATEGORY_EXT_MEDIA_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_NOTIFICATION" deviceCategory="DEVICE_CATEGORY_HEARING_AID"
+                                                       ref="DEFAULT_DEVICE_CATEGORY_HEADSET_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_BLUETOOTH_SCO" deviceCategory="DEVICE_CATEGORY_HEADSET">
+                <point>0,-4200</point>
+                <point>33,-2800</point>
+                <point>66,-1400</point>
+                <point>100,0</point>
+            </volume>
+            <volume stream="AUDIO_STREAM_BLUETOOTH_SCO" deviceCategory="DEVICE_CATEGORY_SPEAKER">
+                <point>0,-2400</point>
+                <point>33,-1600</point>
+                <point>66,-800</point>
+                <point>100,0</point>
+            </volume>
+            <volume stream="AUDIO_STREAM_BLUETOOTH_SCO" deviceCategory="DEVICE_CATEGORY_EARPIECE">
+                <point>0,-4200</point>
+                <point>33,-2800</point>
+                <point>66,-1400</point>
+                <point>100,0</point>
+            </volume>
+            <volume stream="AUDIO_STREAM_BLUETOOTH_SCO" deviceCategory="DEVICE_CATEGORY_EXT_MEDIA"
+                                                        ref="DEFAULT_MEDIA_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_BLUETOOTH_SCO" deviceCategory="DEVICE_CATEGORY_HEARING_AID"
+                                                        ref="DEFAULT_HEARING_AID_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_ENFORCED_AUDIBLE" deviceCategory="DEVICE_CATEGORY_HEADSET">
+                <point>1,-3000</point>
+                <point>33,-2600</point>
+                <point>66,-2200</point>
+                <point>100,-1800</point>
+            </volume>
+            <volume stream="AUDIO_STREAM_ENFORCED_AUDIBLE" deviceCategory="DEVICE_CATEGORY_SPEAKER"
+                                                           ref="DEFAULT_SYSTEM_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_ENFORCED_AUDIBLE" deviceCategory="DEVICE_CATEGORY_EARPIECE"
+                                                           ref="DEFAULT_SYSTEM_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_ENFORCED_AUDIBLE" deviceCategory="DEVICE_CATEGORY_EXT_MEDIA"
+                                                           ref="DEFAULT_DEVICE_CATEGORY_EXT_MEDIA_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_ENFORCED_AUDIBLE" deviceCategory="DEVICE_CATEGORY_HEARING_AID"
+                                                           ref="DEFAULT_HEARING_AID_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_DTMF" deviceCategory="DEVICE_CATEGORY_HEADSET">
+                <point>1,-3000</point>
+                <point>33,-2600</point>
+                <point>66,-2200</point>
+                <point>100,-1800</point>
+            </volume>
+            <volume stream="AUDIO_STREAM_DTMF" deviceCategory="DEVICE_CATEGORY_SPEAKER"
+                                               ref="DEFAULT_SYSTEM_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_DTMF" deviceCategory="DEVICE_CATEGORY_EARPIECE"
+                                               ref="DEFAULT_SYSTEM_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_DTMF" deviceCategory="DEVICE_CATEGORY_EXT_MEDIA"
+                                               ref="DEFAULT_DEVICE_CATEGORY_EXT_MEDIA_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_DTMF" deviceCategory="DEVICE_CATEGORY_HEARING_AID"
+                                               ref="DEFAULT_HEARING_AID_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_TTS" deviceCategory="DEVICE_CATEGORY_HEADSET"
+                                              ref="SILENT_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_TTS" deviceCategory="DEVICE_CATEGORY_SPEAKER"
+                                              ref="FULL_SCALE_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_TTS" deviceCategory="DEVICE_CATEGORY_EARPIECE"
+                                              ref="SILENT_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_TTS" deviceCategory="DEVICE_CATEGORY_EXT_MEDIA"
+                                              ref="SILENT_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_TTS" deviceCategory="DEVICE_CATEGORY_HEARING_AID"
+                                              ref="SILENT_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_ACCESSIBILITY" deviceCategory="DEVICE_CATEGORY_HEADSET"
+                                                        ref="DEFAULT_NON_MUTABLE_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_ACCESSIBILITY" deviceCategory="DEVICE_CATEGORY_SPEAKER"
+                                                        ref="DEFAULT_NON_MUTABLE_SPEAKER_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_ACCESSIBILITY" deviceCategory="DEVICE_CATEGORY_EARPIECE"
+                                                        ref="DEFAULT_NON_MUTABLE_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_ACCESSIBILITY" deviceCategory="DEVICE_CATEGORY_EXT_MEDIA"
+                                                        ref="DEFAULT_NON_MUTABLE_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_ACCESSIBILITY" deviceCategory="DEVICE_CATEGORY_HEARING_AID"
+                                                        ref="DEFAULT_NON_MUTABLE_HEARING_AID_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_ASSISTANT" deviceCategory="DEVICE_CATEGORY_HEADSET"
+                                                        ref="DEFAULT_MEDIA_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_ASSISTANT" deviceCategory="DEVICE_CATEGORY_SPEAKER"
+                                                        ref="DEFAULT_DEVICE_CATEGORY_SPEAKER_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_ASSISTANT" deviceCategory="DEVICE_CATEGORY_EARPIECE"
+                                                        ref="DEFAULT_MEDIA_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_ASSISTANT" deviceCategory="DEVICE_CATEGORY_EXT_MEDIA"
+                                                        ref="DEFAULT_MEDIA_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_ASSISTANT" deviceCategory="DEVICE_CATEGORY_HEARING_AID"
+                                                        ref="DEFAULT_HEARING_AID_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_REROUTING" deviceCategory="DEVICE_CATEGORY_HEADSET"
+                                                    ref="FULL_SCALE_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_REROUTING" deviceCategory="DEVICE_CATEGORY_SPEAKER"
+                                                    ref="FULL_SCALE_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_REROUTING" deviceCategory="DEVICE_CATEGORY_EARPIECE"
+                                                    ref="FULL_SCALE_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_REROUTING" deviceCategory="DEVICE_CATEGORY_EXT_MEDIA"
+                                                    ref="FULL_SCALE_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_REROUTING" deviceCategory="DEVICE_CATEGORY_HEARING_AID"
+                                                    ref="FULL_SCALE_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_PATCH" deviceCategory="DEVICE_CATEGORY_HEADSET"
+                                                ref="FULL_SCALE_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_PATCH" deviceCategory="DEVICE_CATEGORY_SPEAKER"
+                                                ref="FULL_SCALE_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_PATCH" deviceCategory="DEVICE_CATEGORY_EARPIECE"
+                                                ref="FULL_SCALE_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_PATCH" deviceCategory="DEVICE_CATEGORY_EXT_MEDIA"
+                                                ref="FULL_SCALE_VOLUME_CURVE"/>
+            <volume stream="AUDIO_STREAM_PATCH" deviceCategory="DEVICE_CATEGORY_HEARING_AID"
+                                                ref="FULL_SCALE_VOLUME_CURVE"/>
+    </volumes>
+    <volumes>
+            <reference name="FULL_SCALE_VOLUME_CURVE">
+                <point>0,0</point>
+                <point>100,0</point>
+            </reference>
+            <reference name="SILENT_VOLUME_CURVE">
+                <point>0,-9600</point>
+                <point>100,-9600</point>
+            </reference>
+            <reference name="DEFAULT_SYSTEM_VOLUME_CURVE">
+                <point>1,-2400</point>
+                <point>33,-1800</point>
+                <point>66,-1200</point>
+                <point>100,-600</point>
+            </reference>
+            <reference name="DEFAULT_MEDIA_VOLUME_CURVE">
+                <point>1,-5800</point>
+                <point>20,-4000</point>
+                <point>60,-1700</point>
+                <point>100,0</point>
+            </reference>
+            <reference name="DEFAULT_DEVICE_CATEGORY_HEADSET_VOLUME_CURVE">
+                <point>1,-4950</point>
+                <point>33,-3350</point>
+                <point>66,-1700</point>
+                <point>100,0</point>
+            </reference>
+            <reference name="DEFAULT_DEVICE_CATEGORY_SPEAKER_VOLUME_CURVE">
+                <point>1,-5800</point>
+                <point>20,-4000</point>
+                <point>60,-1700</point>
+                <point>100,0</point>
+            </reference>
+            <reference name="DEFAULT_DEVICE_CATEGORY_EARPIECE_VOLUME_CURVE">
+                <point>1,-4950</point>
+                <point>33,-3350</point>
+                <point>66,-1700</point>
+                <point>100,0</point>
+            </reference>
+            <reference name="DEFAULT_DEVICE_CATEGORY_EXT_MEDIA_VOLUME_CURVE">
+                <point>1,-5800</point>
+                <point>20,-4000</point>
+                <point>60,-2100</point>
+                <point>100,-1000</point>
+            </reference>
+            <reference name="DEFAULT_HEARING_AID_VOLUME_CURVE">
+                <point>1,-12700</point>
+                <point>20,-8000</point>
+                <point>60,-4000</point>
+                <point>100,0</point>
+            </reference>
+            <reference name="DEFAULT_NON_MUTABLE_VOLUME_CURVE">
+                <point>0,-5800</point>
+                <point>20,-4000</point>
+                <point>60,-1700</point>
+                <point>100,0</point>
+            </reference>
+            <reference name="DEFAULT_NON_MUTABLE_HEADSET_VOLUME_CURVE">
+                <point>0,-4950</point>
+                <point>33,-3350</point>
+                <point>66,-1700</point>
+                <point>100,0</point>
+            </reference>
+            <reference name="DEFAULT_NON_MUTABLE_SPEAKER_VOLUME_CURVE">
+                <point>0,-5800</point>
+                <point>20,-4000</point>
+                <point>60,-1700</point>
+                <point>100,0</point>
+            </reference>
+            <reference name="DEFAULT_NON_MUTABLE_EARPIECE_VOLUME_CURVE">
+                <point>0,-4950</point>
+                <point>33,-3350</point>
+                <point>66,-1700</point>
+                <point>100,0</point>
+            </reference>
+            <reference name="DEFAULT_NON_MUTABLE_EXT_VOLUME_CURVE">
+                <point>0,-5800</point>
+                <point>20,-4000</point>
+                <point>60,-2100</point>
+                <point>100,-1000</point>
+            </reference>
+            <reference name="DEFAULT_NON_MUTABLE_HEARING_AID_VOLUME_CURVE">
+                <point>0,-12700</point>
+                <point>20,-8000</point>
+                <point>60,-4000</point>
+                <point>100,0</point>
+            </reference>
+    </volumes>
 </audioPolicyConfiguration>
