@@ -1,0 +1,2 @@
+# Khadas Edge1 - vendor property labels (property.te has the types).
+persist.vendor.edge1.hwdec      u:object_r:vendor_edge1_hwdec_prop:s0 exact bool

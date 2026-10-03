@@ -911,6 +911,7 @@ if [[ -d "$SEDIR" ]]; then
                 misc_block_device boot_block_device recovery_block_device
                 hal_graphics_allocator_default_exec same_process_hal_file
                 console_device swap_block_device sysfs_extcon sysfs_wakeup
+                mediacodec_exec
                 hal_graphics_mapper_service"
     missing_types=0
     while read -r t; do

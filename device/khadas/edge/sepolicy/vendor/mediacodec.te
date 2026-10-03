@@ -1,0 +1,11 @@
+# The FFmpeg Codec2 service (external/ffmpeg_codec2, labelled in file_contexts)
+# runs as mediacodec, the vendor's Codec2 server domain, which AOSP already lets at
+# video_device - /dev/video* and, on this board, /dev/media* (file_contexts).
+#
+# FFmpeg's V4L2 request code finds the decoders' media devices through libudev,
+# here libudev-zero, which walks sysfs: /sys/dev/char and the device directories
+# the links lead to, reading their uevent files.
+r_dir_file(mediacodec, sysfs)
+
+# persist.vendor.edge1.hwdec: 0 turns hardware decoding off (property_contexts).
+get_prop(mediacodec, vendor_edge1_hwdec_prop)

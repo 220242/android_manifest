@@ -65,6 +65,14 @@ had_apps=0; [[ -f "$apps_bp" ]] && had_apps=1
 has_apps=0; [[ -f "$apps_bp" ]] && has_apps=1
 (( had_apps == has_apps )) || changed=1
 
+# This board's patches on synced projects (FFmpeg's V4L2 request hwaccels, the
+# FFmpeg Codec2 service): device/khadas/edge/patches/<project path>/. A patch that
+# does not apply stops the build here rather than in the middle of it.
+"$(dirname "${BASH_SOURCE[0]}")/apply-patches.sh" "$TREE" || {
+    echo "apply-patches.sh failed: a patch in device/khadas/edge/patches does not apply" >&2
+    exit 1
+}
+
 # The builder's own settings: language, time zone, signing keys. Product config
 # reads them; they hold no module, so the finder cache is not concerned.
 "$(dirname "${BASH_SOURCE[0]}")/local-config.sh" "$TREE" || echo "local-config.sh failed; continuing with Android's defaults and the test keys" >&2

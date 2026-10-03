@@ -171,8 +171,9 @@ Kati parse time. Step by step in [`docs/PORTING.md`](docs/PORTING.md).
 * **Not CTS-certifiable.** No TEE is provisioned, so KeyMint and Gatekeeper are the
   software `nonsecure` implementations and hardware key attestation is unavailable.
   Widevine is absent entirely; DRM is clearkey only.
-* Codec performance numbers in `media/media_codecs_performance.xml` are datasheet
-  ceilings, not measurements.
+* Hardware video decoding (H.264, VP9, MPEG-2, VP8) goes through FFmpeg's V4L2
+  request hwaccels in a Codec2 service; no codec performance file is shipped until
+  there are measurements from the board. docs/HW_DECODE.md.
 
 The honest test of the first image is whether it boots to a leanback launcher on
 HDMI with a working remote and network. Everything after that is configuration.

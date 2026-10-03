@@ -105,8 +105,12 @@ snapshot() {
       done; echo
       timeout 20 dumpsys wifi | head -n 400; echo
       timeout 20 dumpsys bluetooth_manager | head -n 300; } > "$s/connectivity.txt" 2>&1
-    # Video decoders: the V4L2 nodes and what each one decodes. docs/HW_DECODE.md.
+    # Video decoders: the V4L2 nodes and what each one decodes, and how many
+    # interrupts each has raised - only a hardware decode raises them, so a count
+    # above zero is the proof it ran. docs/HW_DECODE.md.
     { for v in /sys/class/video4linux/*; do echo "$v: $(cat "$v/name" 2>&1)"; done; echo
+      grep -E "video-codec|rkvdec|vpu" /proc/interrupts; echo
+      getprop persist.vendor.edge1.hwdec; echo
       timeout 20 edge1-v4l2-probe; } > "$s/video.txt" 2>&1
     # Sound: the ALSA side (hw_params is "closed" unless something plays) and the
     # framework's - volumes per stream and device, the output in use. Card 21 played

@@ -497,17 +497,36 @@ PRODUCT_PROPERTY_OVERRIDES += \
 # ---------------------------------------------------------------------------
 # Media / codecs.
 #
-# Software decoding for now: the framework's own Codec2 store (libcodec2_soft_*),
-# no vendor Codec2 service - AOSP 14 has no c2@1.2-service.software to add. The
-# mainline kernel's decoders are V4L2 stateless ("request API") devices -
-# rkvdec: H.264 and VP9 to 4K; hantro: MPEG-2 and VP8 - which neither Rockchip's
-# MPP (BSP kernels only) nor AOSP's v4l2_codec2 (stateful decoders only) can
-# drive. The way there is FFmpeg's v4l2-request hwaccel inside an FFmpeg Codec2
-# service: docs/HW_DECODE.md has the plan and its state. edge1-v4l2-probe lists
-# what the decoders offer into every bootwatch snapshot (video.txt).
+# Hardware decoding through FFmpeg's V4L2 request hwaccels, in raspberry-vanilla's
+# FFmpeg Codec2 service (manifest: external/ffmpeg, external/ffmpeg_codec2,
+# external/libudev-zero; this board's patches in patches/). The mainline kernel's
+# decoders are V4L2 stateless ("request API") devices - rkvdec: H.264 and VP9 to
+# 4K; hantro: MPEG-2 to 1080p and VP8 to 4K - which neither Rockchip's MPP (BSP
+# kernels only) nor AOSP's v4l2_codec2 (stateful decoders only) can drive.
+# media/media_codecs.xml lists the service's c2.ffmpeg H.264/VP9/MPEG-2/VP8
+# decoders ahead of the framework's software ones, and the audio AOSP has no
+# decoder for (AC-3, E-AC-3, DTS, TrueHD); everything else stays with
+# c2.android.*, which the swcodec APEX lists on its own. A stream the hardware
+# cannot take (a profile or size it lacks) is decoded by FFmpeg in software in
+# the same component. persist.vendor.edge1.hwdec=0 turns the hardware off.
+# docs/HW_DECODE.md has the plan and its state; edge1-v4l2-probe writes what the
+# decoders offer into every bootwatch snapshot (video.txt).
+#
+# Built only when the projects are synced, so a tree from before them still builds.
 # ---------------------------------------------------------------------------
 PRODUCT_PACKAGES_DEBUG += \
     edge1-v4l2-probe
+
+ifneq ($(wildcard external/ffmpeg_codec2/Android.mk),)
+PRODUCT_PACKAGES += \
+    android.hardware.media.c2@1.2-service-ffmpeg
+
+# The service's own list (media_codecs_ffmpeg_c2.xml, installed with it) is not
+# the one read: media_codecs.xml below includes nothing of it.
+PRODUCT_COPY_FILES += \
+    $(LOCAL_PATH)/media/media_codecs.xml:$(TARGET_COPY_OUT_VENDOR)/etc/media_codecs.xml \
+    $(LOCAL_PATH)/media/c2-ffmpeg-extended.policy:$(TARGET_COPY_OUT_VENDOR)/etc/seccomp_policy/android.hardware.media.c2@1.2-ffmpeg-extended.policy
+endif
 
 PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/media/media_profiles_edge1.xml:$(TARGET_COPY_OUT_VENDOR)/etc/media_profiles_V1_0.xml
@@ -515,10 +534,6 @@ PRODUCT_COPY_FILES += \
 PRODUCT_PROPERTY_OVERRIDES += \
     debug.stagefright.ccodec=4 \
     media.c2.dmabuf.padding=512
-
-# No hardware codec list (media_codecs.xml) until a Codec2 service registers
-# components for it: one that advertised decoders nothing implements would make
-# MediaCodec.configure() throw instead of falling back to a software codec.
 
 # DRM: Widevine L3 only. L1 needs an OP-TEE trusted app, and this board has no
 # provisioned TEE.

@@ -1,60 +1,93 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Khadas Edge1 (RK3399) - hardware codec declarations.
+  Khadas Edge1 (RK3399) - the vendor's codecs: what the FFmpeg Codec2 service
+  (external/ffmpeg_codec2, store "ffmpeg") adds to the framework's software codecs.
+  Those - c2.android.* - come from the swcodec APEX's own list, which the framework
+  reads whatever is here; this file lists only the c2.ffmpeg components that should
+  be offered, and nothing of the service's own media_codecs_ffmpeg_c2.xml.
 
-  Only meaningful when EDGE1_ENABLE_INCOMPLETE_HALS=true, which is what builds
-  the Rockchip Codec2 store (libcodec2_rk over librockchip_mpp). With the flag
-  off the build uses AOSP's software store and this file is not installed -
-  device.mk gates the copy, because advertising a hardware decoder that has no
-  Codec2 component behind it makes MediaCodec fail to configure rather than fall
-  back to software.
+  Video: decoded by the SoC through FFmpeg's V4L2 request hwaccels (rkvdec: H.264
+  and VP9; hantro: MPEG-2 and VP8), so ranked ahead of the software decoders (a
+  lower rank wins; c2.android.* are 0x200) and, having no "software-codec"
+  attribute, reported as hardware-accelerated. Sizes are what the decoders take:
+  rkvdec 4096x2304, hantro's MPEG-2 1920x1088 and VP8 3840x2160 (edge1-v4l2-probe,
+  card 21). A stream the hardware refuses - a profile it lacks, 10-bit - is decoded
+  by FFmpeg in software in the same component, which is slower than a dedicated
+  software codec at 4K.
 
-  RK3399 VPU capability: H.264 to 4K@30, H.265/VP9 to 4K@60 decode; H.264 encode
-  to 1080p@30.
+  Audio: what AOSP has no decoder for at all, decoded by FFmpeg to PCM.
+  Software, and ranked behind c2.android.* in case a later AOSP adds one.
 -->
 <MediaCodecs>
-    <Include href="media_codecs_google_audio.xml" />
-    <Include href="media_codecs_google_telephony.xml" />
-
     <Decoders>
-        <MediaCodec name="c2.rk.avc.decoder" type="video/avc">
-            <Limit name="size" min="64x64" max="3840x2160" />
+        <MediaCodec name="c2.ffmpeg.h264.decoder" type="video/avc" rank="64">
+            <Limit name="size" min="64x64" max="4096x2304" />
             <Limit name="alignment" value="2x2" />
             <Limit name="block-size" value="16x16" />
-            <Limit name="blocks-per-second" min="1" max="489600" />
-            <Limit name="bitrate" range="1-100000000" />
+            <Limit name="blocks-per-second" range="1-1105920" />
+            <Limit name="bitrate" range="1-120000000" />
             <Feature name="adaptive-playback" />
         </MediaCodec>
-        <MediaCodec name="c2.rk.hevc.decoder" type="video/hevc">
-            <Limit name="size" min="64x64" max="3840x2160" />
+        <MediaCodec name="c2.ffmpeg.vp9.decoder" type="video/x-vnd.on2.vp9" rank="64">
+            <Limit name="size" min="64x64" max="4096x2304" />
             <Limit name="alignment" value="2x2" />
             <Limit name="block-size" value="16x16" />
-            <Limit name="blocks-per-second" min="1" max="979200" />
-            <Limit name="bitrate" range="1-100000000" />
+            <Limit name="blocks-per-second" range="1-2211840" />
+            <Limit name="bitrate" range="1-120000000" />
             <Feature name="adaptive-playback" />
         </MediaCodec>
-        <MediaCodec name="c2.rk.vp9.decoder" type="video/x-vnd.on2.vp9">
-            <Limit name="size" min="64x64" max="3840x2160" />
-            <Limit name="alignment" value="2x2" />
-            <Limit name="block-size" value="16x16" />
-            <Limit name="blocks-per-second" min="1" max="979200" />
-            <Limit name="bitrate" range="1-100000000" />
-            <Feature name="adaptive-playback" />
-        </MediaCodec>
-        <MediaCodec name="c2.rk.mpeg2.decoder" type="video/mpeg2">
+        <MediaCodec name="c2.ffmpeg.mpeg2.decoder" type="video/mpeg2" rank="64">
             <Limit name="size" min="64x64" max="1920x1088" />
             <Limit name="alignment" value="2x2" />
             <Limit name="block-size" value="16x16" />
-            <Limit name="bitrate" range="1-40000000" />
+            <Limit name="blocks-per-second" range="1-489600" />
+            <Limit name="bitrate" range="1-80000000" />
+            <Feature name="adaptive-playback" />
         </MediaCodec>
-    </Decoders>
-
-    <Encoders>
-        <MediaCodec name="c2.rk.avc.encoder" type="video/avc">
-            <Limit name="size" min="96x96" max="1920x1088" />
+        <MediaCodec name="c2.ffmpeg.vp8.decoder" type="video/x-vnd.on2.vp8" rank="64">
+            <Limit name="size" min="64x64" max="3840x2160" />
             <Limit name="alignment" value="2x2" />
             <Limit name="block-size" value="16x16" />
-            <Limit name="bitrate" range="1-30000000" />
+            <Limit name="blocks-per-second" range="1-972000" />
+            <Limit name="bitrate" range="1-80000000" />
+            <Feature name="adaptive-playback" />
         </MediaCodec>
-    </Encoders>
+
+        <MediaCodec name="c2.ffmpeg.ac3.decoder" type="audio/ac3" rank="768">
+            <Attribute name="software-codec" />
+            <Limit name="channel-count" max="8" />
+            <Limit name="sample-rate" ranges="8000-192000" />
+            <Limit name="bitrate" range="8000-6144000" />
+        </MediaCodec>
+        <MediaCodec name="c2.ffmpeg.eac3.decoder" type="audio/eac3" rank="768">
+            <Attribute name="software-codec" />
+            <Limit name="channel-count" max="8" />
+            <Limit name="sample-rate" ranges="8000-192000" />
+            <Limit name="bitrate" range="8000-6144000" />
+        </MediaCodec>
+        <MediaCodec name="c2.ffmpeg.dts.decoder" type="audio/vnd.dts" rank="768">
+            <Attribute name="software-codec" />
+            <Limit name="channel-count" max="8" />
+            <Limit name="sample-rate" ranges="8000-192000" />
+            <Limit name="bitrate" range="8000-6144000" />
+        </MediaCodec>
+        <MediaCodec name="c2.ffmpeg.dtshd.decoder" type="audio/vnd.dts.hd" rank="768">
+            <Attribute name="software-codec" />
+            <Limit name="channel-count" max="8" />
+            <Limit name="sample-rate" ranges="8000-192000" />
+            <Limit name="bitrate" range="8000-24500000" />
+        </MediaCodec>
+        <MediaCodec name="c2.ffmpeg.truehd.decoder" type="audio/true-hd" rank="768">
+            <Attribute name="software-codec" />
+            <Limit name="channel-count" max="8" />
+            <Limit name="sample-rate" ranges="8000-192000" />
+            <Limit name="bitrate" range="8000-18000000" />
+        </MediaCodec>
+        <MediaCodec name="c2.ffmpeg.mp2.decoder" type="audio/mpeg-L2" rank="768">
+            <Attribute name="software-codec" />
+            <Limit name="channel-count" max="8" />
+            <Limit name="sample-rate" ranges="8000-48000" />
+            <Limit name="bitrate" range="8000-640000" />
+        </MediaCodec>
+    </Decoders>
 </MediaCodecs>

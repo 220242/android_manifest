@@ -1,0 +1,86 @@
+From 6b100ea3d525ff031cbeb1058550242ad91e8851 Mon Sep 17 00:00:00 2001
+From: Khadas Edge1 Android TV <edge1@localhost>
+Date: Sat, 3 Oct 2026 23:07:22 +0000
+Subject: [PATCH] Hardware decoding for H.264, VP9, MPEG-2 and VP8; E-AC-3,
+ DTS, TrueHD
+
+ffmpeg_hwaccel_init() tried a hardware device for HEVC only (behind
+persist.ffmpeg_codec2.v4l2.h265). With the V4L2 request hwaccels for
+H.264, VP9, MPEG-2 and VP8 in FFmpeg - what the RK3399's rkvdec and hantro
+decode on a mainline kernel - those four try it too, behind
+persist.vendor.edge1.hwdec (on unless 0). A stream the decoder cannot take
+falls back to software in the same component. The line that says a
+hardware device was set up is logged at info.
+
+Audio: E-AC-3, DTS, DTS-HD (its DTS core) and TrueHD components, decoded
+by FFmpeg to PCM - AOSP has no decoder for any of them.
+---
+ ffmpeg_utils/ffmpeg_hwaccel.c | 29 ++++++++++++++++++++++++++---
+ service.cpp                   |  6 ++++++
+ 2 files changed, 32 insertions(+), 3 deletions(-)
+
+diff --git a/ffmpeg_utils/ffmpeg_hwaccel.c b/ffmpeg_utils/ffmpeg_hwaccel.c
+index 06f3647..eff225e 100644
+--- a/ffmpeg_utils/ffmpeg_hwaccel.c
++++ b/ffmpeg_utils/ffmpeg_hwaccel.c
+@@ -6,8 +6,30 @@
+ #include "ffmpeg_hwaccel.h"
+ #include "libavutil/opt.h"
+ 
++/*
++ * Which codecs try FFmpeg's hardware decoding (the V4L2 request API hwaccels).
++ * HEVC as before, behind its own property. H.264, VP9, MPEG-2 and VP8 - what
++ * the Khadas Edge1's rkvdec and hantro decode - behind persist.vendor.edge1.hwdec,
++ * on unless it is 0. A stream the decoder cannot take (a profile or size it
++ * lacks) falls back to FFmpeg's software decoder in the same component: FFmpeg
++ * drops a hwaccel whose init fails and takes the next pixel format.
++ */
++static int ffmpeg_hwaccel_wanted(enum AVCodecID id) {
++    switch (id) {
++        case AV_CODEC_ID_HEVC:
++            return property_get_bool("persist.ffmpeg_codec2.v4l2.h265", 0);
++        case AV_CODEC_ID_H264:
++        case AV_CODEC_ID_VP9:
++        case AV_CODEC_ID_MPEG2VIDEO:
++        case AV_CODEC_ID_VP8:
++            return property_get_bool("persist.vendor.edge1.hwdec", 1);
++        default:
++            return 0;
++    }
++}
++
+ int ffmpeg_hwaccel_init(AVCodecContext *avctx) {
+-    if (avctx->codec_id != AV_CODEC_ID_HEVC || !property_get_bool("persist.ffmpeg_codec2.v4l2.h265", 0))
++    if (!ffmpeg_hwaccel_wanted(avctx->codec_id))
+         return 0;
+ 
+     // Find codec information. At this point, AVCodecContext.codec may not be
+@@ -39,8 +61,9 @@ int ffmpeg_hwaccel_init(AVCodecContext *avctx) {
+         // Don't use multithreading.
+         avctx->thread_count = 1;
+ 
+-        // HW device created, stop here.
+-        ALOGD("ffmpeg_hwaccel_init: %p [%s], hw device = %s", avctx, codec->name,
++        // HW device created, stop here. Info, not debug: whether a video went to
++        // the hardware is the first question about it.
++        ALOGI("ffmpeg_hwaccel_init: %p [%s], hw device = %s", avctx, codec->name,
+               av_hwdevice_get_type_name(config->device_type));
+         break;
+     }
+diff --git a/service.cpp b/service.cpp
+index 2168eaf..cf56055 100644
+--- a/service.cpp
++++ b/service.cpp
+@@ -65,6 +65,12 @@ static const size_t kNumVideoComponents =
+ static const C2FFMPEGComponentInfo kFFMPEGAudioComponents[] = {
+     { "c2.ffmpeg.aac.decoder"   , MEDIA_MIMETYPE_AUDIO_AAC          , AV_CODEC_ID_AAC    },
+     { "c2.ffmpeg.ac3.decoder"   , MEDIA_MIMETYPE_AUDIO_AC3          , AV_CODEC_ID_AC3    },
++    // What AOSP has no decoder for at all; FFmpeg decodes it to PCM.
++    { "c2.ffmpeg.eac3.decoder"  , MEDIA_MIMETYPE_AUDIO_EAC3         , AV_CODEC_ID_EAC3   },
++    { "c2.ffmpeg.dts.decoder"   , "audio/vnd.dts"                   , AV_CODEC_ID_DTS    },
++    // The DTS core of a DTS-HD stream; FFmpeg's dca decoder reads it.
++    { "c2.ffmpeg.dtshd.decoder" , "audio/vnd.dts.hd"                , AV_CODEC_ID_DTS    },
++    { "c2.ffmpeg.truehd.decoder", "audio/true-hd"                   , AV_CODEC_ID_TRUEHD },
+     { "c2.ffmpeg.alac.decoder"  , MEDIA_MIMETYPE_AUDIO_ALAC         , AV_CODEC_ID_ALAC   },
+     { "c2.ffmpeg.flac.decoder"  , MEDIA_MIMETYPE_AUDIO_FLAC         , AV_CODEC_ID_FLAC   },
+     { "c2.ffmpeg.mp2.decoder"   , MEDIA_MIMETYPE_AUDIO_MPEG_LAYER_II, AV_CODEC_ID_MP2    },

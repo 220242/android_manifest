@@ -517,8 +517,9 @@ Rockchip's own gralloc did.
    test. See [`HARDWARE.md`](HARDWARE.md).
 7. **The device targets FCM level 7, not 8.** Forced rather than chosen — see below.
    The vendor image's HAL surface is Android-13-era.
-8. **Codec performance numbers are placeholders.** `media/media_codecs_performance.xml`
-   holds datasheet ceilings, not measurements from this board.
+8. **No codec performance numbers.** The datasheet-ceiling placeholders went with the
+   Rockchip MPP codec list; measured points for the c2.ffmpeg decoders come once
+   hardware decoding has run on the board (docs/HW_DECODE.md).
 9. **ART's userfaultfd GC is off for the first boot.** 6.12 supports it and the board
    qualifies; it stays off so the one attempt that matters has one variable fewer. Flip
    `PRODUCT_ENABLE_UFFD_GC` to `true` once the device boots.

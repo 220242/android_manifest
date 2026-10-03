@@ -158,4 +158,42 @@
   <project name="android_rkbin" path="rkbin" remote="khadas"
            revision="664ccee1d4ada924848b80b2912d48c7fb30049c" clone-depth="1" />
 
+  <!-- ==================================================================
+       Hardware video decoding: FFmpeg with the V4L2 request API, as a Codec2
+       service (docs/HW_DECODE.md).
+
+       The mainline kernel's decoders - rkvdec (H.264, VP9) and hantro (MPEG-2,
+       VP8) - are V4L2 stateless devices, which neither Rockchip's MPP nor AOSP's
+       v4l2_codec2 drives. FFmpeg does, through its v4l2-request hwaccels. These
+       three come from raspberry-vanilla (KonstaKANG's AOSP for the Raspberry
+       Pi), which runs the same arrangement for the Pi's HEVC decoder:
+
+         external/ffmpeg         FFmpeg 7.0 built for Android (Android.mk, a
+                                 pre-generated config), with the Pi's HEVC
+                                 request decoder
+         external/ffmpeg_codec2  the c2.ffmpeg.* Codec2 service (after Michael
+                                 Goffioul's Android-x86 work)
+         external/libudev-zero   libudev for FFmpeg's media device scan
+
+       Pinned to the commits device/khadas/edge/patches/ was made against; those
+       patches add Kwiboo's H.264/MPEG-2/VP8/VP9 request hwaccels, the Android
+       config for them, hardware decoding of those four in the service, and
+       E-AC-3/DTS/TrueHD audio. build/apply-patches.sh puts them on after sync.
+
+       Not raspberry-vanilla's libdav1d, libdrm or Mesa: AOSP's stay, and FFmpeg
+       is built without libdav1d (AV1 stays with c2.android.av1).
+       ================================================================== -->
+  <remote name="raspberry-vanilla" fetch="https://github.com/raspberry-vanilla/" />
+  <project name="android_external_ffmpeg" path="external/ffmpeg" remote="raspberry-vanilla"
+           revision="0d50cb774f803f8f45420cc023c27bde75ed7eb9" upstream="android-14.0"
+           clone-depth="1" />
+  <project name="android_external_ffmpeg_codec2" path="external/ffmpeg_codec2"
+           remote="raspberry-vanilla"
+           revision="67806278059d69bd3cde7d89c32323e2c8d3ce2e" upstream="android-14.0"
+           clone-depth="1" />
+  <project name="android_external_libudev-zero" path="external/libudev-zero"
+           remote="raspberry-vanilla"
+           revision="0ad91b71bcff531a6f3a98f028fe2bcad033c332" upstream="android-14.0"
+           clone-depth="1" />
+
 </manifest>

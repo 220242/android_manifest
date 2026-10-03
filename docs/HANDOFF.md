@@ -198,11 +198,30 @@ not reachable from it.
   HDMI is the HAL's "Speaker", so Android's volume scales the signal: near silence
   that looks like no sound. `ro.config.media_vol_default` sets the start; the volume
   itself is in `dumpsys audio` (`audio.txt`).
+* **Other people's projects are patched, not forked.** This repository is the only
+  one the build can push to, so changes to synced projects live in
+  `device/khadas/edge/patches/<path>/` and `build/apply-patches.sh` applies them
+  (kernel: build-kernel.sh, same scheme). Export with `git format-patch`; a commit
+  whose message swallowed a diff (an empty-bodied original) makes a patch that
+  applies its hunks twice and fails - check `grep -c '^@@'` against the commit.
+* **A seccomp policy is part of a codec's ABI.** Code new to a media service (here
+  FFmpeg's request hwaccels: select() is pselect6) needs its syscalls in the
+  service's policy, or the first use kills the process with SIGSYS.
 * **Images:** only the SD card is built during bring-up (`stage_images` in
   provision-wsl.sh, build-images.sh default); eMMC/NVMe are commented out.
 
 ## Open, in rough order
 
+* Card 23, hardware decoding (docs/HW_DECODE.md, phases 2-3, built and never
+  run): the first build syncs external/ffmpeg, ffmpeg_codec2 and libudev-zero and
+  place-device.sh applies patches/ - a patch that does not apply stops it there.
+  On the board: the overlay's "HW decode:" names c2.ffmpeg.h264/vp9/mpeg2/vp8;
+  a video in SmartTube or VLC raises the decoders' interrupts (video.txt) and logs
+  `ffmpeg_hwaccel_init: ... hw device = drm`. If the codec service crash-loops,
+  logcat's SIGSYS line names a syscall for media/c2-ffmpeg-extended.policy; if it
+  plays black or garbled, persist.vendor.edge1.hwdec=0 is software for comparison.
+  4K is expected to drop frames until zero copy (the frame copy from uncached
+  V4L2 buffers).
 * Card 23: Edge1 Tools' new screen - a mode picked there changes the clocks at
   once (the header shows them) and the active block in EDGE1BOOT:edge1-options.txt;
   the logs switch writes logs=0 and the next boot leaves the card alone (no new

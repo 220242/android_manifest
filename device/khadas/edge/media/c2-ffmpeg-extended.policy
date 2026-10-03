@@ -1,0 +1,8 @@
+# Khadas Edge1 - system calls the FFmpeg Codec2 service needs beyond its own policy
+# (external/ffmpeg_codec2's android.hardware.media.c2@1.2-ffmpeg.policy), which
+# service.cpp merges with this file when it exists. A call missing from both kills
+# the service with SIGSYS - on the first hardware-decoded frame.
+#
+# The V4L2 request hwaccels (libavcodec/v4l2_request.c) wait for a decode request
+# to complete with select() on the request's file descriptor: pselect6 on arm64.
+pselect6: 1
