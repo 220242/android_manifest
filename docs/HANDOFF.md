@@ -96,6 +96,7 @@ not reachable from it.
 | 14 | **boot completed** (`sys.boot_completed=1`); boot animation on HDMI at 1920x1080@60 (Samsung EDID) - the DRM-master patch worked; then black: FallbackHome, "no home" | no launcher/setup wizard/IME in AOSP's atv_base → TvSampleLeanbackLauncher, TvProvision, LeanbackIME, DocumentsUI (+ allowlists); SystemUI crash loop = minigbm mapper could not open card0 (0660) in app processes → card0/card1 0666 + gpu_device; Bluetooth crash loop (no HAL) → BT features off; cgroup v1 moves by system_server EACCES → kernel patch 0002 (CAP_SYS_NICE); /dev/rfkill for the BT HAL; images: SD card only |
 | 15 | leanback launcher found ("real home found"), TvProvision ran; launcher and SystemUI still crash-looped: "Failed to initialize driver" only in app-uid processes | init.edge1.rc chmod'ed `/dev/dri/card0` back to 0660 at `boot`, after ueventd set 0666 → chmod removed (ueventd alone owns node modes; verify-tree guards it); F-Droid preinstalled via `build/fetch-fdroid.sh`; snapshots list `/dev` node modes; HDMI-CEC investigated and dropped by the owner |
 | 16 | **in the launcher** on HDMI, SystemUI up, F-Droid installed (signature matched), TvSettings works; no network (Ethernet unplugged), no Wi-Fi, no Bluetooth; TvSettings died in "Add accessory" (`BluetoothAdapter` null) | Wi-Fi: brcmfmac (built in) asked for firmware at 1.4s, before /vendor → firmware also in the ramdisk's `/lib/firmware/brcm`; `wpa_supplicant`/`hostapd` were never built (`WPA_SUPPLICANT_VERSION` unset; the probe cannot see Make guards) → set, with the module's own rc and our `wpa_supplicant.conf`; `android.hardware.wifi-service` had no legacy HAL and blocked Wi-Fi → removed, framework runs HAL-less. Bluetooth: kernel `hci_bcm` (`BT_HCIUART=y`, `POWER_SEQUENCING=y`) + Armbian's `BCM4359C0.hcd` (ramdisk + vendor) → hci0; the AOSP HAL binds it as an HCI user channel; `/dev/rfkill` back to root-only (the HAL soft-blocks hci0 if it can, then cannot bind); BT features back; A2DP source off (no BT audio provider). UI sounds (`AudioTv.mk`); `has_HDR_display=false`; snapshots add `connectivity.txt`; verify-tree [11] |
+| 17 | **Bluetooth works** (hci0 patched with BCM4359C0.hcd, HAL bound, adapter ON); Wi-Fi up (wlan0, supplicant, scans) but every association with the owner's WPA/WPA2 AP failed 4s in, `status_code=16`; developer options crash; userdata 1.6GiB | `brcmfmac.feature_disable=0x82000` (no firmware 4-way handshake/SAE; status 16 is brcmfmac's catch-all); bootwatch turns on Wi-Fi verbose logging; kernel patch 0003 (`/sys/class/android_usb` - UsbService needs it or `getCurrentFunctions()` throws in TvSettings); userdata 16GiB, image file ends 64MiB into it; USB Wi-Fi/BT adapter drivers + linux-firmware blobs (ramdisk + vendor), `persist.vendor.edge1.wifi.iface`; Edge1 Tools app (performance overlay + first-boot installer); bundled apps via `build/fetch-apps.sh` (Projectivy as HOME, VLC, SmartTube, Material Files, TV Bro, Aurora Store, drop-in folder) |
 
 ## Lessons that cost a card each (check these first next time)
 
@@ -134,17 +135,27 @@ not reachable from it.
 * **Bluetooth = kernel hci_bcm + AOSP's default AIDL HAL over an HCI user channel**, and
   `/dev/rfkill` must stay root-only (the HAL soft-blocks hci0 when it can, and the kernel
   then refuses the bind with -ERFKILL).
+* **Third-party APKs are not system prebuilts.** The build rewrites a PRESIGNED APK
+  with compressed native libraries (breaking its v2 signature) or, with an SDK
+  version set, refuses it; and Android extracts no libraries for an unupdated system
+  app. They ship as files and Edge1 Tools installs them on first boot.
+* **brcmfmac reports every connect failure as status 16.** Card 17's associations
+  failed inside the firmware's own WPA handshake; `brcmfmac.feature_disable=0x82000`
+  moves it to wpa_supplicant, where a wrong key says so.
 * **Images:** only the SD card is built during bring-up (`stage_images` in
   provision-wsl.sh, build-images.sh default); eMMC/NVMe are commented out.
 
 ## Open, in rough order
 
-* Card 17: Wi-Fi - dmesg has `brcmfmac: ... Firmware: BCM4359/9 wl0: ...` (no "error
-  -2"), `connectivity.txt` lists wlan0, `dumpsys wifi` shows the supplicant and scan
-  results, and TvSettings joins a network. Bluetooth - dmesg has `Bluetooth: hci0: BCM:
-  ... BCM4359C0` and the patchram loaded, logcat has `NetBluetoothMgmt ... hci interface
-  0 ready`, the adapter turns on (`dumpsys bluetooth_manager`), and a remote or gamepad
-  pairs from TvSettings > Remotes & Accessories. Also: UI click sounds over HDMI.
+* Card 18: Wi-Fi associates with the MikroTik (if not, logcat now has the
+  supplicant's own lines - verbose logging is on); developer options open; userdata
+  is 16GiB (Settings > Storage); bundled apps installed after first boot (Edge1 Tools
+  lists each one's status), Projectivy is HOME; the overlay (Edge1 Tools > Performance
+  overlay) shows FPS, CPU, GPU, temperatures. `fetch-apps` lines in the build log say
+  what was downloaded; LazyMedia Deluxe only if dropped into D:\android_khadas\apks.
+* Hardware video decode: rkvdec (H.264) is in the kernel but no Codec2 service is
+  installed; the overlay's "HW decode: none" is that. HEVC/VP9 need a newer kernel.
+* Bluetooth pairing of a remote/gamepad not yet tried by the owner.
 * Bluetooth audio (A2DP source): needs an `IBluetoothAudioProviderFactory` service
   (hardware/interfaces/bluetooth/audio/aidl/default) and
   `bluetooth.profile.a2dp.source.enabled` back to true. SELinux for the BT HAL's HCI

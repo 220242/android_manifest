@@ -151,6 +151,15 @@ Measured on the board — [`HARDWARE.md`](HARDWARE.md) has the readings:
   `hci_bcm` loads `BCM4359C0.hcd` (Armbian's) and registers hci0, and AOSP's default
   HAL binds it as an HCI user channel; the features are declared again, which also
   stops TvSettings dying in "Add accessory". UI sounds added.
+* **Bluetooth on; Wi-Fi up but not associating.** Card 17: hci0 patched and the
+  adapter on; Wi-Fi scanned, but every association failed inside the firmware's WPA
+  handshake (brcmfmac's status 16) - now done by wpa_supplicant instead
+  (`brcmfmac.feature_disable=0x82000`). Developer options crashed because mainline has
+  no `/sys/class/android_usb`, which UsbService needs (kernel patch 0003). userdata is
+  16GiB now. Also new: USB Wi-Fi/Bluetooth adapter support, the Edge1 Tools app
+  (performance overlay, first-boot installer) and bundled apps - Projectivy Launcher,
+  VLC, SmartTube, Material Files, TV Bro, Aurora Store, plus any APK dropped into
+  `D:\android_khadas\apks`.
 
 What they did not establish, because none of the card's code ever ran: whether our U-Boot,
 our TPL's DDR init, or our SPL work on this board. The DDR-blob A/B, the SPL boot-order

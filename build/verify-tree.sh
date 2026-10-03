@@ -57,7 +57,7 @@ while IFS= read -r src; do
         err "PRODUCT_COPY_FILES references a missing file: $rel"
     fi
 done < <(grep -hoE '(\$\(LOCAL_PATH\)|device/khadas/edge)/[A-Za-z0-9_./-]+' \
-            "$DEV/device.mk" 2>/dev/null | sort -u)
+            "$DEV/device.mk" "$DEV"/firmware/*.mk 2>/dev/null | sort -u)
 echo
 
 # --- 3. BoardConfig file references -------------------------------------------
@@ -1255,6 +1255,10 @@ def mk(name):
     text = ''.join(l.rstrip('\n').split('#', 1)[0] + '\n' for l in open(path))
     return text.replace('\\\n', ' ')
 dmk, bcm = mk('device.mk'), mk('BoardConfig.mk')
+# Makefiles device.mk includes (firmware/usb-adapters.mk) count as device.mk.
+for extra in sorted(os.listdir(os.path.join(dev, 'firmware'))) if os.path.isdir(os.path.join(dev, 'firmware')) else []:
+    if extra.endswith('.mk'):
+        dmk += mk(os.path.join('firmware', extra))
 pkgs = set()
 for m in re.finditer(r'^\s*PRODUCT_PACKAGES\s*\+?=(.*)$', dmk, re.M):
     pkgs.update(t for t in m.group(1).split() if not t.startswith('$'))
@@ -1336,6 +1340,54 @@ EOF
     done <<< "$conn"
 else
     err "connectivity check failed to run"
+fi
+echo
+
+# --- 12. bundled apps ---------------------------------------------------------
+# build/apps/apps.tsv is read by fetch-apps.sh on the owner's machine, where a
+# malformed line costs an app silently. Its shape is checked here.
+echo "[12] bundled apps list"
+APPS_TSV="$ROOT/build/apps/apps.tsv"
+if [[ -f "$APPS_TSV" ]]; then
+    if out=$(python3 - "$APPS_TSV" <<'EOF'
+import re, sys
+bad, homes, names = [], 0, set()
+for n, line in enumerate(open(sys.argv[1]), 1):
+    line = line.rstrip("\n")
+    if not line.strip() or line.startswith("#"):
+        continue
+    f = line.split("\t")
+    if len(f) != 3:
+        bad.append(f"line {n}: {len(f)} tab-separated fields, want 3"); continue
+    name, sources, role = f
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", name) or name in names:
+        bad.append(f"line {n}: bad or repeated name {name!r}")
+    names.add(name)
+    for src in sources.split("|"):
+        kind, _, arg = src.partition(":")
+        ok = (kind == "fdroid" and re.fullmatch(r"[A-Za-z0-9_.]+", arg)) or \
+             (kind == "url" and arg.startswith("https://")) or \
+             (kind == "github" and re.fullmatch(r"[\w.-]+/[\w.-]+:.+", arg))
+        if not ok:
+            bad.append(f"line {n}: bad source {src!r}")
+    if role not in ("-", "home"):
+        bad.append(f"line {n}: role must be - or home")
+    homes += role == "home"
+if homes > 1:
+    bad.append("more than one app has the home role")
+print("\n".join(bad) if bad else f"{len(names)} apps")
+sys.exit(1 if bad else 0)
+EOF
+); then
+        ok "build/apps/apps.tsv: $out"
+    else
+        while IFS= read -r l; do err "apps.tsv $l"; done <<< "$out"
+    fi
+fi
+if grep -q 'Edge1Tools' "$DEV/device.mk" && [[ -f "$DEV/apps/Edge1Tools/Android.bp" ]]; then
+    ok "Edge1Tools (the installer of those apps) is built and installed"
+else
+    err "device.mk or apps/Edge1Tools is missing Edge1Tools; nothing would install the bundled apps"
 fi
 echo
 

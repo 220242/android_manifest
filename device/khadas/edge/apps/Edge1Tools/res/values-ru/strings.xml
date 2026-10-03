@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Edge1 Tools</string>
+    <string name="hud_on">Оверлей производительности: ВКЛ</string>
+    <string name="hud_off">Оверлей производительности: ВЫКЛ</string>
+    <string name="hud_position">Положение оверлея: %1$s</string>
+    <string name="hud_autostart_on">Показывать после загрузки: ВКЛ</string>
+    <string name="hud_autostart_off">Показывать после загрузки: ВЫКЛ</string>
+    <string name="install_now">Установить встроенные приложения</string>
+    <string name="install_started">Установка идёт в фоне…</string>
+    <string name="bundled_title">Встроенные приложения</string>
+    <string name="bundled_none">В образе нет встроенных приложений.</string>
+    <string name="pos_top_right">справа сверху</string>
+    <string name="pos_top_left">слева сверху</string>
+    <string name="pos_bottom_left">слева снизу</string>
+    <string name="pos_bottom_right">справа снизу</string>
+    <string name="hud_channel">Оверлей производительности</string>
+    <string name="hud_notification">Оверлей производительности включён</string>
+</resources>

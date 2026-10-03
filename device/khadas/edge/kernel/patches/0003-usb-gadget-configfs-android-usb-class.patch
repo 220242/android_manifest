@@ -1,0 +1,109 @@
+usb: gadget: configfs: provide /sys/class/android_usb for Android's UsbService
+
+Khadas Edge1, Android 14 on mainline 6.12. Applied to kernel/mainline by
+build/build-kernel.sh before every build (device/khadas/edge/kernel/patches/).
+
+Android's UsbService creates its USB device manager only if
+/sys/class/android_usb exists. Android's common kernels provide that class from
+their configfs uevent patch; mainline has no such class. Without the manager,
+UsbManager.getCurrentFunctions() throws IllegalStateException, and the first
+thing TvSettings' developer options does is call it:
+
+  FATAL EXCEPTION: main  Process: com.android.tv.settings
+  java.lang.IllegalStateException
+    at android.hardware.usb.UsbManager.getCurrentFunctions
+    at ...DevelopmentFragment.updateUsbConfigurationValues
+
+- every time the page was opened, on card 17. This patch registers the class,
+one device (android0) and a read-only "state" attribute that reports
+DISCONNECTED. That is the truth on this board, where the dwc3 port runs as a
+host. UsbService then runs its legacy handler, which takes its configuration
+from sys.usb.config/sys.usb.state, as init.usb.rc already sets them.
+
+diff --git a/drivers/usb/gadget/configfs.c b/drivers/usb/gadget/configfs.c
+index 6b3713066..0d1bae755 100644
+--- a/drivers/usb/gadget/configfs.c
++++ b/drivers/usb/gadget/configfs.c
+@@ -2091,6 +2091,66 @@ void unregister_gadget_item(struct config_item *item)
+ }
+ EXPORT_SYMBOL_GPL(unregister_gadget_item);
+ 
++/*
++ * Android: /sys/class/android_usb/android0.
++ *
++ * Android's UsbService creates its USB device manager only when this class
++ * exists (UsbService.java: new File("/sys/class/android_usb").exists()), and
++ * without that manager UsbManager.getCurrentFunctions() throws - which is what
++ * TvSettings' developer options call first, so the page cannot open. Android's
++ * common kernels provide the class from their configfs uevent patch. This is the
++ * least of it: the class, one device, and a read-only "state" that says the
++ * gadget is not connected - true on this board, where the dwc3 port runs as a
++ * host.
++ */
++static ssize_t android_usb_state_show(struct device *dev,
++				      struct device_attribute *attr, char *buf)
++{
++	return sysfs_emit(buf, "DISCONNECTED\n");
++}
++
++static struct device_attribute dev_attr_android_usb_state =
++	__ATTR(state, 0444, android_usb_state_show, NULL);
++
++static struct attribute *android_usb_attrs[] = {
++	&dev_attr_android_usb_state.attr,
++	NULL,
++};
++ATTRIBUTE_GROUPS(android_usb);
++
++static struct class *android_usb_class;
++static struct device *android_usb_device;
++
++static void android_usb_compat_init(void)
++{
++	android_usb_class = class_create("android_usb");
++	if (IS_ERR(android_usb_class)) {
++		pr_warn("android_usb: class not created: %ld\n",
++			PTR_ERR(android_usb_class));
++		android_usb_class = NULL;
++		return;
++	}
++	android_usb_device = device_create_with_groups(android_usb_class, NULL,
++						       MKDEV(0, 0), NULL,
++						       android_usb_groups,
++						       "android0");
++	if (IS_ERR(android_usb_device)) {
++		pr_warn("android_usb: android0 not created: %ld\n",
++			PTR_ERR(android_usb_device));
++		android_usb_device = NULL;
++		class_destroy(android_usb_class);
++		android_usb_class = NULL;
++	}
++}
++
++static void android_usb_compat_exit(void)
++{
++	if (android_usb_device)
++		device_unregister(android_usb_device);
++	if (android_usb_class)
++		class_destroy(android_usb_class);
++}
++
+ static int __init gadget_cfs_init(void)
+ {
+ 	int ret;
+@@ -2098,12 +2158,15 @@ static int __init gadget_cfs_init(void)
+ 	config_group_init(&gadget_subsys.su_group);
+ 
+ 	ret = configfs_register_subsystem(&gadget_subsys);
++	if (!ret)
++		android_usb_compat_init();
+ 	return ret;
+ }
+ module_init(gadget_cfs_init);
+ 
+ static void __exit gadget_cfs_exit(void)
+ {
++	android_usb_compat_exit();
+ 	configfs_unregister_subsystem(&gadget_subsys);
+ }
+ module_exit(gadget_cfs_exit);

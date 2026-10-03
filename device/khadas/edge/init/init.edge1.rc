@@ -113,6 +113,20 @@ on boot
 # exists on this kernel, and both are gone.
 # ---------------------------------------------------------------------------
 
+# A USB Wi-Fi adapter instead of the AP6398S. Android drives one Wi-Fi interface,
+# the one named by wifi.interface (read each time Wi-Fi is switched on, HAL-less),
+# and the AP6398S always comes up first as wlan0, so a USB adapter is wlan1 and
+# idle. "setprop persist.vendor.edge1.wifi.iface wlan1" and a reboot hand Wi-Fi to
+# it; clearing the property hands it back. Exact values rather than "=*", so an
+# empty or mistyped value never leaves wifi.interface pointing at nothing.
+on property:persist.vendor.edge1.wifi.iface=wlan1
+    setprop wifi.interface wlan1
+    setprop wifi.direct.interface p2p-dev-wlan1
+
+on property:persist.vendor.edge1.wifi.iface=wlan2
+    setprop wifi.interface wlan2
+    setprop wifi.direct.interface p2p-dev-wlan2
+
 # ---------------------------------------------------------------------------
 # Android TV specifics.
 # ---------------------------------------------------------------------------

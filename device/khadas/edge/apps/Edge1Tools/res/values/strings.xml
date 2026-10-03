@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Edge1 Tools</string>
+    <string name="hud_on">Performance overlay: ON</string>
+    <string name="hud_off">Performance overlay: OFF</string>
+    <string name="hud_position">Overlay position: %1$s</string>
+    <string name="hud_autostart_on">Show overlay after boot: ON</string>
+    <string name="hud_autostart_off">Show overlay after boot: OFF</string>
+    <string name="install_now">Install bundled apps now</string>
+    <string name="install_started">Installing in the background…</string>
+    <string name="bundled_title">Bundled apps</string>
+    <string name="bundled_none">No bundled apps on this image.</string>
+    <string name="pos_top_right">top right</string>
+    <string name="pos_top_left">top left</string>
+    <string name="pos_bottom_left">bottom left</string>
+    <string name="pos_bottom_right">bottom right</string>
+    <string name="hud_channel">Performance overlay</string>
+    <string name="hud_notification">The performance overlay is on</string>
+</resources>

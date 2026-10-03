@@ -119,6 +119,17 @@ PRODUCT_COPY_FILES += \
 # the image is built without it rather than not at all.
 $(call inherit-product-if-exists, vendor/edge1/fdroid/fdroid.mk)
 
+# Edge1 Tools (apps/Edge1Tools): the performance overlay (FPS of the app in front,
+# per-core CPU load and clocks, GPU clock, temperatures, memory, display mode,
+# hardware decoders) and the first-boot installer for the bundled apps.
+# The bundled apps themselves - Projectivy Launcher, VLC, SmartTube, a file
+# manager, a TV browser, Aurora Store, and anything dropped into the apks folder -
+# come from build/fetch-apps.sh, which writes vendor/edge1/apps/apps.mk (or
+# nothing, if every download failed). See build/apps/apps.tsv.
+PRODUCT_PACKAGES += \
+    Edge1Tools
+$(call inherit-product-if-exists, vendor/edge1/apps/apps.mk)
+
 PRODUCT_PACKAGES += \
     TvSampleLeanbackLauncher \
     privapp_whitelist_com.example.sampleleanbacklauncher \
@@ -420,6 +431,10 @@ PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/wifi/firmware/brcm/brcmfmac4359-sdio.bin:$(TARGET_COPY_OUT_RAMDISK)/lib/firmware/brcm/brcmfmac4359-sdio.bin \
     $(LOCAL_PATH)/wifi/firmware/brcm/brcmfmac4359-sdio.txt:$(TARGET_COPY_OUT_RAMDISK)/lib/firmware/brcm/brcmfmac4359-sdio.txt \
     $(LOCAL_PATH)/wifi/firmware/brcm/BCM4359C0.hcd:$(TARGET_COPY_OUT_RAMDISK)/lib/firmware/brcm/BCM4359C0.hcd
+
+# USB Wi-Fi and Bluetooth adapters: firmware for the ones the kernel has drivers
+# for (firmware/usb/README.md lists them), and the same ramdisk-and-vendor pair.
+include $(LOCAL_PATH)/firmware/usb-adapters.mk
 
 PRODUCT_PROPERTY_OVERRIDES += \
     wifi.interface=wlan0 \

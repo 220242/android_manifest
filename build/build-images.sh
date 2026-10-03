@@ -10,9 +10,15 @@
 #   nvme     edge1-nvme.img     Android partitions for the M.2 SSD, no bootloader
 #
 # Environment:
-#   EDGE1_SD_SIZE_MIB     total size of the card image   (default 7000, fits "8GB")
-#   EDGE1_EMMC_SIZE_MIB   total size of the eMMC image   (default 14400, fits "16GB")
-#   EDGE1_NVME_SIZE_MIB   total size of the NVMe image   (default 14400)
+#   EDGE1_USERDATA_MIB    size of userdata, the last partition (default 16384, 16GiB);
+#                         the image is the fixed partitions plus this. A card or eMMC
+#                         needs about 5.3GiB more than this, so 16GiB wants a 32GB card.
+#   EDGE1_SD_SIZE_MIB     total size of the card image, overriding the above
+#   EDGE1_EMMC_SIZE_MIB   total size of the eMMC image, overriding the above
+#   EDGE1_NVME_SIZE_MIB   total size of the NVMe image, overriding the above
+#   EDGE1_FULL_IMAGE=1    write userdata's zeros into the image file in full. By
+#                         default the file stops 64MiB into userdata - see
+#                         "userdata: only its head is in the file" below.
 #   EDGE1_NO_GZIP=1       skip the compressed copies
 #   EDGE1_UBOOT_IDB=path  write this idbloader.img at sector 64 and this u-boot.itb
 #   EDGE1_UBOOT_ITB=path  at sector 16384, instead of u-boot-rockchip.bin. Both or
@@ -33,7 +39,7 @@
 # One layout - device/khadas/edge/flash/partitions.tsv - and three media. Only
 # three things differ, and only one of them is interesting:
 #
-#   size         the card image is sized for an 8GB card, the other two for 16GB.
+#   size         all three default to a 16GiB userdata; each can be overridden.
 #   file name    so all three can sit in out/ at once.
 #   bootloader   the card and the eMMC get u-boot-rockchip.bin at sector 64.
 #                The NVMe does not, and cannot.
@@ -163,11 +169,14 @@ target_file() {
         *) return 1 ;;
     esac
 }
+# The default size is the fixed partitions plus a 16GiB userdata (it was a fixed
+# 7000MiB card, which left userdata 1.6GiB). Called after the layout is read.
 target_size() {
+    local dflt=$(( FIRST_PART_MIB + fixed_mib + ${EDGE1_USERDATA_MIB:-16384} + GPT_TAIL_MIB ))
     case "$1" in
-        sdcard) echo "${EDGE1_SD_SIZE_MIB:-7000}" ;;
-        emmc)   echo "${EDGE1_EMMC_SIZE_MIB:-14400}" ;;
-        nvme)   echo "${EDGE1_NVME_SIZE_MIB:-14400}" ;;
+        sdcard) echo "${EDGE1_SD_SIZE_MIB:-$dflt}" ;;
+        emmc)   echo "${EDGE1_EMMC_SIZE_MIB:-$dflt}" ;;
+        nvme)   echo "${EDGE1_NVME_SIZE_MIB:-$dflt}" ;;
         *) return 1 ;;
     esac
 }
@@ -446,11 +455,12 @@ build_target() {
 
     echo "==> partition table"
     sgdisk --zap-all "$img" >/dev/null
-    local start=$FIRST_PART_MIB n=1 i name size
+    local start=$FIRST_PART_MIB n=1 i name size rest_start=-1
     for i in "${!NAMES[@]}"; do
         name="${NAMES[$i]}"; size="${FIXED[$i]}"
         if (( i == rest_index )); then
             size=$rest_mib
+            rest_start=$start
             sgdisk --new="$n:${start}M:0" --change-name="$n:$name" "$img" >/dev/null
         else
             sgdisk --new="$n:${start}M:+${size}M" --change-name="$n:$name" "$img" >/dev/null
@@ -502,6 +512,21 @@ build_target() {
 
     echo "==> verifying the table reads back"
     sgdisk --print "$img" | sed -n '/Number/,$p' | sed 's/^/    /'
+
+    # userdata: only its head is in the file. The table gives it its full size,
+    # but nothing is written into it - Android formats it on first boot - so the
+    # file ends 64MiB into it instead of carrying 16GiB of zeros that Etcher would
+    # spend a quarter of an hour writing. The 64MiB that remain are zeros on purpose:
+    # they overwrite the superblocks of whatever f2fs the card held before (the
+    # previous build's userdata starts at the same offset), which Android would
+    # otherwise try to mount, with keys that no longer exist. What is cut off is
+    # zeros and the secondary GPT; the kernel and U-Boot read the primary one, and
+    # already did with a card bigger than the image. EDGE1_FULL_IMAGE=1 keeps it all.
+    if (( rest_index >= 0 && rest_start >= 0 )) && [[ "${IMAGES[$rest_index]}" == "-" ]] \
+       && [[ "${EDGE1_FULL_IMAGE:-0}" != "1" ]]; then
+        truncate -s "$(( rest_start + 64 ))M" "$img"
+        echo "==> ${NAMES[$rest_index]}: ${rest_mib}MiB in the table, the first 64MiB (zeros) in the file"
+    fi
 
     if [[ "${EDGE1_NO_GZIP:-0}" != "1" ]]; then
         echo "==> compressing"

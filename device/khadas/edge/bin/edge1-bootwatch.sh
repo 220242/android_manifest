@@ -143,6 +143,10 @@ while :; do
     fi
     if [ -z "$done_at" ] && completed; then
         done_at=$t
+        # Wi-Fi verbose logging: wpa_supplicant's own debug lines in logcat. Card
+        # 17's failed associations said no more than "status_code=16" without it.
+        cmd wifi set-verbose-logging enabled > /dev/null 2>&1 \
+            && log "Wi-Fi verbose logging on"
     fi
     # Keep streaming after a completed boot: whatever goes wrong next is wanted too.
     if [ -n "$done_at" ]; then

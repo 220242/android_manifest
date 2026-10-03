@@ -112,6 +112,15 @@ directory changes (`kernelPatchesHash`).
 |---|---|
 | `0001-drm-master-to-the-client-that-asks` | The kernel makes the first opener of `/dev/dri/card0` DRM master. On this board that is minigbm's allocator (rockchip-drm has no render node), not drm_hwcomposer, which opens the device only when SurfaceFlinger registers with it - so the composer could not get master and ran headless (cards 12 and 13). With the patch, opening gives no master; the composer's `SET_MASTER` does. `drm.master_on_open=1` restores upstream. |
 | `0002-cgroup-v1-cap-sys-nice-moves-tasks` | system_server (uid system, CAP_SYS_NICE) moves app processes between cpuset/cpu/blkio groups; mainline cgroup v1 allows that only to root or the task's owner, so every move failed with EACCES (card 14, ~700 times). Android's common kernels let CAP_SYS_NICE do it; so does this, checked on the opener's credentials. |
+| `0003-usb-gadget-configfs-android-usb-class` | Android's UsbService creates its USB device manager only if `/sys/class/android_usb` exists (Android's common kernels provide it); without one, `UsbManager.getCurrentFunctions()` throws and TvSettings' developer options crashed on opening (card 17). The patch registers the class, `android0`, and a read-only `state` of DISCONNECTED - true here, where the dwc3 port is a host. |
+
+**USB Wi-Fi and Bluetooth adapters** are built in too: rtw88 USB (RTL8811CU/8821CU,
+8812BU/8822BU, 8822CU, 8723DU), rtl8xxxu (the 802.11n nano dongles), mt7601u, mt76x0u,
+mt76x2u, mt7921u, ath9k_htc, rt2800usb, and btusb with its Broadcom, Realtek and
+MediaTek parts. Their firmware is in `device/khadas/edge/firmware/usb/` (README there),
+in the ramdisk and `/vendor`. Android drives one Wi-Fi interface and one Bluetooth
+controller, and the onboard AP6398S takes `wlan0`/`hci0` first; a USB Wi-Fi adapter is
+used after `setprop persist.vendor.edge1.wifi.iface wlan1` and a reboot.
 
 ## Toolchain
 

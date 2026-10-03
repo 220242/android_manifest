@@ -214,6 +214,16 @@ $script:TrackedInputs = @(
        Stages=@('Uboot'); Label="the U-Boot build script" }
     @{ Key='buildScriptHash';  Path='build/build.sh';
        Stages=@('Build'); Label="the platform build script" }
+    # The bundled apps: the list, the script that fetches them, and the drop-in
+    # folders (D:\android_khadas\apks and ~/android_khadas/apks). A file dropped in
+    # changes nothing under device/, so without this the Build stage would stay
+    # complete and the image would not carry it.
+    @{ Key='appsHash'; Path='build/apps/apps.tsv';
+       Stages=@('Build'); Label="the bundled apps";
+       Probe=('{ cat ~/android_khadas/android_manifest/build/apps/apps.tsv ' +
+              '~/android_khadas/android_manifest/build/fetch-apps.sh; ' +
+              'ls -l --time-style=+%s ~/android_khadas/apks /mnt/?/android_khadas/apks; } ' +
+              '2>/dev/null | sha256sum | cut -c1-16') }
 )
 
 function Invalidate-OnInputChange {

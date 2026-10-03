@@ -202,9 +202,14 @@ build/build-images.sh sdcard         # just the card
 
 | Image | Size | Bootloader | Written by |
 |---|---|---|---|
-| `edge1-sdcard.img` | `EDGE1_SD_SIZE_MIB`, default 7000 | sector 64 | Balena Etcher, from the desktop |
-| `edge1-emmc.img` | `EDGE1_EMMC_SIZE_MIB`, default 14400 | sector 64 | the on-device installer, or `ums 0 mmc 0` + Etcher |
-| `edge1-nvme.img` | `EDGE1_NVME_SIZE_MIB`, default 14400 | **none** | the on-device installer, or `ums 0 nvme 0` + Etcher |
+| `edge1-sdcard.img` | fixed partitions + `EDGE1_USERDATA_MIB` (16GiB): needs a 32GB card | sector 64 | Balena Etcher, from the desktop |
+| `edge1-emmc.img` | the same; `EDGE1_EMMC_SIZE_MIB` overrides | sector 64 | the on-device installer, or `ums 0 mmc 0` + Etcher |
+| `edge1-nvme.img` | the same; `EDGE1_NVME_SIZE_MIB` overrides | **none** | the on-device installer, or `ums 0 nvme 0` + Etcher |
+
+userdata gets its full size in the partition table, but the image file ends 64MiB
+into it (zeros, which wipe the previous build's f2fs superblocks): Android formats
+it on first boot, so writing 16GiB of zeros would only cost Etcher a quarter of an
+hour. `EDGE1_FULL_IMAGE=1` keeps the whole thing.
 
 One layout — `flash/partitions.tsv` — and three media. Each image is a GPT built from that
 file with every partition image `dd`'d into place, plus a `.img.gz` beside it that Etcher

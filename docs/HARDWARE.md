@@ -241,6 +241,6 @@ fitted**. Everything about them is reasoned from the silicon, not observed.
 GPT:14335999 != 125042687
 ```
 
-Our card image is 7000MiB and the card is 59.6GB, so the GPT does not span the device
-and the kernel says so. Harmless — `EDGE1_SD_SIZE_MIB` is deliberately sized for the
-smallest card worth using.
+Our card image was 7000MiB and the card is 59.6GB, so the GPT does not span the device
+and the kernel says so. Harmless. (Since card 18 the table spans about 21.5GB - userdata
+is 16GiB - and the same note applies.)

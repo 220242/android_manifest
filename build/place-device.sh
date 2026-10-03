@@ -58,6 +58,13 @@ had_fdroid=0; [[ -f "$fdroid_mk" ]] && had_fdroid=1
 has_fdroid=0; [[ -f "$fdroid_mk" ]] && has_fdroid=1
 (( had_fdroid == has_fdroid )) || changed=1
 
+# The same for the apps installed on first boot (fetch-apps.sh, vendor/edge1/apps).
+apps_bp="$TREE/vendor/edge1/apps/Android.bp"
+had_apps=0; [[ -f "$apps_bp" ]] && had_apps=1
+"$(dirname "${BASH_SOURCE[0]}")/fetch-apps.sh" "$TREE" || echo "fetch-apps.sh failed; continuing without the bundled apps" >&2
+has_apps=0; [[ -f "$apps_bp" ]] && has_apps=1
+(( had_apps == has_apps )) || changed=1
+
 if (( changed )); then
     # Soong's finder caches the tree walk. A changed device tree that the cache
     # predates would be found only on the second build, which is the kind of

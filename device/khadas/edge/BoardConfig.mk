@@ -159,6 +159,18 @@ BOARD_KERNEL_CMDLINE := \
 # state) is the way to lift this for a user build; it is listed as open work.
 BOARD_KERNEL_CMDLINE += androidboot.verifiedbootstate=orange
 
+# brcmfmac.feature_disable=0x82000 turns off two firmware offloads of the BCM4359:
+# FWSUP (bit 13, the firmware doing the WPA 4-way handshake itself) and SAE (bit
+# 19, WPA3 authentication in firmware). On card 17 every association with a
+# WPA/WPA2-PSK access point failed four seconds in with status 16 - brcmfmac's
+# catch-all "connect failed", which is all that comes back when the handshake runs
+# inside the firmware - and "Registration to specific type not supported" for the
+# frames the supplicant wanted to handle itself. With both off, wpa_supplicant does
+# the handshake on the host, as on every other driver, and a failure is reported
+# as what it is (wrong key, timeout). The same value is the usual cure for
+# brcmfmac on the Raspberry Pi's BCM43455.
+BOARD_KERNEL_CMDLINE += brcmfmac.feature_disable=0x82000
+
 # veritymode is appended per-variant: enforcing on user, eio on userdebug so a
 # bring-up image with a locally modified vendor partition still boots.
 ifeq ($(TARGET_BUILD_VARIANT),user)

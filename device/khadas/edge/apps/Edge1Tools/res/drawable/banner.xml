@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 320x180 TV launcher banner: a plain tile; the label is drawn by the launcher. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="#FF1E3A5F" />
+    <size android:width="320dp" android:height="180dp" />
+</shape>
