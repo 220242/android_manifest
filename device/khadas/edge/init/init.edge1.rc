@@ -79,14 +79,11 @@ on boot
     chown system system /dev/cec0
     chmod 0660 /dev/cec0
 
-    # The GPU is reached through the DRM render node, not /dev/mali0: that node
-    # belonged to the BSP's midgard kmod and does not exist with panfrost. Mesa
-    # opens the render node from every process that draws, so it has to be
-    # world-accessible - the same reason /dev/mali0 was 0666 on the old path.
-    chown system graphics /dev/dri/renderD128
-    chmod 0666 /dev/dri/renderD128
-    chown system graphics /dev/dri/card0
-    chmod 0660 /dev/dri/card0
+    # No chown/chmod of /dev/dri here: ueventd.edge1.rc owns those modes. This block
+    # set card0 back to 0660 at "boot", after ueventd had made it 0666, and that is
+    # why card 15's launcher and SystemUI still could not open it from their app
+    # uids ("Failed to initialize driver", then a RenderThread SIGSEGV in panfrost)
+    # while TvSettings and TvProvision, which run as uid system, drew fine.
 
     # Video: mainline exposes rkvdec and RGA as V4L2 M2M devices, replacing
     # /dev/mpp_service and /dev/rga. Which index each lands on depends on probe

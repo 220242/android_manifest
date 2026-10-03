@@ -136,6 +136,11 @@ Measured on the board — [`HARDWARE.md`](HARDWARE.md) has the readings:
   with no HAL (features off for now); and system_server could not move app processes
   between cgroups on a mainline kernel (second kernel patch, CAP_SYS_NICE, as in
   Android's common kernels). The pipeline builds only the SD card image for now.
+* **Launcher found; one node mode short.** Card 15: TvProvision ran and the leanback
+  launcher became HOME, but it and SystemUI still could not use graphics buffers from
+  their app uids - `init.edge1.rc` was chmod'ing `/dev/dri/card0` back to 0660 after
+  ueventd had made it 0666. Removed. F-Droid is now preinstalled (fetched and
+  signature-checked at build time).
 * **Known next: Wi-Fi.** brcmfmac is built in, so it asks for
   `brcm/brcmfmac4359-sdio.bin` 1.8s into boot, long before `/vendor` is mounted, and
   gets -2. Armbian loads it as a module, after its rootfs is up. Not a boot blocker;

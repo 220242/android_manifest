@@ -498,6 +498,13 @@ fi
 # graphics_device, which apps may not use, the mapper fails in every app and its
 # RenderThread dies in Mesa - card 14's SystemUI loop.
 ue="$DEV/init/ueventd.edge1.rc"
+# And nothing may change those modes later: card 15 still failed because
+# init.edge1.rc chmod'ed card0 back to 0660 at "boot", after ueventd had set 0666.
+if grep -hnE '^[[:space:]]*(chmod|chown)[[:space:]].*/dev/dri' "$DEV"/init/*.rc >/dev/null; then
+    err "an init rc file chmods/chowns /dev/dri; ueventd.edge1.rc alone owns those modes:"
+    err "  $(grep -lE '^[[:space:]]*(chmod|chown)[[:space:]].*/dev/dri' "$DEV"/init/*.rc | xargs -n1 basename | tr '\n' ' ')"
+    cl_bad=$((cl_bad+1))
+fi
 if grep -qE '^/dev/dri/card0[[:space:]]+0666[[:space:]]' "$ue" \
    && grep -qE '^/dev/dri/card0[[:space:]]+u:object_r:gpu_device:s0' "$DEV/sepolicy/vendor/file_contexts"; then
     ok "/dev/dri/card0 is open to every process (0666, gpu_device), as minigbm needs"

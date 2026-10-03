@@ -113,6 +113,12 @@ PRODUCT_COPY_FILES += \
 #
 # LiveTv is the TIF reference tuner UI, and it is what makes the
 # android.software.live_tv feature declaration meaningful.
+# F-Droid, the AOSP-world app store, preinstalled on /product. Not listed here:
+# build/fetch-fdroid.sh downloads it (verifying F-Droid's signing certificate) into
+# vendor/edge1/fdroid/ with a fdroid.mk that adds the package, and when that fails
+# the image is built without it rather than not at all.
+$(call inherit-product-if-exists, vendor/edge1/fdroid/fdroid.mk)
+
 PRODUCT_PACKAGES += \
     TvSampleLeanbackLauncher \
     privapp_whitelist_com.example.sampleleanbacklauncher \

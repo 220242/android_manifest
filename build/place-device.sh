@@ -49,6 +49,15 @@ else
     changed=1
 fi
 
+# The F-Droid prebuilt lives outside the device tree (a copy that is replaced
+# wholesale whenever it differs), in vendor/edge1/fdroid - see fetch-fdroid.sh. Its
+# appearing or disappearing is a change for the finder too.
+fdroid_mk="$TREE/vendor/edge1/fdroid/Android.mk"
+had_fdroid=0; [[ -f "$fdroid_mk" ]] && had_fdroid=1
+"$(dirname "${BASH_SOURCE[0]}")/fetch-fdroid.sh" "$TREE" || echo "fetch-fdroid.sh failed; continuing without F-Droid" >&2
+has_fdroid=0; [[ -f "$fdroid_mk" ]] && has_fdroid=1
+(( had_fdroid == has_fdroid )) || changed=1
+
 if (( changed )); then
     # Soong's finder caches the tree walk. A changed device tree that the cache
     # predates would be found only on the second build, which is the kind of

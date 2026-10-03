@@ -75,7 +75,10 @@ snapshot() {
     mkdir -p "$s"
     getprop > "$s/getprop.txt" 2>&1
     ps -A -o PID,PPID,USER,STAT,TIME,LABEL,NAME > "$s/ps.txt" 2>&1
-    { cat /proc/uptime; echo; cat /proc/mounts; echo; ls -l /dev/block/by-name; } \
+    # Device node modes and labels too: card 15's display bug was a node mode that
+    # a log could only hint at.
+    { cat /proc/uptime; echo; cat /proc/mounts; echo; ls -l /dev/block/by-name; echo
+      ls -lZ /dev/dri /dev/snd /dev/cec* /dev/video* /dev/media* /dev/rfkill; } \
         > "$s/misc.txt" 2>&1
     timeout 20 dumpsys -l > "$s/services.txt" 2>&1
     timeout 20 dumpsys SurfaceFlinger > "$s/surfaceflinger.txt" 2>&1

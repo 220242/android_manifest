@@ -94,14 +94,49 @@ not reachable from it.
 | 12 | memfd on (no ashmem errors), whole-boot logs on the card; audio HAL aborted 129× and system_server was killed 6×; display headless | the HAL forbids an external device (HDMI, `connection: hdmi`) in `<attachedDevices>` and ModulePrimary cannot connect external ones → the primary output is a built-in "Speaker" that plays to ALSA card 0 = `hdmi-sound`; the minigbm allocator opened card0 first and held DRM master, so drm_hwcomposer made a null display → composer started at `late-fs`; verify-tree checks both |
 | 13 | audio HAL up; audioserver waited for `IModule/bluetooth` (declared by the APEX's VINTF, no module in our XML) → AudioService hung, watchdog ×6; composer still headless | bluetooth module added, usb removed (exactly the APEX's declared set; verify-tree checks); the composer opens card0 only when SurfaceFlinger registers (52.98s, after the allocator) → kernel patch: no implicit DRM master on open, `SET_MASTER` for whoever asks while none exists; kernel patch mechanism in build-kernel.sh; bootwatch timeout 300s |
 | 14 | **boot completed** (`sys.boot_completed=1`); boot animation on HDMI at 1920x1080@60 (Samsung EDID) - the DRM-master patch worked; then black: FallbackHome, "no home" | no launcher/setup wizard/IME in AOSP's atv_base → TvSampleLeanbackLauncher, TvProvision, LeanbackIME, DocumentsUI (+ allowlists); SystemUI crash loop = minigbm mapper could not open card0 (0660) in app processes → card0/card1 0666 + gpu_device; Bluetooth crash loop (no HAL) → BT features off; cgroup v1 moves by system_server EACCES → kernel patch 0002 (CAP_SYS_NICE); /dev/rfkill for the BT HAL; images: SD card only |
+| 15 | leanback launcher found ("real home found"), TvProvision ran; launcher and SystemUI still crash-looped: "Failed to initialize driver" only in app-uid processes | init.edge1.rc chmod'ed `/dev/dri/card0` back to 0660 at `boot`, after ueventd set 0666 → chmod removed (ueventd alone owns node modes; verify-tree guards it); F-Droid preinstalled via `build/fetch-fdroid.sh`; snapshots list `/dev` node modes; HDMI-CEC investigated and dropped by the owner |
+
+## Lessons that cost a card each (check these first next time)
+
+* **Device node modes belong to `ueventd.edge1.rc` only.** It is parsed (imported
+  from `/system/etc/ueventd.rc`) and works; an rc `chmod` at `boot` silently overrode it.
+* **Graphics on this board:** rockchip-drm has no render node, so minigbm opens
+  `/dev/dri/card0` in *every* process (allocator, mapper in each app) - it must be 0666
+  and `gpu_device`. drm_hwcomposer opens card0 only when SurfaceFlinger registers, so
+  it cannot win the implicit-master race; kernel patch 0001 makes master explicit.
+* **The AIDL audio HAL builds its modules from `audio_policy_configuration.xml`**: v7
+  format, no xi:include, built-in devices only in `<attachedDevices>` (HDMI is a
+  "Speaker" on ALSA card 0), and exactly the IModule set the APEX declares (default,
+  r_submix, bluetooth). verify-tree validates against `build/schema/` and the HAL rules.
+* **init.rc resets `sys.use_memfd` to false in post-fs-data**; the `/product` rc sets it
+  back. There is no ashmem in 6.12.
+* **AOSP's TV base has no launcher, setup wizard or keyboard** - device.mk adds the AOSP
+  ones. Check the installed app list (logcat paths) against the tree's module list.
+* **Mainline vs Android common kernel gaps** are fixed as patches in
+  `device/khadas/edge/kernel/patches/` (applied by build-kernel.sh; check-kernel-fragment.sh
+  checks they apply): 0001 DRM master, 0002 cgroup v1 CAP_SYS_NICE.
+* **F-Droid** comes from `build/fetch-fdroid.sh` (run by place-device.sh): downloaded
+  on the owner's machine (f-droid.org is not reachable from this sandbox), accepted only
+  with F-Droid's signing certificate (SHA-256 43238d51...a9c9ccab, from memory - if the
+  script reports a different one, check it against f-droid.org before trusting it),
+  cached in `~/.cache/edge1`; on failure the image is built without it.
+* **Images:** only the SD card is built during bring-up (`stage_images` in
+  provision-wsl.sh, build-images.sh default); eMMC/NVMe are commented out.
 
 ## Open, in rough order
 
-* Card 15: the leanback launcher on HDMI; SystemUI stays up (no "Failed to initialize
-  driver" in app processes, no RenderThread SIGSEGV in panfrost); no
-  "AddTidToCgroup ... Permission denied"; TvProvision ran (settings
-  device_provisioned=1). Then: remote/keyboard input, Ethernet/Wi-Fi in TvSettings,
-  sound over HDMI.
+* Card 16: the leanback launcher on HDMI and SystemUI up (no "Failed to initialize
+  driver", no RenderThread SIGSEGV in panfrost); `misc.txt` shows `/dev/dri/card0`
+  `crw-rw-rw-` and `gpu_device`; no "AddTidToCgroup ... Permission denied" (patch 0002);
+  F-Droid in /product/app (or fetch-fdroid's warning in the build log). Then: remote
+  and keyboard input, Ethernet/Wi-Fi in TvSettings, sound over HDMI.
+* HDMI-CEC (owner: not needed now). Findings for later: every AOSP 14 CEC HAL
+  (`tv.hdmi.cec`, `tv.hdmi.connection`, `tv.cec@1.1`) is a mock that reads/writes FIFOs,
+  and `CONFIG_DRM_DW_HDMI_CEC` is `=m` (modules are not loaded), so there is no
+  `/dev/cec0`. It needs `=y` plus a HAL implementing IHdmiCec and IHdmiConnection over
+  the Linux CEC API (CEC_ADAP_S_LOG_ADDRS, CEC_TRANSMIT/RECEIVE, CEC_DQEVENT state
+  changes as hotplug + physical address); the mocks in
+  hardware/interfaces/tv/hdmi/{cec,connection}/aidl/default are the template.
 * Bluetooth: features removed until a HAL runs (BCM4359 firmware patch); put
   `android.hardware.bluetooth*.xml` back with it.
 * init.rc's blkio.weight / cpuctl uclamp.latency_sensitive writes fail (ACK-only
