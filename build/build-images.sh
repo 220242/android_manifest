@@ -4,7 +4,7 @@
 #
 #   usage: build-images.sh [tree-dir] [target...]
 #
-# Targets (default: all three):
+# Targets (default: sdcard only during bring-up; name emmc or nvme to build them):
 #   sdcard   edge1-sdcard.img   bootable card, written from a desktop with Etcher
 #   emmc     edge1-emmc.img     bootable eMMC image
 #   nvme     edge1-nvme.img     Android partitions for the M.2 SSD, no bootloader
@@ -139,7 +139,9 @@ if [[ -n "$EXT_IDB$EXT_ITB" ]]; then
 fi
 
 TARGETS=("$@")
-(( ${#TARGETS[@]} )) || TARGETS=(sdcard emmc nvme)
+# The card only, by default, while the port is brought up from it; "emmc" and
+# "nvme" still build when named on the command line.
+(( ${#TARGETS[@]} )) || TARGETS=(sdcard)   # emmc nvme
 
 for t in sgdisk dd od; do
     command -v "$t" >/dev/null 2>&1 || { echo "$t not found (apt-get install gdisk)" >&2; exit 1; }

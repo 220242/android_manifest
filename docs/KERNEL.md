@@ -104,6 +104,7 @@ directory changes (`kernelPatchesHash`).
 | Patch | Why |
 |---|---|
 | `0001-drm-master-to-the-client-that-asks` | The kernel makes the first opener of `/dev/dri/card0` DRM master. On this board that is minigbm's allocator (rockchip-drm has no render node), not drm_hwcomposer, which opens the device only when SurfaceFlinger registers with it - so the composer could not get master and ran headless (cards 12 and 13). With the patch, opening gives no master; the composer's `SET_MASTER` does. `drm.master_on_open=1` restores upstream. |
+| `0002-cgroup-v1-cap-sys-nice-moves-tasks` | system_server (uid system, CAP_SYS_NICE) moves app processes between cpuset/cpu/blkio groups; mainline cgroup v1 allows that only to root or the task's owner, so every move failed with EACCES (card 14, ~700 times). Android's common kernels let CAP_SYS_NICE do it; so does this, checked on the opener's credentials. |
 
 ## Toolchain
 

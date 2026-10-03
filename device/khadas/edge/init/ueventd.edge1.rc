@@ -7,8 +7,18 @@
 # GPU. panfrost's render node, opened by Mesa in every process that draws - which
 # is why it is 0666, the same reason /dev/mali0 was.
 /dev/dri/renderD128       0666   system     graphics
-# KMS. SurfaceFlinger's composer (drm_hwcomposer) is the only user.
-/dev/dri/card0            0660   system     graphics
+# KMS (rockchip-drm) and panfrost's primary node. Not the composer's alone, as
+# this file used to say: minigbm opens card0 in every process that touches a
+# graphics buffer - the allocator, and the mapper inside each app - because
+# rockchip-drm has no render node. At 0660 system:graphics no app could open it, so
+# the mapper failed ("Failed to initialize driver", "Failed to importBuffer"),
+# Mesa got no buffer and SystemUI's RenderThread died in
+# panfrost_resource_set_damage_region on card 14, every few seconds. 0666, as
+# AOSP's own ueventd.rc has /dev/dri/*; who may do what on them is SELinux's
+# business (gpu_device, sepolicy/vendor/file_contexts), and only the composer is
+# DRM master (kernel/patches/0001).
+/dev/dri/card0            0666   system     graphics
+/dev/dri/card1            0666   system     graphics
 
 # Video: rkvdec and RGA as V4L2 M2M devices, plus the media controller.
 /dev/video0               0660   media      media
@@ -19,6 +29,10 @@
 /dev/cec0                 0660   system     system
 # IR receiver
 /dev/lirc0                0660   system     system
+# The Bluetooth HAL (android.hardware.bluetooth-service.default, user bluetooth)
+# toggles the radio through rfkill; at the default root-only mode it logged
+# "unable to open /dev/rfkill: Permission denied" on card 14.
+/dev/rfkill               0660   bluetooth  bluetooth
 # uart0, the BCM4359's Bluetooth transport. Left in place for whichever HAL ends
 # up owning it; see init.edge1.rc.
 /dev/ttyS0                0660   bluetooth  bluetooth

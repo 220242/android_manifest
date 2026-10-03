@@ -169,16 +169,26 @@ stage_uboot() {
 
 stage_images() {
     place_device
-    log "assembling the whole-disk images (SD card, eMMC, NVMe)"
-    "$MANIFEST/build/build-images.sh" "$TREE" 2>&1 | tee "$LOGS/images.log"
+    # SD card only while the port is brought up from the card: the eMMC and NVMe
+    # images cost minutes and ~15GiB each, and nothing installs them yet. To build
+    # them again, put them back in this list:
+    local targets=(sdcard)   # emmc nvme
+    log "assembling the whole-disk images (${targets[*]})"
+    "$MANIFEST/build/build-images.sh" "$TREE" "${targets[@]}" 2>&1 | tee "$LOGS/images.log"
     # Copied out to $WORK so they are reachable from Explorer without going through
     # the tree. Only the compressed copies are moved: the raw images are 7 and 15GiB
     # and \\wsl.localhost is slow. Etcher reads .gz directly.
     local pout="$TREE/out/target/product/edge"
     local moved=0
     mkdir -p "$WORK/output"
-    local img
-    for img in edge1-sdcard.img edge1-emmc.img edge1-nvme.img; do
+    local img t
+    # Only the images this run built: an eMMC or NVMe image left from an earlier run
+    # would otherwise be copied out again as if it were current.
+    for t in emmc nvme; do
+        [[ " ${targets[*]} " == *" $t "* ]] || rm -f "$WORK/output/edge1-$t.img" "$WORK/output/edge1-$t.img.gz"
+    done
+    for img in "${targets[@]/#/edge1-}"; do
+        img="$img.img"
         if [[ -f "$pout/$img.gz" ]]; then
             cp -f "$pout/$img.gz" "$WORK/output/"
             log "$img.gz -> $WORK/output/ ($(du -h "$pout/$img.gz" | cut -f1))"
@@ -206,9 +216,8 @@ stage_images() {
     fi
     log "$moved image(s) in $WORK/output"
     echo
-    echo "edge1-sdcard.img.gz is the one to write with Etcher. The other two are"
-    echo "installed onto the board by /vendor/bin/edge1-install-internal.sh, which"
-    echo "runs from the card - see docs/PORTING.md."
+    echo "edge1-sdcard.img.gz is the one to write with Etcher. (The eMMC and NVMe images"
+    echo "are off during bring-up - see stage_images in provision-wsl.sh.)"
 }
 
 stage_build() {

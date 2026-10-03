@@ -900,9 +900,8 @@ function Stage-Uboot {
 }
 
 function Stage-Images {
-    Write-Stage 'Stage 12/12  Whole-disk images (SD card, eMMC, NVMe)'
-    Write-Info 'edge1-sdcard.img is the one Etcher writes; the other two are installed'
-    Write-Info 'onto the board from the card by /vendor/bin/edge1-install-internal.sh'
+    Write-Stage 'Stage 12/12  Whole-disk image (SD card; eMMC and NVMe off during bring-up)'
+    Write-Info 'edge1-sdcard.img.gz is the one Etcher writes'
     $rc = Invoke-InDistro -Command '~/android_khadas/android_manifest/build/windows/provision-wsl.sh images' -AllowFailure
     Write-Info "output: \\wsl.localhost\$($script:DistroName)\home\builder\android_khadas\output"
     if ($rc -ne 0) {

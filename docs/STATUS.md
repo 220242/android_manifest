@@ -127,6 +127,15 @@ Measured on the board — [`HARDWARE.md`](HARDWARE.md) has the readings:
   SurfaceFlinger registers with it, well after the allocator. Since the kernel is
   ours, it now carries a patch (`device/khadas/edge/kernel/patches/`): opening the
   node no longer makes the opener DRM master; asking for it does.
+* **Android boots to completion.** Card 14: `sys.boot_completed=1`, the boot
+  animation on HDMI at 1920x1080@60 from the TV's EDID - the DRM-master patch works -
+  and then a black FallbackHome: AOSP's TV base has no launcher, no setup wizard and no
+  keyboard. Added the AOSP ones (TvSampleLeanbackLauncher, TvProvision, LeanbackIME,
+  plus DocumentsUI). SystemUI was crash-looping because minigbm could not open
+  `/dev/dri/card0` from app processes (now 0666, `gpu_device`); Bluetooth crash-looped
+  with no HAL (features off for now); and system_server could not move app processes
+  between cgroups on a mainline kernel (second kernel patch, CAP_SYS_NICE, as in
+  Android's common kernels). The pipeline builds only the SD card image for now.
 * **Known next: Wi-Fi.** brcmfmac is built in, so it asks for
   `brcm/brcmfmac4359-sdio.bin` 1.8s into boot, long before `/vendor` is mounted, and
   gets -2. Armbian loads it as a module, after its rootfs is up. Not a boot blocker;

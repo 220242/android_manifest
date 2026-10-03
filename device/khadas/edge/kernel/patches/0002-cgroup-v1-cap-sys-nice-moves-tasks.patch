@@ -1,0 +1,43 @@
+cgroup-v1: let CAP_SYS_NICE move other users' tasks, as Android's kernels do
+
+Khadas Edge1, Android 14 on mainline 6.12. Applied to kernel/mainline by
+build/build-kernel.sh before every build (device/khadas/edge/kernel/patches/).
+
+Android keeps every app process in a cpuset, cpu and blkio group chosen by its
+state (top-app, foreground, background ...), and system_server moves them there:
+uid system, with CAP_SYS_NICE, writing to cgroup.procs and tasks files that init
+has made system-owned. Mainline's cgroup v1 lets a writer move only its own tasks
+unless it is root, so every move of an app failed:
+
+  E libprocessgroup: AddTidToCgroup failed to write '501'; path=foreground;
+    process: Permission denied
+
+- 700 times on card 14, and no app left the root group. Android's common kernels
+carry the same exception for CAP_SYS_NICE. Checked against the opener's
+credentials (file_ns_capable), like the uid test it extends, so an inherited fd
+grants nothing its opener did not have.
+
+diff --git a/kernel/cgroup/cgroup-v1.c b/kernel/cgroup/cgroup-v1.c
+index e28d5f0d2..e55b9a800 100644
+--- a/kernel/cgroup/cgroup-v1.c
++++ b/kernel/cgroup/cgroup-v1.c
+@@ -517,9 +517,18 @@ static ssize_t __cgroup1_procs_write(struct kernfs_open_file *of,
+ 	 */
+ 	cred = of->file->f_cred;
+ 	tcred = get_task_cred(task);
++	/*
++	 * Android: system_server moves every app's processes between the cpuset,
++	 * cpu and blkio groups (task_profiles.json), as uid system and with
++	 * CAP_SYS_NICE. Android's common kernels let CAP_SYS_NICE do that; without
++	 * it each move fails with EACCES ("AddTidToCgroup failed to write ...
++	 * Permission denied") and no app ever leaves the root group. The
++	 * capability is the opener's, like the uid above.
++	 */
+ 	if (!uid_eq(cred->euid, GLOBAL_ROOT_UID) &&
+ 	    !uid_eq(cred->euid, tcred->uid) &&
+-	    !uid_eq(cred->euid, tcred->suid))
++	    !uid_eq(cred->euid, tcred->suid) &&
++	    !file_ns_capable(of->file, &init_user_ns, CAP_SYS_NICE))
+ 		ret = -EACCES;
+ 	put_cred(tcred);
+ 	if (ret)

@@ -93,16 +93,19 @@ not reachable from it.
 | 11 | system_server runs, but the watchdog kills it (67s, ×3) in `AudioService` | `sys.use_memfd` was reset to false by `init.rc` post-fs-data → `/product` rc sets it back; the AIDL audio HAL rejected `audio_policy_configuration.xml` (HIDL format, `halVersion="AIDL"`, unresolvable `xi:include`s) and registered no `IModule/default` → self-contained v7 file validated against the HAL's XSD (`build/schema/`); bootwatch streams the whole logcat/dmesg; bootfs 512MiB; ramoops 3.25MiB |
 | 12 | memfd on (no ashmem errors), whole-boot logs on the card; audio HAL aborted 129× and system_server was killed 6×; display headless | the HAL forbids an external device (HDMI, `connection: hdmi`) in `<attachedDevices>` and ModulePrimary cannot connect external ones → the primary output is a built-in "Speaker" that plays to ALSA card 0 = `hdmi-sound`; the minigbm allocator opened card0 first and held DRM master, so drm_hwcomposer made a null display → composer started at `late-fs`; verify-tree checks both |
 | 13 | audio HAL up; audioserver waited for `IModule/bluetooth` (declared by the APEX's VINTF, no module in our XML) → AudioService hung, watchdog ×6; composer still headless | bluetooth module added, usb removed (exactly the APEX's declared set; verify-tree checks); the composer opens card0 only when SurfaceFlinger registers (52.98s, after the allocator) → kernel patch: no implicit DRM master on open, `SET_MASTER` for whoever asks while none exists; kernel patch mechanism in build-kernel.sh; bootwatch timeout 300s |
+| 14 | **boot completed** (`sys.boot_completed=1`); boot animation on HDMI at 1920x1080@60 (Samsung EDID) - the DRM-master patch worked; then black: FallbackHome, "no home" | no launcher/setup wizard/IME in AOSP's atv_base → TvSampleLeanbackLauncher, TvProvision, LeanbackIME, DocumentsUI (+ allowlists); SystemUI crash loop = minigbm mapper could not open card0 (0660) in app processes → card0/card1 0666 + gpu_device; Bluetooth crash loop (no HAL) → BT features off; cgroup v1 moves by system_server EACCES → kernel patch 0002 (CAP_SYS_NICE); /dev/rfkill for the BT HAL; images: SD card only |
 
 ## Open, in rough order
 
-* Card 14: `media.audio_policy` registers (no "waiting for media.audio_policy"),
-  system_server gets past `AudioService` to `boot_progress_ams_ready`; drm_hwcomposer
-  logs pipelines (no "DRM/KMS master access required", no null-display) and the boot
-  animation is on HDMI; `/sys/module/drm/parameters/master_on_open` reads N.
-* The `late-fs` start of the composer (card 12's fix) is harmless but did not help -
-  drm_hwcomposer opens the device on SurfaceFlinger's registerCallback. It can go once
-  the kernel patch is confirmed.
+* Card 15: the leanback launcher on HDMI; SystemUI stays up (no "Failed to initialize
+  driver" in app processes, no RenderThread SIGSEGV in panfrost); no
+  "AddTidToCgroup ... Permission denied"; TvProvision ran (settings
+  device_provisioned=1). Then: remote/keyboard input, Ethernet/Wi-Fi in TvSettings,
+  sound over HDMI.
+* Bluetooth: features removed until a HAL runs (BCM4359 firmware patch); put
+  `android.hardware.bluetooth*.xml` back with it.
+* init.rc's blkio.weight / cpuctl uclamp.latency_sensitive writes fail (ACK-only
+  files); harmless.
 * Real HDMI audio (hotplug, AUDIO_DEVICE_OUT_HDMI, passthrough) needs a HAL module that
   connects external devices; ModulePrimary does not. "Speaker" on card 0 until then.
 * system_server's `LowMemDetector` PSI trigger fails with EINVAL (unprivileged

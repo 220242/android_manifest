@@ -44,8 +44,8 @@ PRODUCT_ENFORCE_RRO_TARGETS := *
 # ---------------------------------------------------------------------------
 # Android TV: device type, leanback and TIF.
 #
-# atv_base.mk already declares android.hardware.type.television,
-# android.software.leanback and the launcher. Added here are the features the
+# atv_base.mk already declares android.hardware.type.television and
+# android.software.leanback. Added here are the features the
 # legacy device/rockchip/common/tv/permissions/tv_core_hardware.xml declared
 # that are board facts rather than TV facts.
 #
@@ -62,9 +62,17 @@ PRODUCT_COPY_FILES += \
     frameworks/native/data/etc/android.hardware.usb.host.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/android.hardware.usb.host.xml \
     frameworks/native/data/etc/android.hardware.wifi.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/android.hardware.wifi.xml \
     frameworks/native/data/etc/android.hardware.wifi.direct.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/android.hardware.wifi.direct.xml \
-    frameworks/native/data/etc/android.hardware.bluetooth.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/android.hardware.bluetooth.xml \
-    frameworks/native/data/etc/android.hardware.bluetooth_le.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/android.hardware.bluetooth_le.xml \
     $(LOCAL_PATH)/permissions/khadas_edge_excluded_hardware.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/khadas_edge_excluded_hardware.xml
+
+# No android.hardware.bluetooth / bluetooth_le, for now. With the feature declared,
+# system_server starts the Bluetooth service, and com.android.bluetooth aborts at
+# once - "Can't start stack, last instance: starting HciHalHidl", after "HalVersionManager
+# No supported HAL version" - because no Bluetooth HAL is running yet (the BCM4359
+# needs its firmware patch loaded first; see init.edge1.rc). It restarted every few
+# seconds on card 14. Without the feature SystemServer logs "No Bluetooth Service
+# (Bluetooth Hardware Not Present)" and leaves it. The two lines come back with the HAL:
+#   frameworks/native/data/etc/android.hardware.bluetooth.xml
+#   frameworks/native/data/etc/android.hardware.bluetooth_le.xml
 
 # android.hardware.opengles.aep.xml was copied here, carried over from the BSP
 # where the Mali blob supported the Android Extension Pack. AEP requires GLES 3.1
@@ -75,12 +83,44 @@ PRODUCT_COPY_FILES += \
 # The deqp level file dragonboard also copies is left out for the same reason: it
 # states which dEQP suite the driver passes, and nothing here has run one.
 
-# TV apps. TvProvider/TvSettings come from atv_base.mk; LiveTv is the TIF
-# reference tuner UI and is what makes android.software.live_tv meaningful.
-# atv_base.mk already provides the leanback launcher, TvProvider and
-# TvSettings. Only LiveTv is added: it is the TIF reference tuner UI, and it is
-# what makes the android.software.live_tv feature declaration meaningful.
+# TV apps. atv_base.mk brings TvProvider, TvSettings, TvSystemUI and the TV package
+# installer, and no launcher: Google's TV launcher is part of GMS, not AOSP. Card 14
+# booted to completion and stayed on TvSettings' FallbackHome - black - logging
+# "User unlocked but no home; let's hope someone enables one soon?". Checked against
+# what the board actually ran (every /system, /system_ext, /product app in card 14's
+# logcat) and the synced tree's module list, these were missing and are needed on
+# a TV box without GMS:
+#
+#   TvSampleLeanbackLauncher  AOSP's leanback launcher (device/google/atv): HOME
+#   TvProvision               AOSP's stand-in for a setup wizard: marks the device
+#                             provisioned and user setup complete on first boot,
+#                             then disables itself. Without one nothing does
+#                             ("There should probably be exactly one setup wizard;
+#                             found 0"), and HOME, notifications and some settings
+#                             behave as on a device still being set up
+#   LeanbackIME               the TV on-screen keyboard. There was no IME at all,
+#                             so no text field - a Wi-Fi password, a search - could
+#                             be filled in with the remote
+#   DocumentsUI               the system file picker and Files: installing an APK
+#                             from a USB stick, and any app's "open file", go
+#                             through it
+#
+# Each privileged one comes with its privapp-permission allowlist: a privileged app
+# whose allowlist is missing stops system_server at boot when the allowlist is
+# enforced. All of these modules are in the synced tree (Probe stage module list).
+# Left out on purpose: phone apps (Dialer, Contacts, messaging), Launcher3, Gallery2,
+# Music and Camera2 - nothing on a TV box uses them, and each costs space on /system.
+#
+# LiveTv is the TIF reference tuner UI, and it is what makes the
+# android.software.live_tv feature declaration meaningful.
 PRODUCT_PACKAGES += \
+    TvSampleLeanbackLauncher \
+    privapp_whitelist_com.example.sampleleanbacklauncher \
+    TvProvision \
+    privapp_whitelist_com.android.tv.provision \
+    LeanbackIME \
+    DocumentsUI \
+    privapp_whitelist_com.android.documentsui \
     LiveTv
 
 # Leanback/TV device overlays (density, HDMI-driven screen config, no rotation).

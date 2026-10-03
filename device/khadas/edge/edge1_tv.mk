@@ -12,8 +12,9 @@
 # Android TV base.
 #
 # device/google/atv supplies the leanback system configuration: TvProvider,
-# TvSettings, LeanbackLauncher, the television device-type feature set,
-# tv-specific SystemUI and the TIF (TV Input Framework) plumbing.
+# TvSettings, TvSystemUI, the television device-type feature set and the TIF (TV
+# Input Framework) plumbing. Not a launcher, a setup wizard or a keyboard -
+# device.mk adds those (card 14 booted to a black FallbackHome without them).
 #
 # The legacy tree instead used device/rockchip/common/tv/tv_base.mk. That file
 # is unusable on 14: it still lists libstagefright_soft_* codecs, PicoTts,

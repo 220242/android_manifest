@@ -493,6 +493,19 @@ else
     err "  opens card0 first, holds DRM master, and the composer runs headless"
     cl_bad=$((cl_bad+1))
 fi
+# minigbm opens /dev/dri/card0 in every process that touches a graphics buffer
+# (rockchip-drm has no render node), apps included. At 0660 system:graphics, or as
+# graphics_device, which apps may not use, the mapper fails in every app and its
+# RenderThread dies in Mesa - card 14's SystemUI loop.
+ue="$DEV/init/ueventd.edge1.rc"
+if grep -qE '^/dev/dri/card0[[:space:]]+0666[[:space:]]' "$ue" \
+   && grep -qE '^/dev/dri/card0[[:space:]]+u:object_r:gpu_device:s0' "$DEV/sepolicy/vendor/file_contexts"; then
+    ok "/dev/dri/card0 is open to every process (0666, gpu_device), as minigbm needs"
+else
+    err "/dev/dri/card0 must be 0666 in ueventd.edge1.rc and gpu_device in file_contexts:"
+    err "  minigbm's mapper opens it in every app process"
+    cl_bad=$((cl_bad+1))
+fi
 # First-stage init takes the vbmeta partitions to read from the DT's
 # /firmware/android/vbmeta/parts or from "avb=<partition>" in the fstab; a bare "avb"
 # names nothing. With avb on a first_stage_mount entry and no name anywhere, it stops

@@ -27,7 +27,12 @@
 /dev/block/by-name/boot             u:object_r:boot_block_device:s0
 /dev/block/by-name/recovery         u:object_r:recovery_block_device:s0
 
-/dev/dri/card0                      u:object_r:graphics_device:s0
+# gpu_device for the KMS node too, not graphics_device: minigbm's mapper opens card0
+# in every app process (rockchip-drm has no render node), and apps may use
+# gpu_device but not graphics_device. card1 is panfrost's primary node. GloDroid
+# labels both the same way.
+/dev/dri/card0                      u:object_r:gpu_device:s0
+/dev/dri/card1                      u:object_r:gpu_device:s0
 /dev/dri/renderD128                 u:object_r:gpu_device:s0
 # No /dev/video[0-9]* line. AOSP's own file_contexts has that exact spec, and the
 # two files are concatenated before being compiled, so a second identical one is
