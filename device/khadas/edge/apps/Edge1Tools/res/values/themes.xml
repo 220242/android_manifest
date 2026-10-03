@@ -33,6 +33,11 @@
         <item name="android:buttonBarButtonStyle">@style/Edge1.Button.Text</item>
     </style>
 
+    <!-- A dotted name without parent= inherits the name before the last dot, which
+         has to exist: "Text.Body" is "Text" plus its items. Hence the empty roots. -->
+    <style name="Text" />
+    <style name="Edge1" />
+
     <!-- Type scale (M3 headline/title/body/label), +4sp over the phone sizes. -->
     <style name="Text.Headline">
         <item name="android:textSize">32sp</item>

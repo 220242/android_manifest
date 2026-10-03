@@ -72,7 +72,7 @@ done
 # And no file_contexts specification AOSP already has verbatim: the two files are
 # concatenated and checkfc refuses a specification twice.
 for spec in $(sed 's/#.*//' "$DEV/file_contexts" | awk 'NF>=2 {print $1}'); do
-    if awk '{print $1}' "$SEP/private/file_contexts" "$SEP/vendor/file_contexts" | grep -qxF -- "$spec"; then
+    if awk '{print $1}' "$SEP/private/file_contexts" "$SEP/vendor/file_contexts" | grep -xF -- "$spec" > /dev/null; then
         echo "file_contexts: $spec is already in AOSP's file_contexts" >&2; bad=1
     fi
 done

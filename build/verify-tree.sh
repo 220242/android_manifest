@@ -12,6 +12,9 @@
 # can be run before a 120GiB sync.
 #
 set -uo pipefail
+# A pipeline's last grep reads all of its input (> /dev/null, not -q): grep -q stops at
+# the first match, the writer dies of SIGPIPE, and pipefail turns a match into a
+# failure - now and then, on a busy machine.
 
 # shellcheck source=build/lib-tree.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib-tree.sh"
@@ -136,7 +139,7 @@ if [[ -f "$TSV" ]]; then
     # with dd finds nothing there. The first successful build ended that way.
     if grep -qE '^super\s' "$TSV" && grep -qE '[^-]\.img' <<< "$(grep -E '^super\s' "$TSV")"; then
         if sed 's/#.*//' "$DEV/BoardConfig.mk" \
-           | grep -qE '^[[:space:]]*BOARD_BUILD_SUPER_IMAGE_BY_DEFAULT[[:space:]]*:?=[[:space:]]*true'; then
+           | grep -E '^[[:space:]]*BOARD_BUILD_SUPER_IMAGE_BY_DEFAULT[[:space:]]*:?=[[:space:]]*true' > /dev/null; then
             ok "super.img is in the layout and BOARD_BUILD_SUPER_IMAGE_BY_DEFAULT is true"
         else
             err "partitions.tsv flashes super.img but BoardConfig.mk does not set"
@@ -229,8 +232,8 @@ if [[ -f "$TSV" ]]; then
     # Anything in the layout with an image that is a filesystem the build sparses.
     # boot/recovery/vbmeta are never sparse - mkbootimg and avbtool write raw.
     if grep -qE '^super[[:space:]].*\.img' "$TSV"; then
-        if sed 's/#.*//' "$DEV/BoardConfig.mk" | grep -qE \
-           '^[[:space:]]*TARGET_USERIMAGES_SPARSE_(EXT|F2FS)_DISABLED[[:space:]]*:?=[[:space:]]*true'; then
+        if sed 's/#.*//' "$DEV/BoardConfig.mk" | grep -E \
+           '^[[:space:]]*TARGET_USERIMAGES_SPARSE_(EXT|F2FS)_DISABLED[[:space:]]*:?=[[:space:]]*true' > /dev/null; then
             ok "super.img is flashed and the board disables sparse ext/f2fs images"
         else
             err "partitions.tsv flashes super.img but BoardConfig.mk does not set"
@@ -449,12 +452,12 @@ echo
 #                              avb fstab flags need either those or "unlocked".
 echo "[3h] kernel command line: boot_devices and the verified-boot state"
 cl_bad=0
-if sed 's/#.*//' "$DEV/BoardConfig.mk" | grep -q 'androidboot.boot_devices'; then
+if sed 's/#.*//' "$DEV/BoardConfig.mk" | grep 'androidboot.boot_devices' > /dev/null; then
     err "BoardConfig.mk puts androidboot.boot_devices in boot.img; it differs per medium"
     err "  (card fe320000.mmc, eMMC fe330000.mmc) and has to come from the bootloader"
     cl_bad=$((cl_bad+1))
 fi
-if sed 's/#.*//' "$DEV/BoardConfig.mk" | grep -q 'androidboot.verifiedbootstate=orange'; then
+if sed 's/#.*//' "$DEV/BoardConfig.mk" | grep 'androidboot.verifiedbootstate=orange' > /dev/null; then
     ok "BoardConfig.mk declares the device unlocked (verifiedbootstate=orange)"
 else
     err "BoardConfig.mk does not pass androidboot.verifiedbootstate=orange; with no vbmeta"
@@ -474,7 +477,7 @@ done
 # rebooted the board.
 init_rc="$DEV/init/init.edge1.rc"
 for mode in early late; do
-    if grep -vE '^\s*#' "$init_rc" | grep -qE "^\s*mount_all\s+/vendor/etc/fstab\.\\\$\{ro\.hardware\}\s+--$mode"; then
+    if grep -vE '^\s*#' "$init_rc" | grep -E "^\s*mount_all\s+/vendor/etc/fstab\.\\\$\{ro\.hardware\}\s+--$mode" > /dev/null; then
         ok "init.edge1.rc runs mount_all --$mode on the fstab"
     else
         err "init.edge1.rc has no 'mount_all /vendor/etc/fstab.\${ro.hardware} --$mode'; /data"
@@ -518,8 +521,8 @@ fi
 # names nothing. With avb on a first_stage_mount entry and no name anywhere, it stops
 # with "Missing vbmeta partitions" - which is what the board did.
 fstab_f="$DEV/fstab.edge1"
-if grep -vE '^\s*#' "$fstab_f" | grep -E 'first_stage_mount' | grep -qE '(^|[ ,])avb([ ,=]|$)'; then
-    if grep -vE '^\s*#' "$fstab_f" | grep -E 'first_stage_mount' | grep -qE '(^|[ ,])avb=[a-z_]+'; then
+if grep -vE '^\s*#' "$fstab_f" | grep -E 'first_stage_mount' | grep -E '(^|[ ,])avb([ ,=]|$)' > /dev/null; then
+    if grep -vE '^\s*#' "$fstab_f" | grep -E 'first_stage_mount' | grep -E '(^|[ ,])avb=[a-z_]+' > /dev/null; then
         ok "fstab names its vbmeta partition (avb=...), as first-stage init needs"
     else
         err "fstab.edge1 uses a bare 'avb' on first_stage_mount entries and names no"
@@ -599,7 +602,7 @@ if [[ -n "$ship" ]] && (( ship <= 29 )); then
     fi
 fi
 # vold must not manage the card Android boots from.
-if grep -vE '^\s*#' "$fstab_f" | grep -E 'voldmanaged=' | grep -q 'fe320000\.mmc'; then
+if grep -vE '^\s*#' "$fstab_f" | grep -E 'voldmanaged=' | grep 'fe320000\.mmc' > /dev/null; then
     err "fstab.edge1 hands the SD slot (fe320000.mmc), the boot card, to vold"
     cl_bad=$((cl_bad+1))
 else
@@ -722,7 +725,7 @@ for pat in "${!obsolete[@]}"; do
     if [[ -n "$hits" ]]; then
         while IFS= read -r h; do
             # A mention inside a comment is documentation, not usage.
-            if grep -n -- "$pat" "$h" | grep -qvE '^\s*[0-9]+:\s*(#|//|\*|<!--)'; then
+            if grep -n -- "$pat" "$h" | grep -vE '^\s*[0-9]+:\s*(#|//|\*|<!--)' > /dev/null; then
                 err "$pat used in ${h#$ROOT/} - ${obsolete[$pat]}"
             fi
         done <<<"$hits"

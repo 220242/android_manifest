@@ -226,7 +226,7 @@ fi
 # costs a character, and the decoder stays simple. build/edge1-pstore.py knows this
 # layout and the old 1MiB one.
 readonly RAMOOPS_NODE=/reserved-memory/ramoops@30100000
-if ! fdtget -l "$staged" / | grep -qx reserved-memory; then
+if ! fdtget -l "$staged" / | grep -x reserved-memory > /dev/null; then
     fdtput -c "$staged" /reserved-memory
     fdtput -t i "$staged" /reserved-memory '#address-cells' 2
     fdtput -t i "$staged" /reserved-memory '#size-cells' 2
@@ -237,7 +237,7 @@ if [[ "$cells" != "2 2" ]]; then
     echo "==> /reserved-memory in ${DTB}.dtb is not 2/2 cells; not adding ramoops." >&2
     echo "    The kernel log will not survive a reset. Fix this block." >&2
 else
-    fdtget -l "$staged" /reserved-memory | grep -qx "${RAMOOPS_NODE##*/}" \
+    fdtget -l "$staged" /reserved-memory | grep -x "${RAMOOPS_NODE##*/}" > /dev/null \
         || fdtput -c "$staged" "$RAMOOPS_NODE"
     fdtput -t s "$staged" "$RAMOOPS_NODE" compatible ramoops
     fdtput -t x "$staged" "$RAMOOPS_NODE" reg 0 30100000 0 340000

@@ -79,6 +79,7 @@ has the full story.
 |---|---|
 | `build/verify-tree.sh` | the whole tree's consistency checks; must end `errors: 0` |
 | `build/dev/check-kernel-fragment.sh <linux-6.12>` | the kernel patches apply, and every symbol in the kernel fragment takes, via the kernel's own defconfig + merge_config + olddefconfig and `scripts/dummy-tools` (seconds, no cross compiler). A miss stops the owner's Kernel stage. |
+| `build/dev/check-edge1tools.sh <android-all-14.jar>` | Edge1 Tools' resources link (aapt2) and its Java compiles against the R that comes out - what the build does to the app; Robolectric's android-all 14 stands in for the framework (the script says where to get it) |
 | `build/dev/test-bootscr-uboot2022.sh <u-boot-v2022.07> <card.img>` | runs the card's boot.scr through distro boot on a v2022.07 sandbox with the board's command set and environment; `EDGE1_PRELOAD=edge1-pstore.bin@0x30100000` replays a capture |
 | `build/build-images.sh <fake-tree> sdcard` | builds a card from a synthetic `boot.img` (see the test script's notes) |
 
@@ -207,6 +208,10 @@ not reachable from it.
 * **A seccomp policy is part of a codec's ABI.** Code new to a media service (here
   FFmpeg's request hwaccels: select() is pselect6) needs its syscalls in the
   service's policy, or the first use kills the process with SIGSYS.
+* **aapt2: a dotted style name is a child.** `<style name="Text.Body">` without
+  `parent=` inherits `Text`, and a missing `Text` stops the link (the first build
+  of the Material 3 screens, at 11%). A regex check of `@style/` references does
+  not see it; `build/dev/check-edge1tools.sh` runs the real aapt2.
 * **Images:** only the SD card is built during bring-up (`stage_images` in
   provision-wsl.sh, build-images.sh default); eMMC/NVMe are commented out.
 
