@@ -7,13 +7,15 @@ import android.content.SharedPreferences;
 import android.util.Log;
 
 /**
- * After every boot: install whatever bundled app is still due, a few minutes on,
- * and the overlay if asked - unless the overlay is what the board keeps resetting
- * after. Card 18 reset about ten seconds after each boot completed, once the
- * overlay was set to start with it; so each autostart counts a try, the overlay
- * clears the count once it has run SETTLE_MS, and two tries that never got there
- * turn autostart off. Committed, not applied: a reset seconds later must find it
- * on disk.
+ * After every boot: the overlay, if asked - unless the overlay is what the board
+ * keeps resetting after. Card 18 reset about ten seconds after each boot
+ * completed, once the overlay was set to start with it; so each autostart counts
+ * a try, the overlay clears the count once it has run SETTLE_MS, and two tries
+ * that never got there turn autostart off. Committed, not applied: a reset seconds
+ * later must find it on disk.
+ *
+ * Nothing is installed at boot: the bundled apps go in one by one, when the owner
+ * presses their button in MainActivity.
  */
 public class BootReceiver extends BroadcastReceiver {
     static final String TAG = "Edge1Boot";
@@ -22,7 +24,6 @@ public class BootReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context context, Intent intent) {
         if (!Intent.ACTION_BOOT_COMPLETED.equals(intent.getAction())) return;
-        PreinstallJob.schedule(context, false);
 
         SharedPreferences p = Prefs.get(context);
         if (!p.getBoolean(Prefs.HUD_AUTOSTART, false)) return;

@@ -1,6 +1,6 @@
-// Edge1 Tools: the performance overlay and the first-boot installer of the
-// bundled apps (build/fetch-apps.sh). Platform-signed so that the system grants it,
-// by signature, what both need: drawing over other apps, the per-task frame rate
+// Edge1 Tools: the performance overlay and the installer of the apps on the
+// image, one by one on request (build/fetch-apps.sh). Platform-signed so that the
+// system grants it, by signature, what both need: drawing over other apps, the per-task frame rate
 // (ACCESS_FPS_COUNTER), installing packages without a prompt, and choosing the
 // default launcher. Nothing here needs it to be privileged.
 android_app {
@@ -14,14 +14,4 @@ android_app {
     optimize: {
         enabled: false,
     },
-    required: ["edge1_tools_sysconfig"],
-}
-
-// Not stopped at first boot, so BootReceiver runs then. See the file.
-prebuilt_etc {
-    name: "edge1_tools_sysconfig",
-    src: "edge1-tools-sysconfig.xml",
-    filename: "edge1-tools.xml",
-    sub_dir: "sysconfig",
-    system_ext_specific: true,
 }

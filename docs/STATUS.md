@@ -179,7 +179,8 @@ Measured on the board — [`HARDWARE.md`](HARDWARE.md) has the readings:
   kept) with its own ramoops if it ended in a reset, and the card ships an
   `edge1-options.txt` that holds the big cores and the GPU below their top clocks - if
   the resets stop, it is power. Also the steps toward a release build:
-  [`RELEASE.md`](RELEASE.md).
+  [`RELEASE.md`](RELEASE.md). The bundled apps are offered in Edge1 Tools one by one
+  and installed only on request.
 
 What they did not establish, because none of the card's code ever ran: whether our U-Boot,
 our TPL's DDR init, or our SPL work on this board. The DDR-blob A/B, the SPL boot-order

@@ -3,6 +3,8 @@ package org.edge1.tools;
 import android.app.Activity;
 import android.content.SharedPreferences;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.TypedValue;
 import android.view.View;
 import android.widget.Button;
@@ -10,15 +12,36 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
-import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
 
-/** The settings screen: overlay on/off, its corner, autostart, the default launcher, and the bundled apps. */
+/**
+ * The settings screen: overlay on/off, its corner, autostart, the default launcher,
+ * and the apps on this image - each with a button of its own, installed only when
+ * pressed.
+ */
 public class MainActivity extends Activity {
     private Button hud;
     private Button position;
     private Button autostart;
     private Button launcher;
-    private TextView status;
+    private TextView notice;
+    private TextView appsTitle;
+    private LinearLayout appList;
+
+    private final Handler handler = new Handler(Looper.getMainLooper());
+    private final List<Preinstaller.Offer> offers = new ArrayList<>();
+    private final List<Button> appButtons = new ArrayList<>();
+    private boolean offersLoaded;
+
+    /** Refreshes the app buttons every 2s while an install is running. */
+    private final Runnable poll = new Runnable() {
+        @Override
+        public void run() {
+            if (refreshApps()) handler.postDelayed(this, 2000);
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -54,28 +77,36 @@ public class MainActivity extends Activity {
             refresh();
         });
         launcher = button(list, v -> Launchers.cycle(this, ok -> refresh()));
-        Button install = button(list, v -> {
-            PreinstallJob.schedule(this, true);
-            status.setText(R.string.install_started);
-            v.postDelayed(this::refresh, 15000);
-        });
-        install.setText(R.string.install_now);
 
-        status = new TextView(this);
-        status.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
-        status.setPadding(0, dp(16), 0, 0);
-        list.addView(status);
+        notice = text(list, 16);
+        appsTitle = text(list, 20);
+        appsTitle.setText(R.string.bundled_title);
+        appList = new LinearLayout(this);
+        appList.setOrientation(LinearLayout.VERTICAL);
+        list.addView(appList);
 
         ScrollView scroll = new ScrollView(this);
         scroll.addView(list);
         setContentView(scroll);
         hud.requestFocus();
+
+        // Reading ten APK manifests (one of them 180MB) is not for the UI thread.
+        new Thread(() -> {
+            List<Preinstaller.Offer> found = Preinstaller.offers(getApplicationContext());
+            runOnUiThread(() -> showOffers(found));
+        }, "edge1-offers").start();
     }
 
     @Override
     protected void onResume() {
         super.onResume();
         refresh();
+    }
+
+    @Override
+    protected void onPause() {
+        handler.removeCallbacks(poll);
+        super.onPause();
     }
 
     private Button button(LinearLayout parent, View.OnClickListener onClick) {
@@ -85,6 +116,32 @@ public class MainActivity extends Activity {
         b.setOnClickListener(onClick);
         parent.addView(b);
         return b;
+    }
+
+    private TextView text(LinearLayout parent, int sp) {
+        TextView t = new TextView(this);
+        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp);
+        t.setPadding(0, dp(16), 0, 0);
+        parent.addView(t);
+        return t;
+    }
+
+    private void showOffers(List<Preinstaller.Offer> found) {
+        if (isDestroyed()) return;
+        offers.clear();
+        offers.addAll(found);
+        appButtons.clear();
+        appList.removeAllViews();
+        for (Preinstaller.Offer offer : offers) {
+            appButtons.add(button(appList, v -> {
+                PreinstallJob.schedule(this, offer.apk.getName());
+                refreshApps();
+                handler.removeCallbacks(poll);
+                handler.postDelayed(poll, 2000);
+            }));
+        }
+        offersLoaded = true;
+        refresh();
     }
 
     private void refresh() {
@@ -98,20 +155,51 @@ public class MainActivity extends Activity {
                 ? R.string.hud_autostart_on : R.string.hud_autostart_off);
         launcher.setText(getString(R.string.launcher,
                 Launchers.label(this, Launchers.current(this))));
+        boolean tripped = p.getBoolean(Prefs.HUD_AUTOSTART_TRIPPED, false);
+        notice.setVisibility(tripped ? View.VISIBLE : View.GONE);
+        if (tripped) notice.setText(R.string.hud_autostart_tripped);
+        if (refreshApps()) {
+            handler.removeCallbacks(poll);
+            handler.postDelayed(poll, 2000);
+        }
+    }
 
-        StringBuilder sb = new StringBuilder();
-        if (p.getBoolean(Prefs.HUD_AUTOSTART_TRIPPED, false)) {
-            sb.append(getString(R.string.hud_autostart_tripped)).append("\n\n");
+    /** Sets every app button's text from what is installed now; true while one installs. */
+    private boolean refreshApps() {
+        if (!offersLoaded) {
+            return false;
         }
-        sb.append(getString(R.string.bundled_title)).append('\n');
-        File[] apks = Preinstaller.bundled();
-        if (apks.length == 0) sb.append(getString(R.string.bundled_none));
-        for (File f : apks) {
-            String s = p.getString(Prefs.STATUS_PREFIX + f.getName(), "…");
-            sb.append("• ").append(f.getName().replace(".apk", "")).append(": ").append(s)
-                    .append('\n');
+        if (offers.isEmpty()) {
+            appsTitle.setText(R.string.bundled_none);
+            return false;
         }
-        status.setText(sb);
+        boolean busy = false;
+        for (int i = 0; i < offers.size(); i++) {
+            Preinstaller.Offer o = offers.get(i);
+            Button b = appButtons.get(i);
+            String name = o.apk.getName();
+            String st = Preinstaller.status(this, name);
+            long have = Preinstaller.installedVersion(getPackageManager(), o.pkg);
+            if (Preinstaller.INSTALLING.equals(st) && PreinstallJob.queued(this, name)) {
+                b.setText(getString(R.string.app_installing, o.label));
+                b.setEnabled(false);
+                busy = true;
+            } else if (st != null && st.startsWith("failed")) {
+                b.setText(getString(R.string.app_failed, o.label, st.substring(st.indexOf(':') + 1).trim()));
+                b.setEnabled(true);
+            } else if (have >= o.versionCode) {
+                b.setText(getString(R.string.app_installed, o.label, o.versionName));
+                b.setEnabled(false);
+            } else if (have >= 0) {
+                b.setText(getString(R.string.app_update, o.label, o.versionName));
+                b.setEnabled(true);
+            } else {
+                b.setText(getString(R.string.app_install, o.label, o.versionName,
+                        String.format(Locale.ROOT, "%.0f MB", o.apk.length() / 1048576.0)));
+                b.setEnabled(true);
+            }
+        }
+        return busy;
     }
 
     private int dp(int v) {

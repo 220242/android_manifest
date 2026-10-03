@@ -182,6 +182,10 @@ not reachable from it.
 * **Product rc files run as init; vendor ones as vendor_init.** /sys/power/wake_lock
   and swapon are init's (`init.edge1.standby.rc` is on /product for that), and
   `swapon_all`/`mount_all` run in init itself even from a vendor file.
+* **AOSP's `development/tools/make_key` exits 1 whatever happens** (its EXIT trap ends
+  in `exit 1`): judge it by the files it leaves, never by its status.
+* **Warnings for the owner go to stdout.** The Windows transcript (the report) keeps a
+  native command's stdout, not its stderr - local-config's key failure was invisible.
 * **SELinux before a build:** `build/dev/check-sepolicy.sh <system/sepolicy>` compiles
   the vendor policy with AOSP's - every neverallow, and public types only for vendor.
 * **Images:** only the SD card is built during bring-up (`stage_images` in
@@ -197,6 +201,11 @@ not reachable from it.
   (link training fails on the empty slot); A2DP to a Bluetooth headset; an exFAT
   stick shows up; `/proc/swaps` lists zram0 (misc.txt); the power key puts the TV to
   standby and any key wakes it; the system language and time zone are the builder's.
+  The bundled apps are no longer installed by themselves (the owner's call): Edge1
+  Tools lists them with a button each - "Install", "Update", "installed".
+  The first card-20 build stopped at the module probe: its sepolicy check took
+  `get_prop(system_server, ...)` for a declaration of `system_server` (fixed), and
+  the key set was never made (make_key always exits 1; fixed, the files are checked).
 * Hardware video decode: docs/HW_DECODE.md. Phase 1 (decoders up, probed) is on
   card 19; next the FFmpeg Codec2 service (software), then v4l2-request for H.264
   and VP9. HEVC needs a newer kernel.

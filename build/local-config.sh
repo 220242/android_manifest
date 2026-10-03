@@ -27,7 +27,8 @@ set -euo pipefail
 readonly TREE="${1:?usage: local-config.sh <tree-dir>}"
 
 say()  { echo "local-config: $*"; }
-warn() { echo "local-config: $*" >&2; }
+# Warnings on stdout too: the Windows transcript keeps stdout, not stderr.
+warn() { echo "local-config: WARNING: $*"; }
 
 # Writes $2 to $1 only when different, so an unchanged config is not a new input.
 write_if_changed() {
@@ -100,9 +101,11 @@ for n in $NAMES; do
     fi
     rm -f "$KEYS/$n.pk8" "$KEYS/$n.x509.pem"
     # make_key asks for a password; an empty line means none (the build cannot
-    # type one in). The subject only names the key.
-    if ! ( cd "$KEYS" && echo | "$make_key" "$n" "/C=XX/O=Khadas Edge1 Android TV/CN=$n" >/dev/null 2>&1 ) \
-       || [[ ! -f "$KEYS/$n.pk8" || ! -f "$KEYS/$n.x509.pem" ]]; then
+    # type one in). The subject only names the key. Its exit status says nothing:
+    # its EXIT trap ends in "exit 1" whatever happened, so the files are the test.
+    ( cd "$KEYS" && echo | "$make_key" "$n" "/C=XX/O=Khadas Edge1 Android TV/CN=$n" ) >/dev/null 2>&1 || true
+    if [[ ! -s "$KEYS/$n.pk8" || ! -s "$KEYS/$n.x509.pem" ]] \
+       || ! openssl x509 -noout -in "$KEYS/$n.x509.pem" 2>/dev/null; then
         warn "keys: make_key failed for $n; the build uses the test keys"
         rm -f "$KEYS/$n.pk8" "$KEYS/$n.x509.pem"
         rm -rf "$TREE_KEYS"

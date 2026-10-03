@@ -954,7 +954,12 @@ def types_in(root):
             except OSError:
                 continue
             found |= set(re.findall(r'^type\s+([a-z0-9_]+)', body, re.M))
-            found |= set(re.findall(r'^[a-z_]*_prop\(([a-z0-9_]+)', body, re.M))
+            # Property types are declared by macros: vendor_internal_prop(x),
+            # system_restricted_prop(x) and the like. get_prop(domain, x) and
+            # set_prop(domain, x) only use them, and their first argument is a
+            # domain - counting it made "get_prop(system_server, ...)" a local
+            # declaration of system_server and stopped a run as a duplicate.
+            found |= set(re.findall(r'^(?!(?:get|set)_prop\()[a-z_]*_prop\(([a-z0-9_]+)', body, re.M))
     return found
 plat = types_in(os.path.join(tree, 'system', 'sepolicy'))
 ours = types_in(sedir)

@@ -9,42 +9,49 @@ import android.content.Context;
 import android.os.PersistableBundle;
 
 /**
- * Runs Preinstaller off the main thread, with JobScheduler's ten minutes to do it.
- * The run after a boot waits BOOT_DELAY_MS, so installs (and the compiling that
- * comes with each) do not pile onto the busiest minute of the boot; "install now"
- * runs at once.
+ * Installs one bundled app, the one the owner chose in MainActivity, off the main
+ * thread and outside the activity: leaving the screen does not cut an install of a
+ * 180MB APK short. One job per file, so several can be queued; Preinstaller runs
+ * them one at a time.
  */
 public class PreinstallJob extends JobService {
-    private static final int JOB_ID = 1;
-    private static final String FORCE = "force";
-    static final long BOOT_DELAY_MS = 3 * 60 * 1000;
+    private static final String APK = "apk";
 
-    static void schedule(Context context, boolean force) {
+    static void schedule(Context context, String fileName) {
         PersistableBundle extras = new PersistableBundle();
-        extras.putBoolean(FORCE, force);
-        JobInfo.Builder job = new JobInfo.Builder(JOB_ID,
-                new ComponentName(context, PreinstallJob.class)).setExtras(extras);
-        if (force) {
-            job.setOverrideDeadline(0);
-        } else {
-            job.setMinimumLatency(BOOT_DELAY_MS).setOverrideDeadline(BOOT_DELAY_MS);
-        }
-        context.getSystemService(JobScheduler.class).schedule(job.build());
+        extras.putString(APK, fileName);
+        Preinstaller.markQueued(context, fileName);
+        JobInfo job = new JobInfo.Builder(jobId(fileName),
+                new ComponentName(context, PreinstallJob.class))
+                .setExtras(extras)
+                .setOverrideDeadline(0)
+                .build();
+        context.getSystemService(JobScheduler.class).schedule(job);
+    }
+
+    /** Is an install of this file queued or running? */
+    static boolean queued(Context context, String fileName) {
+        return context.getSystemService(JobScheduler.class).getPendingJob(jobId(fileName)) != null;
+    }
+
+    private static int jobId(String fileName) {
+        return 1000 + (fileName.hashCode() & 0xffff);
     }
 
     @Override
     public boolean onStartJob(JobParameters params) {
-        final boolean force = params.getExtras().getBoolean(FORCE, false);
+        final String fileName = params.getExtras().getString(APK);
+        if (fileName == null) return false;
         new Thread(() -> {
-            Preinstaller.run(getApplicationContext(), force);
+            Preinstaller.install(getApplicationContext(), fileName);
             jobFinished(params, false);
-        }, "edge1-preinstall").start();
+        }, "edge1-install").start();
         return true;
     }
 
     @Override
     public boolean onStopJob(JobParameters params) {
-        // Cut short (the ten minutes ran out): what is done stays done; run again.
+        // Cut short (the job's time ran out): let JobScheduler run it again.
         return true;
     }
 }

@@ -6,10 +6,8 @@
     <string name="hud_position">Положение оверлея: %1$s</string>
     <string name="hud_autostart_on">Показывать после загрузки: ВКЛ</string>
     <string name="hud_autostart_off">Показывать после загрузки: ВЫКЛ</string>
-    <string name="install_now">Установить встроенные приложения</string>
-    <string name="install_started">Установка идёт в фоне…</string>
-    <string name="bundled_title">Встроенные приложения</string>
-    <string name="bundled_none">В образе нет встроенных приложений.</string>
+    <string name="bundled_title">Приложения в образе - установите нужные:</string>
+    <string name="bundled_none">В образе нет приложений.</string>
     <string name="pos_top_right">справа сверху</string>
     <string name="pos_top_left">слева сверху</string>
     <string name="pos_bottom_left">слева снизу</string>
@@ -18,4 +16,9 @@
     <string name="hud_notification">Оверлей производительности включён</string>
     <string name="hud_autostart_tripped">Автозапуск оверлея выключен: плата дважды подряд перезагрузилась в первые три минуты после его показа.</string>
     <string name="launcher">Лаунчер по умолчанию: %1$s</string>
+    <string name="app_install">Установить %1$s %2$s (%3$s)</string>
+    <string name="app_update">Обновить %1$s до %2$s</string>
+    <string name="app_installed">%1$s %2$s - установлено</string>
+    <string name="app_installing">Устанавливается %1$s…</string>
+    <string name="app_failed">%1$s - ошибка (%2$s), нажмите ещё раз</string>
 </resources>

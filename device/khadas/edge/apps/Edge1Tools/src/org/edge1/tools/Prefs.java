@@ -11,7 +11,6 @@ final class Prefs {
     static final String HUD_BOOT_TRIES = "hud_boot_tries";
     /** Set when those tries turned autostart off; MainActivity says so. */
     static final String HUD_AUTOSTART_TRIPPED = "hud_autostart_tripped";
-    static final String DONE_PREFIX = "done:";
     static final String STATUS_PREFIX = "status:";
 
     /** Overlay corners, in the order the position button cycles through them. */

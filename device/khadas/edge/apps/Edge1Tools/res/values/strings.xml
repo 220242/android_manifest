@@ -6,10 +6,8 @@
     <string name="hud_position">Overlay position: %1$s</string>
     <string name="hud_autostart_on">Show overlay after boot: ON</string>
     <string name="hud_autostart_off">Show overlay after boot: OFF</string>
-    <string name="install_now">Install bundled apps now</string>
-    <string name="install_started">Installing in the background…</string>
-    <string name="bundled_title">Bundled apps</string>
-    <string name="bundled_none">No bundled apps on this image.</string>
+    <string name="bundled_title">Apps on this image - install the ones you want:</string>
+    <string name="bundled_none">No apps on this image.</string>
     <string name="pos_top_right">top right</string>
     <string name="pos_top_left">top left</string>
     <string name="pos_bottom_left">bottom left</string>
@@ -18,4 +16,9 @@
     <string name="hud_notification">The performance overlay is on</string>
     <string name="hud_autostart_tripped">Overlay autostart was turned off: the board restarted twice in a row within three minutes of showing it.</string>
     <string name="launcher">Default launcher: %1$s</string>
+    <string name="app_install">Install %1$s %2$s (%3$s)</string>
+    <string name="app_update">Update %1$s to %2$s</string>
+    <string name="app_installed">%1$s %2$s - installed</string>
+    <string name="app_installing">Installing %1$s…</string>
+    <string name="app_failed">%1$s - failed (%2$s), press to retry</string>
 </resources>

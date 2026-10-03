@@ -58,7 +58,7 @@ had_fdroid=0; [[ -f "$fdroid_mk" ]] && had_fdroid=1
 has_fdroid=0; [[ -f "$fdroid_mk" ]] && has_fdroid=1
 (( had_fdroid == has_fdroid )) || changed=1
 
-# The same for the apps installed on first boot (fetch-apps.sh, vendor/edge1/apps).
+# The same for the apps Edge1 Tools offers to install (fetch-apps.sh, vendor/edge1/apps).
 apps_bp="$TREE/vendor/edge1/apps/Android.bp"
 had_apps=0; [[ -f "$apps_bp" ]] && had_apps=1
 "$(dirname "${BASH_SOURCE[0]}")/fetch-apps.sh" "$TREE" || echo "fetch-apps.sh failed; continuing without the bundled apps" >&2

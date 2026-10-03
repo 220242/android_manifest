@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Put the apps that are installed on first boot into the AOSP tree.
+# Put the apps Edge1 Tools offers for installation into the AOSP tree.
 #
 #   usage: fetch-apps.sh <tree-dir>
 #
@@ -17,19 +17,20 @@
 # Both end up under <tree>/vendor/edge1/apps/:
 #
 #   <name>.apk        each app, byte for byte
-#   preinstall.conf   the launcher to make default, and which files came from F-Droid
+#   preinstall.conf   which files came from F-Droid
 #   Android.bp        a prebuilt_etc per file, into /system_ext/etc/edge1-preinstall/
 #   apps.mk           PRODUCT_PACKAGES for those modules; device.mk pulls it in with
 #                     inherit-product-if-exists
 #
-# They go onto the image as files, not as system apps. Edge1 Tools installs them
-# with PackageInstaller on first boot, so they end up as ordinary apps: updatable,
+# They go onto the image as files, not as system apps. Edge1 Tools lists them with
+# a button each and installs one with PackageInstaller when the owner presses it -
+# nothing goes in by itself - so they end up as ordinary apps: updatable,
 # removable, with their native libraries extracted the usual way. (As prebuilt
 # system apps, a third-party APK with compressed native libraries cannot work: the
 # build would have to rewrite it, breaking its v2 signature, and Android does not
 # extract libraries for an unupdated system app.)
 #
-# When the folder and F-Droid both supply the same app, the device installs the
+# When the folder and F-Droid both supply the same app, the device offers the
 # folder's copy: Edge1 Tools compares package names, which it can read and this
 # script cannot.
 #

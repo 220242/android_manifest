@@ -1,4 +1,6 @@
-# Apps installed on first boot by Edge1 Tools (device/khadas/edge/apps/Edge1Tools).
+# Apps on the image for Edge1 Tools (device/khadas/edge/apps/Edge1Tools) to offer:
+# it lists them with a button each, and installs one only when that button is
+# pressed.
 #
 # Two sources, read by build/fetch-apps.sh:
 #

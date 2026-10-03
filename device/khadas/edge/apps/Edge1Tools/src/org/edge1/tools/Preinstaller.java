@@ -18,7 +18,6 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -26,24 +25,40 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Installs the APKs build/fetch-apps.sh put in /system_ext/etc/edge1-preinstall as
- * ordinary apps, through PackageInstaller - silently, since the platform signature
- * gives this app INSTALL_PACKAGES. Each file is installed once: an app the owner
- * later uninstalls stays uninstalled. Two files of one package (the apks folder's
- * and F-Droid's) install once, the folder's preferred. Runs are serialized: a press
- * of "install now" while the boot run is going waits for it.
+ * The APKs build/fetch-apps.sh put in /system_ext/etc/edge1-preinstall, offered one
+ * by one: MainActivity shows a button per app, and nothing is installed unless the
+ * owner presses it. (Up to card 19 all of them went in at first boot; the owner wants
+ * to choose.) An install goes through PackageInstaller silently - the platform
+ * signature gives this app INSTALL_PACKAGES - and the result is an ordinary app,
+ * updatable from its store and removable from Settings.
  *
- * Nothing here changes the default launcher any more. Card 18 made Projectivy HOME
- * by itself and then reset in a loop, each time seconds after the boot completed,
- * as the launcher and the overlay started; whatever the trigger, something the
- * owner did not choose should not be what runs at every boot. MainActivity has a
- * button for it.
+ * Two files of one package (the apks folder's and F-Droid's) make one offer, the
+ * folder's preferred, then the higher version. Installs are serialized.
  */
 final class Preinstaller {
     static final String TAG = "Edge1Preinstall";
     static final File DIR = new File("/system_ext/etc/edge1-preinstall");
     private static final String ACTION_RESULT = "org.edge1.tools.INSTALL_RESULT";
     private static final Object LOCK = new Object();
+
+    static final String INSTALLING = "installing";
+
+    /** One app on offer: the file chosen for a package, and what it is. */
+    static final class Offer {
+        final File apk;
+        final String pkg;
+        final CharSequence label;
+        final String versionName;
+        final long versionCode;
+
+        Offer(File apk, String pkg, CharSequence label, String versionName, long versionCode) {
+            this.apk = apk;
+            this.pkg = pkg;
+            this.label = label;
+            this.versionName = versionName == null ? "" : versionName;
+            this.versionCode = versionCode;
+        }
+    }
 
     private Preinstaller() {}
 
@@ -54,70 +69,37 @@ final class Preinstaller {
         return apks;
     }
 
-    /** @param force install even the ones that were installed once and removed since */
-    static void run(Context context, boolean force) {
-        synchronized (LOCK) {
-            runLocked(context, force);
-        }
-    }
-
-    private static void runLocked(Context context, boolean force) {
+    /** Every app on offer, in file-name order. Reads each APK's manifest: call off the UI thread. */
+    static List<Offer> offers(Context context) {
         PackageManager pm = context.getPackageManager();
-        SharedPreferences prefs = Prefs.get(context);
-        // One file per package. The folder and F-Droid can both supply an app; the
-        // folder's copy (not marked "fetched") wins, then the higher version.
         List<String> fetched = confAll("fetched");
-        Map<String, File> chosen = new LinkedHashMap<>();
-        Map<String, PackageInfo> infos = new HashMap<>();
+        Map<String, Offer> chosen = new LinkedHashMap<>();
         for (File apk : bundled()) {
-            PackageInfo archive = pm.getPackageArchiveInfo(apk.getPath(), 0);
-            if (archive == null) {
-                status(prefs, apk.getName(), "unreadable APK");
+            PackageInfo info = pm.getPackageArchiveInfo(apk.getPath(), 0);
+            if (info == null || info.applicationInfo == null) {
+                Log.w(TAG, apk.getName() + ": unreadable APK");
                 continue;
             }
-            String pkg = archive.packageName;
-            File prev = chosen.get(pkg);
-            if (prev == null || preferred(apk, archive, prev, infos.get(pkg), fetched)) {
-                if (prev != null) status(prefs, prev.getName(), "same app as " + apk.getName());
-                chosen.put(pkg, apk);
-                infos.put(pkg, archive);
-            } else {
-                status(prefs, apk.getName(), "same app as " + prev.getName());
-            }
+            info.applicationInfo.sourceDir = apk.getPath();
+            info.applicationInfo.publicSourceDir = apk.getPath();
+            Offer offer = new Offer(apk, info.packageName, info.applicationInfo.loadLabel(pm),
+                    info.versionName, info.getLongVersionCode());
+            Offer prev = chosen.get(offer.pkg);
+            if (prev == null || preferred(offer, prev, fetched)) chosen.put(offer.pkg, offer);
         }
-        for (Map.Entry<String, File> e : chosen.entrySet()) {
-            String pkg = e.getKey();
-            File apk = e.getValue();
-            String key = apk.getName();
-            if (installedVersion(pm, pkg) >= infos.get(pkg).getLongVersionCode()) {
-                prefs.edit().putString(Prefs.DONE_PREFIX + key, pkg).apply();
-                status(prefs, key, "installed (" + pkg + ")");
-                continue;
-            }
-            if (!force && prefs.contains(Prefs.DONE_PREFIX + key)) {
-                status(prefs, key, "removed by the user; not reinstalled");
-                continue;
-            }
-            String result = install(context, apk, pkg);
-            if (result == null) {
-                prefs.edit().putString(Prefs.DONE_PREFIX + key, pkg).apply();
-                status(prefs, key, "installed (" + pkg + ")");
-            } else {
-                status(prefs, key, "failed: " + result);
-            }
-        }
+        return new ArrayList<>(chosen.values());
     }
 
     /** Is a better than b, two files of the same package? */
-    private static boolean preferred(File a, PackageInfo ai, File b, PackageInfo bi,
-            List<String> fetched) {
-        boolean aFetched = fetched.contains(a.getName());
-        boolean bFetched = fetched.contains(b.getName());
+    private static boolean preferred(Offer a, Offer b, List<String> fetched) {
+        boolean aFetched = fetched.contains(a.apk.getName());
+        boolean bFetched = fetched.contains(b.apk.getName());
         if (aFetched != bFetched) return !aFetched;
-        return ai.getLongVersionCode() > bi.getLongVersionCode();
+        return a.versionCode > b.versionCode;
     }
 
-    private static long installedVersion(PackageManager pm, String pkg) {
+    /** The installed version of pkg, or -1. */
+    static long installedVersion(PackageManager pm, String pkg) {
         try {
             return pm.getPackageInfo(pkg, 0).getLongVersionCode();
         } catch (PackageManager.NameNotFoundException e) {
@@ -125,7 +107,38 @@ final class Preinstaller {
         }
     }
 
-    private static void status(SharedPreferences prefs, String key, String text) {
+    /** INSTALLING, "failed: ...", or null: nothing to report for this file. */
+    static String status(Context context, String fileName) {
+        return Prefs.get(context).getString(Prefs.STATUS_PREFIX + fileName, null);
+    }
+
+    static void markQueued(Context context, String fileName) {
+        Prefs.get(context).edit().putString(Prefs.STATUS_PREFIX + fileName, INSTALLING).apply();
+    }
+
+    /** Installs one bundled file; runs on PreinstallJob's thread. */
+    static void install(Context context, String fileName) {
+        synchronized (LOCK) {
+            SharedPreferences prefs = Prefs.get(context);
+            File apk = new File(DIR, fileName);
+            PackageInfo info = apk.isFile()
+                    ? context.getPackageManager().getPackageArchiveInfo(apk.getPath(), 0) : null;
+            if (info == null) {
+                setStatus(prefs, fileName, "failed: unreadable APK");
+                return;
+            }
+            setStatus(prefs, fileName, INSTALLING);
+            String result = install(context, apk, info.packageName);
+            if (result == null) {
+                Log.i(TAG, fileName + ": installed (" + info.packageName + ")");
+                prefs.edit().remove(Prefs.STATUS_PREFIX + fileName).apply();
+            } else {
+                setStatus(prefs, fileName, "failed: " + result);
+            }
+        }
+    }
+
+    private static void setStatus(SharedPreferences prefs, String key, String text) {
         Log.i(TAG, key + ": " + text);
         prefs.edit().putString(Prefs.STATUS_PREFIX + key, text).apply();
     }
