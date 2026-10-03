@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Material 3 dark colour scheme, seed #415F91 (Material Theme Builder's tonal
+  palettes). Fixed rather than the system's dynamic colours: a TV box has no
+  wallpaper to derive them from, and the screens must read the same on every TV.
+-->
+<resources>
+    <color name="m3_primary">#FFAAC7FF</color>
+    <color name="m3_on_primary">#FF0A305F</color>
+    <color name="m3_primary_container">#FF284777</color>
+    <color name="m3_on_primary_container">#FFD6E3FF</color>
+    <color name="m3_secondary">#FFBEC6DC</color>
+    <color name="m3_on_secondary">#FF283141</color>
+    <color name="m3_secondary_container">#FF3E4759</color>
+    <color name="m3_on_secondary_container">#FFDAE2F9</color>
+    <color name="m3_tertiary">#FFDDBCE0</color>
+    <color name="m3_tertiary_container">#FF573E5C</color>
+    <color name="m3_on_tertiary_container">#FFFAD8FD</color>
+    <color name="m3_error">#FFFFB4AB</color>
+    <color name="m3_on_error">#FF690005</color>
+    <color name="m3_error_container">#FF93000A</color>
+    <color name="m3_on_error_container">#FFFFDAD6</color>
+    <color name="m3_surface">#FF111318</color>
+    <color name="m3_on_surface">#FFE2E2E9</color>
+    <color name="m3_on_surface_variant">#FFC4C6D0</color>
+    <color name="m3_outline">#FF8E9099</color>
+    <color name="m3_outline_variant">#FF44474E</color>
+    <color name="m3_surface_container_low">#FF191C20</color>
+    <color name="m3_surface_container">#FF1D2024</color>
+    <color name="m3_surface_container_high">#FF282A2F</color>
+    <color name="m3_surface_container_highest">#FF33353A</color>
+    <!-- The TV focus ring: what the remote points at must be plain from across the room. -->
+    <color name="m3_focus_ring">#FFD6E3FF</color>
+    <!-- onSurface at 12%: Material's state layer for a focused or pressed surface. -->
+    <color name="m3_state_layer">#1FE2E2E9</color>
+</resources>

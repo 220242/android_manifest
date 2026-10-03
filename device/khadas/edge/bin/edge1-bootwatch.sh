@@ -265,6 +265,8 @@ logs_turned_off() {
 n=
 if [ -n "$mounted" ]; then
     apply_options
+    # For Edge1 Tools' logs switch: what the card says, and that there is a card.
+    setprop sys.edge1.logs "$LOGS_ON"
     # logs=0: the clock limits are all there is to do. No logs, no snapshots, no
     # thermal lines, no reboot on a boot that does not complete - the build is
     # trusted. The partition stays mounted, read-only, for Edge1 Tools' changes to

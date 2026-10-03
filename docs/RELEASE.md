@@ -34,6 +34,12 @@ their TV box, what is done, and the order the rest goes in.
 * **Sound settings:** Settings > Sound & display (Edge1 Tools): media volume, a test
   sound, the output in use. The volume starts at the top, so the TV's remote sets the
   loudness - it started at 2-3 of 15 before, which was near silence over HDMI.
+* **Edge1 Tools** in Material 3: performance modes (the six of edge1-options.txt,
+  applied at once by the root helper edge1-ctl), the overlay, sound, launcher, the
+  bundled apps, and the logs switch.
+* **Logs off:** logs=0 in edge1-options.txt (or the switch in Edge1 Tools) and
+  nothing is written to the card at all - the userdebug build stops being a
+  bring-up recorder without a rebuild.
 
 ## Left, in order
 

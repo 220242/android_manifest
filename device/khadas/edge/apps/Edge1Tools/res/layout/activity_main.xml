@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Edge1 Tools: one column of Material 3 cards, inside the TV's safe area. -->
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/scroll"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/m3_surface"
+    android:fillViewport="true"
+    android:scrollbars="none">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingStart="@dimen/screen_margin_h"
+        android:paddingEnd="@dimen/screen_margin_h"
+        android:paddingTop="@dimen/screen_margin_v"
+        android:paddingBottom="@dimen/screen_margin_v">
+
+        <TextView
+            style="@style/Text.Headline"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/app_name" />
+        <TextView
+            android:id="@+id/status"
+            style="@style/Text.Body"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:fontFeatureSettings="tnum" />
+
+        <!-- Clock modes -->
+        <LinearLayout style="@style/Edge1.Card">
+            <TextView
+                style="@style/Edge1.CardTitle"
+                android:drawableStart="@drawable/ic_speed"
+                android:text="@string/perf_title" />
+            <TextView
+                style="@style/Text.Body"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/perf_intro" />
+            <LinearLayout
+                android:id="@+id/preset_rows"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical" />
+            <TextView
+                android:id="@+id/perf_now"
+                style="@style/Text.Body"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:fontFeatureSettings="tnum" />
+        </LinearLayout>
+
+        <!-- Performance overlay -->
+        <LinearLayout style="@style/Edge1.Card">
+            <TextView
+                style="@style/Edge1.CardTitle"
+                android:drawableStart="@drawable/ic_chart"
+                android:text="@string/hud_title" />
+            <include android:id="@+id/row_hud" layout="@layout/row_switch" />
+            <TextView
+                style="@style/Text.Label"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="18dp"
+                android:text="@string/hud_corner" />
+            <LinearLayout
+                android:id="@+id/corner_group"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:orientation="horizontal" />
+            <include android:id="@+id/row_autostart" layout="@layout/row_switch" />
+            <TextView
+                android:id="@+id/notice"
+                style="@style/Text.Body"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/tile_gap"
+                android:background="@drawable/bg_notice"
+                android:padding="16dp"
+                android:textColor="@color/m3_on_error_container"
+                android:visibility="gone" />
+        </LinearLayout>
+
+        <!-- Sound and display -->
+        <LinearLayout style="@style/Edge1.Card">
+            <TextView
+                style="@style/Edge1.CardTitle"
+                android:drawableStart="@drawable/ic_volume"
+                android:text="@string/sound_card_title" />
+            <include android:id="@+id/row_sound" layout="@layout/row_nav" />
+            <include android:id="@+id/row_display" layout="@layout/row_nav" />
+        </LinearLayout>
+
+        <!-- Launcher -->
+        <LinearLayout style="@style/Edge1.Card">
+            <TextView
+                style="@style/Edge1.CardTitle"
+                android:drawableStart="@drawable/ic_home"
+                android:text="@string/launcher_title" />
+            <include android:id="@+id/row_launcher" layout="@layout/row_nav" />
+        </LinearLayout>
+
+        <!-- Logs on the card (debuggable builds that boot from it) -->
+        <LinearLayout
+            android:id="@+id/card_logs"
+            style="@style/Edge1.Card">
+            <TextView
+                style="@style/Edge1.CardTitle"
+                android:drawableStart="@drawable/ic_logs"
+                android:text="@string/logs_title" />
+            <include android:id="@+id/row_logs" layout="@layout/row_switch" />
+            <include android:id="@+id/row_logs_clear" layout="@layout/row_nav" />
+        </LinearLayout>
+
+        <!-- Bundled apps -->
+        <LinearLayout style="@style/Edge1.Card">
+            <TextView
+                style="@style/Edge1.CardTitle"
+                android:drawableStart="@drawable/ic_apps"
+                android:text="@string/bundled_title" />
+            <TextView
+                android:id="@+id/apps_note"
+                style="@style/Text.Body"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
+            <LinearLayout
+                android:id="@+id/app_list"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical" />
+        </LinearLayout>
+    </LinearLayout>
+</ScrollView>

@@ -9,6 +9,7 @@ import android.content.SharedPreferences;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageInstaller;
 import android.content.pm.PackageManager;
+import android.graphics.drawable.Drawable;
 import android.util.Log;
 
 import java.io.File;
@@ -48,13 +49,16 @@ final class Preinstaller {
         final File apk;
         final String pkg;
         final CharSequence label;
+        final Drawable icon;
         final String versionName;
         final long versionCode;
 
-        Offer(File apk, String pkg, CharSequence label, String versionName, long versionCode) {
+        Offer(File apk, String pkg, CharSequence label, Drawable icon, String versionName,
+                long versionCode) {
             this.apk = apk;
             this.pkg = pkg;
             this.label = label;
+            this.icon = icon;
             this.versionName = versionName == null ? "" : versionName;
             this.versionCode = versionCode;
         }
@@ -69,7 +73,7 @@ final class Preinstaller {
         return apks;
     }
 
-    /** Every app on offer, in file-name order. Reads each APK's manifest: call off the UI thread. */
+    /** Every app on offer, in file-name order. Reads each APK's manifest and icon: call off the UI thread. */
     static List<Offer> offers(Context context) {
         PackageManager pm = context.getPackageManager();
         List<String> fetched = confAll("fetched");
@@ -83,7 +87,7 @@ final class Preinstaller {
             info.applicationInfo.sourceDir = apk.getPath();
             info.applicationInfo.publicSourceDir = apk.getPath();
             Offer offer = new Offer(apk, info.packageName, info.applicationInfo.loadLabel(pm),
-                    info.versionName, info.getLongVersionCode());
+                    info.applicationInfo.loadIcon(pm), info.versionName, info.getLongVersionCode());
             Offer prev = chosen.get(offer.pkg);
             if (prev == null || preferred(offer, prev, fetched)) chosen.put(offer.pkg, offer);
         }

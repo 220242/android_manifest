@@ -112,6 +112,7 @@ not reachable from it.
 | 19 | resets at different moments every boot: ~3s after the first boot completed, and on opening Edge1 Tools in the second; 40-57C; the ramoops region came back readable but with bit errors on every line - a hardware reset (unrefreshed DRAM), not a panic. Also: the PCIe controller stuck in deferred probe (its PHY was a module) and re-probed whenever any device bound | A log per boot (`boot-NNNNN`, ten kept, `boots.txt`, `alive.txt`, each boot's ramoops saved into its own folder by the next); `edge1-options.txt` on EDGE1BOOT with CPU/GPU clock limits, shipped at A72 1416MHz / GPU 600MHz as a power test; core rail voltages and GPU clock in the thermal line; PCIe PHY built in. Owner: no IR remote (driver not built). Toward a release build: SELinux rules for every non-bootwatch denial of cards 18-19 (bootwatch permissive + unaudited), checked offline with `build/dev/check-sepolicy.sh`; A2DP (the BT audio provider's VINTF fragment); exFAT + USB 3 disks; zram; standby without suspend; adb needs authorization; the builder's language/time zone; private signing keys (dev-keys) - docs/RELEASE.md |
 | 20 | first build stopped at the module probe (a false sepolicy duplicate, fixed); the second came back with edge1-boot.log (`booti`, `edge1_prev=none`), a ramoops region cleared as by a power cut, the default edge1-options.txt, and **no edge1-logs** - Android apparently never got as far as its log recorder. The owner: **a black screen from the start, no "android" text** - so not even the kernel console came up, i.e. the kernel stopped before the display driver (~1.1s), where the PCIe probe runs. Power: a **Baseus 100W GaN power bank** (USB-C PD) | The PCIe controller out of the kernel: building its PHY in was the build's one change that runs early in the kernel and can hang it (mainline's RK3399 PCIe PHY is what Armbian patches; the slot is empty). The bootwatch itself was run under mksh, Android's shell, and works. Bundled apps: offered one by one in Edge1 Tools, installed only on request |
 | 21 | **Android up again**: boot completed at 111s, ran 833s with the power-test clocks (A72 1416MHz, GPU 600MHz) and no reset - one boot in `boots.txt`; SmartTube played. `video.txt` exactly as planned: rkvdec `S264` up to 4096x2560 and `VP9F` 4096x2304, hantro `MG2S` 1920x1088 and `VP8F` 3840x2160, `/dev/media0` hantro, `/dev/media1` rkvdec. The owner could not tell whether there was sound, and an Xbox pad has no volume keys: the HAL opened ALSA card 0 36 times, so it played - at **media volume 2 of 15** (`volume_changed` in the logcat), about -40 dB | `ro.config.media_vol_default=15`, and the TV volume curve for "Speaker" (the HDMI output). **Settings > Sound & display**: Edge1 Tools' `SoundActivity` handles `com.android.tv.settings.SOUND`, so TvSettings lists it on its main screen - volume -/+, a left/right test tone, where the sound goes, and a button to TvSettings' Display & Sound (which Device Preferences hides once a Sound handler exists). Bootwatch: `audio.txt` (ALSA state, `dumpsys audio`, `dumpsys media.audio_flinger`) |
+| 22 | Sound at 15 of 15 on the HDMI "speaker"; Settings' new **Sound & display** entry opened SoundActivity, and TvSettings' Display & Sound twice. 593s, no reset (the power-test clocks); the session ended in a restart chosen in Settings, after which no boot-00002 and an edge1-boot.log still from the cold start - either the card was pulled, or the warm reboot never reached boot.scr (ask). **com.android.bluetooth ran in the zygote domain**: `seapp_context_lookup: No match ... seinfo default`, as on card 21 - since the build signs with its own keys (card 18, test keys: `bluetooth` domain) | Bluetooth: no cause found in the sources (Soong signs Bluetooth.apk with `<keys>/bluetooth`, keys.conf's @BLUETOOTH is the same file); `packages.txt` now has each package's signature hash and local-config prints the keys' - AOSP's test bluetooth key is `d77294ce`. **logs=0** in edge1-options.txt stops every write to the card: boot.scr reads it with `env import -t -r ... logs` (tested on the 2022.07 sandbox), the bootwatch only applies the clocks and leaves the partition read-only. **edge1-ctl** (vendor, root, own domain): Edge1 Tools' modes and logs switch, through sys.edge1.ctl / persist.sys.edge1.perf and init.edge1.ctl.rc on /product; it writes the picked mode into the card's file. **Edge1 Tools in Material 3** (platform widgets, M3 dark scheme, focus ring), runs as the system user; the six modes, overlay, sound, launcher, logs switch, bundled apps |
 
 ## Lessons that cost a card each (check these first next time)
 
@@ -202,18 +203,16 @@ not reachable from it.
 
 ## Open, in rough order
 
-* Card 22 (sound): the first boot starts at media volume 15 of 15 - a fresh flash
-  clears /data, a kept /data keeps the old level. Settings shows "Sound & display"
-  ("Звук и экран") on its main screen: -/+ change the level, the test sound plays left
-  then right, and the bottom button opens Display & Sound. `audio.txt` in each
-  snapshot: `dumpsys audio` has the stream volumes. If still silent at 15,
-  `audio.txt`'s `hw_params`/`status` while something plays say whether ALSA runs.
-  Power: card 21 ran 833s with the test clocks and did not reset, from the Baseus
-  power bank. Next: a longer session the same way; then the two lines in
-  edge1-options.txt commented out (full clocks) - if resets come back, it is power at
-  the top OPPs (try a mains USB-C PD charger, 12V/15V). Each reset's `pstore/` and the
-  last `thermal` lines (rails, clocks) say more. Not yet tried by the owner: A2DP
-  headphones, an exFAT stick, standby with the power key.
+* Card 23: Edge1 Tools' new screen - a mode picked there changes the clocks at
+  once (the header shows them) and the active block in EDGE1BOOT:edge1-options.txt;
+  the logs switch writes logs=0 and the next boot leaves the card alone (no new
+  boot folder, edge1-boot.log unchanged). `packages.txt`: Bluetooth's signature hash
+  against the report's "keys: bluetooth signature hash" - equal means the signing
+  is right and mac_permissions is not; d77294ce means it was signed with AOSP's
+  test key. Ask whether the restart from Settings on card 22 came back.
+  Power: card 21 ran 833s and card 22 593s at the test clocks without a reset, from
+  the Baseus power bank. Next: full speed (the mode in Edge1 Tools), and a longer
+  session; resets coming back at full speed mean power at the top OPPs.
 * Hardware video decode: docs/HW_DECODE.md. Phase 1 confirmed on card 21 (both
   decoders and their formats in `video.txt`); next the FFmpeg Codec2 service
   (software), then v4l2-request for H.264 and VP9. HEVC needs a newer kernel.

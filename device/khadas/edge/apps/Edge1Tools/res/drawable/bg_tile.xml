@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A selectable surface. Focused: the remote is on it - a bright ring, plain from
+     across the room. Activated: it is the chosen one (a mode, a corner) - M3's
+     secondary container. Both at once: both. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_focused="true" android:state_activated="true">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/m3_secondary_container" />
+            <stroke android:width="@dimen/focus_ring" android:color="@color/m3_focus_ring" />
+            <corners android:radius="@dimen/corner_tile" />
+        </shape>
+    </item>
+    <item android:state_focused="true">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/m3_surface_container_highest" />
+            <stroke android:width="@dimen/focus_ring" android:color="@color/m3_focus_ring" />
+            <corners android:radius="@dimen/corner_tile" />
+        </shape>
+    </item>
+    <item android:state_activated="true">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/m3_secondary_container" />
+            <corners android:radius="@dimen/corner_tile" />
+        </shape>
+    </item>
+    <item android:state_pressed="true">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/m3_surface_container_highest" />
+            <corners android:radius="@dimen/corner_tile" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@color/m3_surface_container_high" />
+            <corners android:radius="@dimen/corner_tile" />
+        </shape>
+    </item>
+</selector>

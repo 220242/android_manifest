@@ -1,6 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  The system user (as TvSettings): the performance modes and the logs switch are
+  properties only it may set (sys.*, persist.sys.*), which init hands to the root
+  helper bin/edge1-ctl.sh (init/init.edge1.ctl.rc). Platform-signed, on /system_ext.
+-->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="org.edge1.tools">
+    package="org.edge1.tools"
+    android:sharedUserId="android.uid.system">
 
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
@@ -19,7 +25,7 @@
         android:label="@string/app_name"
         android:icon="@drawable/icon"
         android:banner="@drawable/banner"
-        android:theme="@android:style/Theme.DeviceDefault"
+        android:theme="@style/Theme.Edge1"
         android:allowBackup="false">
 
         <activity

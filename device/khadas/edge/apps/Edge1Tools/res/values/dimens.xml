@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- TV safe area: 5% of a 960x540dp screen. -->
+    <dimen name="screen_margin_h">48dp</dimen>
+    <dimen name="screen_margin_v">27dp</dimen>
+    <dimen name="card_padding">24dp</dimen>
+    <dimen name="card_gap">16dp</dimen>
+    <dimen name="tile_gap">12dp</dimen>
+    <dimen name="corner_card">24dp</dimen>
+    <dimen name="corner_tile">16dp</dimen>
+    <dimen name="corner_pill">28dp</dimen>
+    <dimen name="focus_ring">3dp</dimen>
+</resources>

@@ -1,39 +1,93 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Edge1 Tools</string>
-    <string name="hud_on">Performance overlay: ON</string>
-    <string name="hud_off">Performance overlay: OFF</string>
-    <string name="hud_position">Overlay position: %1$s</string>
-    <string name="hud_autostart_on">Show overlay after boot: ON</string>
-    <string name="hud_autostart_off">Show overlay after boot: OFF</string>
-    <string name="bundled_title">Apps on this image - install the ones you want:</string>
-    <string name="bundled_none">No apps on this image.</string>
-    <string name="pos_top_right">top right</string>
-    <string name="pos_top_left">top left</string>
-    <string name="pos_bottom_left">bottom left</string>
-    <string name="pos_bottom_right">bottom right</string>
+    <string name="status">A72 %1$s · A53 %2$s · GPU %3$s MHz now · %4$s</string>
+
+    <!-- Clock modes: the same six as EDGE1BOOT:edge1-options.txt. -->
+    <string name="perf_title">Performance mode</string>
+    <string name="perf_intro">Upper limits for the processor and graphics clocks. A mode applies at once and is kept: on the card it is written into edge1-options.txt, as if edited on a PC.</string>
+    <string name="perf_values">A72 %1$d · A53 %2$d · GPU %3$d</string>
+    <string name="perf_now">Running now: A72 up to %1$d, A53 up to %2$d, GPU up to %3$d MHz.</string>
+    <string name="perf_now_own">Running now: own limits - A72 up to %1$d, A53 up to %2$d, GPU up to %3$d MHz.</string>
+    <string name="perf_failed">Could not set the mode: %1$s</string>
+    <string name="preset_power">Power test</string>
+    <string name="preset_power_text">The top steps off. Card 21 ran without restarts in it.</string>
+    <string name="preset_full">Full speed</string>
+    <string name="preset_full_text">As designed. Needs a good USB-C PD supply.</string>
+    <string name="preset_video">Video</string>
+    <string name="preset_video_text">Software decoding wants the whole CPU; 600 MHz is plenty for the menus.</string>
+    <string name="preset_games">Games</string>
+    <string name="preset_games_text">Graphics at the top, fast cores a step lower.</string>
+    <string name="preset_quiet">Quiet and cool</string>
+    <string name="preset_quiet_text">Less heat and fan; 4K video will stutter.</string>
+    <string name="preset_minimal">Minimal</string>
+    <string name="preset_minimal_text">For testing: restarts even here are not about load.</string>
+
+    <!-- Performance overlay -->
+    <string name="hud_title">Performance overlay</string>
+    <string name="hud_show">Show the overlay</string>
+    <string name="hud_show_text">Frame rate, CPU cores, clocks and temperatures on top of every app.</string>
+    <string name="hud_corner">Corner</string>
+    <string name="pos_top_right">Top right</string>
+    <string name="pos_top_left">Top left</string>
+    <string name="pos_bottom_left">Bottom left</string>
+    <string name="pos_bottom_right">Bottom right</string>
+    <string name="hud_autostart">Show after boot</string>
+    <string name="hud_autostart_text">30 seconds after the boot. Turns itself off if the board restarts twice in a row after it.</string>
+    <string name="hud_autostart_tripped">Overlay autostart was turned off: the board restarted twice in a row within three minutes of showing it.</string>
     <string name="hud_channel">Performance overlay</string>
     <string name="hud_notification">The performance overlay is on</string>
-    <string name="hud_autostart_tripped">Overlay autostart was turned off: the board restarted twice in a row within three minutes of showing it.</string>
-    <string name="launcher">Default launcher: %1$s</string>
-    <string name="app_install">Install %1$s %2$s (%3$s)</string>
-    <string name="app_update">Update %1$s to %2$s</string>
-    <string name="app_installed">%1$s %2$s - installed</string>
-    <string name="app_installing">Installing %1$s…</string>
-    <string name="app_failed">%1$s - failed (%2$s), press to retry</string>
+
+    <!-- Sound and display -->
+    <string name="sound_card_title">Sound and display</string>
+    <string name="sound_row">Sound</string>
+    <string name="sound_row_text">Volume %1$d of %2$d · test sound · output</string>
+    <string name="display_row">Display &amp; sound (system)</string>
+    <string name="display_row_text">Resolution, HDR, system sounds, surround sound</string>
+
+    <!-- Launcher -->
+    <string name="launcher_title">Default launcher</string>
+    <string name="launcher_text">Press to switch to the next installed one</string>
+
+    <!-- Logs on the card -->
+    <string name="logs_title">Boot logs</string>
+    <string name="logs_switch">Write logs to the card</string>
+    <string name="logs_on_text">Every boot writes logcat, dmesg and state snapshots to edge1-logs, and the kernel\'s last words after a reset. Turn it off once the build needs no more debugging.</string>
+    <string name="logs_off_text">Off: nothing is written to the card - as logs=0 in edge1-options.txt. The performance mode still applies.</string>
+    <string name="logs_clear">Delete the logs from the card</string>
+    <string name="logs_clear_text">Removes the edge1-logs folder.</string>
+    <string name="logs_clear_first">Turn the logs off first.</string>
+    <string name="logs_clear_confirm">The edge1-logs folder on the card will be deleted. This cannot be undone.</string>
+    <string name="logs_clear_title">Delete the logs?</string>
+    <string name="delete">Delete</string>
+    <string name="cancel">Cancel</string>
+    <string name="logs_cleared">Logs deleted</string>
+
+    <!-- Bundled apps -->
+    <string name="bundled_title">Apps on this image</string>
+    <string name="bundled_note">Install the ones you want. They are ordinary apps afterwards: updated from their store, removed in Settings.</string>
+    <string name="bundled_none">No apps on this image.</string>
+    <string name="app_summary">%1$s · %2$s</string>
+    <string name="app_failed_text">Failed: %1$s</string>
+    <string name="action_install">Install</string>
+    <string name="action_update">Update</string>
+    <string name="action_installed">Installed</string>
+    <string name="action_installing">Installing…</string>
+    <string name="action_retry">Retry</string>
+
+    <!-- The sound screen -->
     <string name="sound_title">Sound</string>
-    <string name="sound_level">Volume: %1$d of %2$d</string>
-    <string name="sound_level_off">Volume: off (0 of %1$d)</string>
-    <string name="sound_fixed">Volume: fixed by the system</string>
-    <string name="sound_quieter">−  Quieter</string>
-    <string name="sound_louder">Louder  +</string>
-    <string name="sound_test">Test sound: left speaker, then right</string>
+    <string name="sound_volume">Volume</string>
+    <string name="sound_level_of">of %1$d</string>
+    <string name="sound_level_off">of %1$d · off</string>
+    <string name="sound_fixed">set by the system</string>
+    <string name="sound_quieter">Quieter</string>
+    <string name="sound_louder">Louder</string>
+    <string name="sound_test">Test sound</string>
     <string name="sound_output">Sound goes to: %1$s</string>
     <string name="sound_output_hdmi">HDMI (the TV)</string>
     <string name="sound_output_none">nowhere</string>
-    <string name="sound_note">This is the level the box sends over HDMI; at the top it is the full signal and the TV\'s remote sets how loud it is. Bluetooth headphones have a level of their own, set here while they play.</string>
-    <string name="sound_display_settings">Display &amp; sound: resolution, HDR, system sounds, surround…</string>
-    <string name="sound_open">Sound and volume</string>
+    <string name="sound_note">This is the level the box sends over HDMI; at the top it is the full signal and the TV\'s remote sets how loud it is. The test plays on the left speaker, then the right. Bluetooth headphones have a level of their own, set here while they play.</string>
     <!-- TvSettings reads these two and drawable/sound_icon by name for the Sound
          entry on its main screen (SoundActivity says more). -->
     <string name="sound_pref_title">Sound &amp; display</string>

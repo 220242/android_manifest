@@ -1,39 +1,86 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Edge1 Tools</string>
-    <string name="hud_on">Оверлей производительности: ВКЛ</string>
-    <string name="hud_off">Оверлей производительности: ВЫКЛ</string>
-    <string name="hud_position">Положение оверлея: %1$s</string>
-    <string name="hud_autostart_on">Показывать после загрузки: ВКЛ</string>
-    <string name="hud_autostart_off">Показывать после загрузки: ВЫКЛ</string>
-    <string name="bundled_title">Приложения в образе - установите нужные:</string>
-    <string name="bundled_none">В образе нет приложений.</string>
-    <string name="pos_top_right">справа сверху</string>
-    <string name="pos_top_left">слева сверху</string>
-    <string name="pos_bottom_left">слева снизу</string>
-    <string name="pos_bottom_right">справа снизу</string>
+    <string name="status">Сейчас A72 %1$s · A53 %2$s · GPU %3$s МГц · %4$s</string>
+
+    <string name="perf_title">Режим работы</string>
+    <string name="perf_intro">Верхние пределы частот процессора и графики. Режим включается сразу и сохраняется: на карте он записывается в edge1-options.txt, как при правке на ПК.</string>
+    <string name="perf_values">A72 %1$d · A53 %2$d · GPU %3$d</string>
+    <string name="perf_now">Сейчас: A72 до %1$d, A53 до %2$d, GPU до %3$d МГц.</string>
+    <string name="perf_now_own">Сейчас свои пределы: A72 до %1$d, A53 до %2$d, GPU до %3$d МГц.</string>
+    <string name="perf_failed">Режим не установлен: %1$s</string>
+    <string name="preset_power">Тест питания</string>
+    <string name="preset_power_text">Верхние ступени выключены. На нём карта 21 работала без перезагрузок.</string>
+    <string name="preset_full">Полная скорость</string>
+    <string name="preset_full_text">Как задумано. Нужен хороший блок питания USB-C PD.</string>
+    <string name="preset_video">Видео</string>
+    <string name="preset_video_text">Программному декодированию нужен весь процессор; меню хватает 600 МГц.</string>
+    <string name="preset_games">Игры</string>
+    <string name="preset_games_text">Графика на максимуме, быстрые ядра на ступень ниже.</string>
+    <string name="preset_quiet">Тихий и холодный</string>
+    <string name="preset_quiet_text">Меньше нагрев и шум; 4K-видео будет дёргаться.</string>
+    <string name="preset_minimal">Минимальный</string>
+    <string name="preset_minimal_text">Для проверки: сбои даже здесь - не от нагрузки.</string>
+
+    <string name="hud_title">Оверлей производительности</string>
+    <string name="hud_show">Показывать оверлей</string>
+    <string name="hud_show_text">Частота кадров, ядра процессора, частоты и температуры поверх любого приложения.</string>
+    <string name="hud_corner">Угол экрана</string>
+    <string name="pos_top_right">Справа вверху</string>
+    <string name="pos_top_left">Слева вверху</string>
+    <string name="pos_bottom_left">Слева внизу</string>
+    <string name="pos_bottom_right">Справа внизу</string>
+    <string name="hud_autostart">Показывать после загрузки</string>
+    <string name="hud_autostart_text">Через 30 секунд после загрузки. Выключится сам, если плата дважды подряд перезагрузится после него.</string>
+    <string name="hud_autostart_tripped">Автозапуск оверлея выключен: плата дважды подряд перезагрузилась в первые три минуты после его показа.</string>
     <string name="hud_channel">Оверлей производительности</string>
     <string name="hud_notification">Оверлей производительности включён</string>
-    <string name="hud_autostart_tripped">Автозапуск оверлея выключен: плата дважды подряд перезагрузилась в первые три минуты после его показа.</string>
-    <string name="launcher">Лаунчер по умолчанию: %1$s</string>
-    <string name="app_install">Установить %1$s %2$s (%3$s)</string>
-    <string name="app_update">Обновить %1$s до %2$s</string>
-    <string name="app_installed">%1$s %2$s - установлено</string>
-    <string name="app_installing">Устанавливается %1$s…</string>
-    <string name="app_failed">%1$s - ошибка (%2$s), нажмите ещё раз</string>
+
+    <string name="sound_card_title">Звук и экран</string>
+    <string name="sound_row">Звук</string>
+    <string name="sound_row_text">Громкость %1$d из %2$d · проверка звука · вывод</string>
+    <string name="display_row">Экран и звук (система)</string>
+    <string name="display_row_text">Разрешение, HDR, системные звуки, объёмный звук</string>
+
+    <string name="launcher_title">Лаунчер по умолчанию</string>
+    <string name="launcher_text">Нажмите, чтобы выбрать следующий установленный</string>
+
+    <string name="logs_title">Логи загрузки</string>
+    <string name="logs_switch">Записывать логи на карту</string>
+    <string name="logs_on_text">Каждая загрузка пишет в edge1-logs logcat, dmesg и снимки состояния, а после сбоя - последние слова ядра. Выключите, когда сборка больше не требует отладки.</string>
+    <string name="logs_off_text">Выключено: на карту не пишется ничего - как logs=0 в edge1-options.txt. Режим работы продолжает действовать.</string>
+    <string name="logs_clear">Удалить логи с карты</string>
+    <string name="logs_clear_text">Удаляет папку edge1-logs.</string>
+    <string name="logs_clear_first">Сначала выключите логи.</string>
+    <string name="logs_clear_confirm">Папка edge1-logs на карте будет удалена. Это нельзя отменить.</string>
+    <string name="logs_clear_title">Удалить логи?</string>
+    <string name="delete">Удалить</string>
+    <string name="cancel">Отмена</string>
+    <string name="logs_cleared">Логи удалены</string>
+
+    <string name="bundled_title">Приложения в образе</string>
+    <string name="bundled_note">Установите нужные. Дальше это обычные приложения: обновляются из своего магазина, удаляются в Настройках.</string>
+    <string name="bundled_none">В образе нет приложений.</string>
+    <string name="app_summary">%1$s · %2$s</string>
+    <string name="app_failed_text">Ошибка: %1$s</string>
+    <string name="action_install">Установить</string>
+    <string name="action_update">Обновить</string>
+    <string name="action_installed">Установлено</string>
+    <string name="action_installing">Установка…</string>
+    <string name="action_retry">Повторить</string>
+
     <string name="sound_title">Звук</string>
-    <string name="sound_level">Громкость: %1$d из %2$d</string>
-    <string name="sound_level_off">Громкость: выключена (0 из %1$d)</string>
-    <string name="sound_fixed">Громкость: задана системой</string>
-    <string name="sound_quieter">−  Тише</string>
-    <string name="sound_louder">Громче  +</string>
-    <string name="sound_test">Проверить звук: левый, затем правый динамик</string>
+    <string name="sound_volume">Громкость</string>
+    <string name="sound_level_of">из %1$d</string>
+    <string name="sound_level_off">из %1$d · выключен</string>
+    <string name="sound_fixed">задана системой</string>
+    <string name="sound_quieter">Тише</string>
+    <string name="sound_louder">Громче</string>
+    <string name="sound_test">Проверить звук</string>
     <string name="sound_output">Звук идёт на: %1$s</string>
     <string name="sound_output_hdmi">HDMI (телевизор)</string>
     <string name="sound_output_none">никуда</string>
-    <string name="sound_note">Это уровень, который приставка отдаёт по HDMI; на максимуме сигнал полный, а громкость задаёт пульт телевизора. У Bluetooth-наушников свой уровень - его меняют здесь, пока они играют.</string>
-    <string name="sound_display_settings">Экран и звук: разрешение, HDR, системные звуки, объёмный звук…</string>
-    <string name="sound_open">Звук и громкость</string>
+    <string name="sound_note">Это уровень, который приставка отдаёт по HDMI; на максимуме сигнал полный, а громкость задаёт пульт телевизора. Проверка звучит в левом динамике, потом в правом. У Bluetooth-наушников свой уровень - его меняют здесь, пока они играют.</string>
     <string name="sound_pref_title">Звук и экран</string>
     <string name="sound_pref_summary">Громкость, проверка звука, разрешение</string>
 </resources>

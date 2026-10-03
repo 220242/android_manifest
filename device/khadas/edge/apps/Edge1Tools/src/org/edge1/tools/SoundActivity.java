@@ -14,12 +14,8 @@ import android.media.AudioTrack;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.util.Log;
-import android.util.TypedValue;
-import android.view.View;
 import android.widget.Button;
-import android.widget.LinearLayout;
 import android.widget.ProgressBar;
-import android.widget.ScrollView;
 import android.widget.TextView;
 
 import java.util.List;
@@ -31,7 +27,7 @@ import java.util.List;
  * com.android.tv.settings.SOUND (MainFragment.updateSoundSettings), with this app's
  * sound_pref_title, sound_pref_summary and sound_icon. Device Preferences then hides
  * its own "Display & Sound" entry (DevicePrefFragment.updateSounds) - resolution, HDR,
- * system sounds, surround - so the last button here opens that screen.
+ * system sounds, surround - so the last row here opens that screen.
  *
  * Why the box needs it: the HDMI output is the audio HAL's "Speaker"
  * (audio/audio_policy_configuration.xml says why), so Android's media volume scales
@@ -50,9 +46,9 @@ public class SoundActivity extends Activity {
 
     private AudioManager audio;
     private TextView level;
+    private TextView levelOf;
     private ProgressBar bar;
     private TextView output;
-    private Button louder;
     private AudioTrack track;
 
     private final BroadcastReceiver changed = new BroadcastReceiver() {
@@ -66,37 +62,26 @@ public class SoundActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         audio = getSystemService(AudioManager.class);
-        int pad = dp(32);
-        LinearLayout list = new LinearLayout(this);
-        list.setOrientation(LinearLayout.VERTICAL);
-        list.setPadding(pad, pad, pad, pad);
-
-        TextView title = text(list, 28);
-        title.setText(R.string.sound_title);
-        title.setPadding(0, 0, 0, 0);
-
-        level = text(list, 20);
-        bar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
-        bar.setFocusable(false);
-        list.addView(bar, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(24)));
+        setContentView(R.layout.activity_sound);
+        level = findViewById(R.id.level);
+        levelOf = findViewById(R.id.level_of);
+        bar = findViewById(R.id.bar);
+        output = findViewById(R.id.output);
 
         // Two buttons rather than a seek bar: plain to see which one has the focus,
         // and left/right moves between them the way it does everywhere else.
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        list.addView(row);
-        button(row, R.string.sound_quieter, v -> step(-1));
-        louder = button(row, R.string.sound_louder, v -> step(+1));
-
-        button(list, R.string.sound_test, v -> playTest());
-        output = text(list, 18);
-        text(list, 16).setText(R.string.sound_note);
-        button(list, R.string.sound_display_settings, v -> openDisplaySound());
-
-        ScrollView scroll = new ScrollView(this);
-        scroll.addView(list);
-        setContentView(scroll);
+        Button quieter = findViewById(R.id.quieter);
+        Button louder = findViewById(R.id.louder);
+        Button test = findViewById(R.id.test);
+        quieter.setOnClickListener(v -> step(-1));
+        louder.setOnClickListener(v -> step(+1));
+        test.setOnClickListener(v -> playTest());
+        Ui.zoomOnFocus(quieter);
+        Ui.zoomOnFocus(louder);
+        Ui.zoomOnFocus(test);
+        Ui.row(findViewById(R.id.row_display), getString(R.string.display_row),
+                getString(R.string.display_row_text), R.drawable.ic_tv,
+                v -> openDisplaySound(this));
         louder.requestFocus();
     }
 
@@ -126,12 +111,13 @@ public class SoundActivity extends Activity {
     private void refresh() {
         int max = audio.getStreamMaxVolume(STREAM);
         int now = audio.getStreamVolume(STREAM);
+        level.setText(String.valueOf(now));
         if (audio.isVolumeFixed()) {
-            level.setText(R.string.sound_fixed);
+            levelOf.setText(R.string.sound_fixed);
         } else if (now == 0 || audio.isStreamMute(STREAM)) {
-            level.setText(getString(R.string.sound_level_off, max));
+            levelOf.setText(getString(R.string.sound_level_off, max));
         } else {
-            level.setText(getString(R.string.sound_level, now, max));
+            levelOf.setText(getString(R.string.sound_level_of, max));
         }
         bar.setMax(max);
         bar.setProgress(now);
@@ -226,37 +212,15 @@ public class SoundActivity extends Activity {
         track = null;
     }
 
-    private void openDisplaySound() {
+    /** TvSettings' Display & Sound screen, which Device Preferences hides once this one exists. */
+    static void openDisplaySound(Activity from) {
         Intent intent = new Intent(Settings.ACTION_SOUND_SETTINGS).setClassName(
                 "com.android.tv.settings",
                 "com.android.tv.settings.device.displaysound.DisplaySoundActivity");
         try {
-            startActivity(intent);
+            from.startActivity(intent);
         } catch (ActivityNotFoundException e) {
             Log.w(TAG, "no TvSettings display & sound screen", e);
         }
-    }
-
-    private Button button(LinearLayout parent, int text, View.OnClickListener onClick) {
-        Button b = new Button(this);
-        b.setText(text);
-        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
-        b.setAllCaps(false);
-        b.setOnClickListener(onClick);
-        parent.addView(b);
-        return b;
-    }
-
-    private TextView text(LinearLayout parent, int sp) {
-        TextView t = new TextView(this);
-        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp);
-        t.setPadding(0, dp(16), 0, 0);
-        parent.addView(t);
-        return t;
-    }
-
-    private int dp(int v) {
-        return (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v,
-                getResources().getDisplayMetrics());
     }
 }

@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Material 3, drawn with the platform's own widgets: the colour scheme in colors.xml,
+  M3's shapes (24dp cards, 16dp tiles, pill buttons), its type scale a step up for a
+  TV seen from the sofa, and a focus ring on everything the remote can reach - the
+  part of Material that a D-pad needs most and a phone design leaves faint.
+-->
+<resources>
+    <style name="Theme.Edge1" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:colorPrimary">@color/m3_primary</item>
+        <item name="android:colorPrimaryDark">@color/m3_surface</item>
+        <item name="android:colorAccent">@color/m3_primary</item>
+        <item name="android:colorControlActivated">@color/m3_primary</item>
+        <item name="android:colorControlNormal">@color/m3_on_surface_variant</item>
+        <item name="android:colorBackground">@color/m3_surface</item>
+        <item name="android:windowBackground">@color/m3_surface</item>
+        <item name="android:statusBarColor">@color/m3_surface</item>
+        <item name="android:navigationBarColor">@color/m3_surface</item>
+        <item name="android:textColorPrimary">@color/m3_on_surface</item>
+        <item name="android:textColorSecondary">@color/m3_on_surface_variant</item>
+        <!-- The drawables below draw their own focus state. -->
+        <item name="android:defaultFocusHighlightEnabled">false</item>
+        <item name="android:alertDialogTheme">@style/Theme.Edge1.Dialog</item>
+    </style>
+
+    <style name="Theme.Edge1.Dialog" parent="@android:style/Theme.Material.Dialog.Alert">
+        <item name="android:colorPrimary">@color/m3_primary</item>
+        <item name="android:colorAccent">@color/m3_primary</item>
+        <item name="android:colorBackground">@color/m3_surface_container_high</item>
+        <item name="android:windowBackground">@drawable/bg_dialog</item>
+        <item name="android:textColorPrimary">@color/m3_on_surface</item>
+        <item name="android:textColorSecondary">@color/m3_on_surface_variant</item>
+        <item name="android:buttonBarButtonStyle">@style/Edge1.Button.Text</item>
+    </style>
+
+    <!-- Type scale (M3 headline/title/body/label), +4sp over the phone sizes. -->
+    <style name="Text.Headline">
+        <item name="android:textSize">32sp</item>
+        <item name="android:textColor">@color/m3_on_surface</item>
+        <item name="android:fontFamily">sans-serif</item>
+    </style>
+    <style name="Text.Display">
+        <item name="android:textSize">57sp</item>
+        <item name="android:textColor">@color/m3_on_surface</item>
+        <item name="android:fontFamily">sans-serif</item>
+    </style>
+    <style name="Text.Title">
+        <item name="android:textSize">22sp</item>
+        <item name="android:textColor">@color/m3_on_surface</item>
+        <item name="android:fontFamily">sans-serif</item>
+    </style>
+    <style name="Text.TitleSmall">
+        <item name="android:textSize">18sp</item>
+        <item name="android:textColor">@color/m3_on_surface</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+    </style>
+    <style name="Text.Body">
+        <item name="android:textSize">16sp</item>
+        <item name="android:textColor">@color/m3_on_surface_variant</item>
+        <item name="android:fontFamily">sans-serif</item>
+        <item name="android:lineSpacingMultiplier">1.15</item>
+    </style>
+    <style name="Text.Label">
+        <item name="android:textSize">15sp</item>
+        <item name="android:textColor">@color/m3_on_surface_variant</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:letterSpacing">0.01</item>
+    </style>
+
+    <!-- A section: M3 filled card. -->
+    <style name="Edge1.Card">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">@dimen/card_gap</item>
+        <item name="android:orientation">vertical</item>
+        <item name="android:padding">@dimen/card_padding</item>
+        <item name="android:background">@drawable/bg_card</item>
+    </style>
+    <style name="Edge1.CardTitle" parent="Text.Title">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:drawablePadding">14dp</item>
+        <item name="android:gravity">center_vertical</item>
+        <item name="android:layout_marginBottom">12dp</item>
+    </style>
+
+    <!-- Anything the remote can select: a list row, a mode, a segment. -->
+    <style name="Edge1.Tile">
+        <item name="android:background">@drawable/bg_tile</item>
+        <item name="android:focusable">true</item>
+        <item name="android:clickable">true</item>
+        <item name="android:paddingStart">20dp</item>
+        <item name="android:paddingEnd">20dp</item>
+        <item name="android:paddingTop">14dp</item>
+        <item name="android:paddingBottom">14dp</item>
+        <item name="android:minHeight">64dp</item>
+    </style>
+
+    <!-- Buttons: M3 filled, tonal and text, as pills. -->
+    <style name="Edge1.Button" parent="@android:style/Widget.Material.Button.Borderless">
+        <item name="android:textAllCaps">false</item>
+        <item name="android:textSize">17sp</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:minHeight">56dp</item>
+        <item name="android:minWidth">96dp</item>
+        <item name="android:paddingStart">28dp</item>
+        <item name="android:paddingEnd">28dp</item>
+        <item name="android:stateListAnimator">@null</item>
+        <item name="android:drawablePadding">10dp</item>
+    </style>
+    <style name="Edge1.Button.Filled">
+        <item name="android:background">@drawable/bg_button_filled</item>
+        <item name="android:textColor">@color/text_on_filled</item>
+        <item name="android:drawableTint">@color/text_on_filled</item>
+    </style>
+    <style name="Edge1.Button.Tonal">
+        <item name="android:background">@drawable/bg_button_tonal</item>
+        <item name="android:textColor">@color/text_on_tonal</item>
+        <item name="android:drawableTint">@color/text_on_tonal</item>
+    </style>
+    <style name="Edge1.Button.Text">
+        <item name="android:background">@drawable/bg_button_text</item>
+        <item name="android:textColor">@color/m3_primary</item>
+    </style>
+
+    <!-- M3 switch: 52x32 track, 24dp thumb on, 16dp off. -->
+    <style name="Edge1.Switch">
+        <item name="android:thumb">@drawable/switch_thumb</item>
+        <item name="android:track">@drawable/switch_track</item>
+        <item name="android:switchMinWidth">52dp</item>
+        <item name="android:showText">false</item>
+        <item name="android:focusable">false</item>
+        <item name="android:clickable">false</item>
+        <item name="android:background">@null</item>
+    </style>
+</resources>
