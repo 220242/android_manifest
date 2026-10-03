@@ -256,8 +256,8 @@ else
     echo "     script will not save the previous kernel's log)" >&2
 fi
 # Settings the owner can change on a PC between two boots; edge1-bootwatch reads
-# them at every boot (userdebug). In Russian, the owner's language: it is the one
-# file on the card meant to be edited by hand. Every mode sets all three limits, so
+# them at every boot (userdebug), boot.scr reads "logs". In Russian, the owner's
+# language: it is the one file on the card meant to be edited by hand. Every mode sets all three limits, so
 # the last uncommented mode in the file wins whole. The one on is the power test:
 # card 19 reset at random moments under load, at 40-57C, its ramoops bit-flipped
 # throughout - a hardware reset; card 21 ran 14 minutes at these clocks without one.
@@ -283,6 +283,13 @@ cat > "$WORK/edge1-options.txt" <<'EOF'
 # перед строками включённого и уберите # у строк нужного. Если включено
 # несколько, действует нижний: каждый режим задаёт все три предела.
 # Что применилось, видно в edge1-logs/boots.txt (options: ...).
+
+# --- Логи загрузки ------------------------------------------------------
+# logs=1: каждая загрузка пишет на карту отчёт для поиска неисправностей -
+# папку edge1-logs, edge1-boot.log и edge1-pstore.bin.
+# logs=0: на карту не пишется ничего - когда сборка проверена и логи больше
+# не нужны. Режимы ниже действуют и так. Переключается и в Edge1 Tools.
+logs=1
 
 # === Тест питания (включён сейчас) ======================================
 # A72 1416, A53 1416, GPU 600. Верхние ступени выключены - самые
@@ -376,7 +383,10 @@ Send the whole edge1-logs folder (zip it), with edge1-boot.log and edge1-pstore.
 
 edge1-options.txt is the one file here meant to be edited on a PC: settings read at
 every boot - CPU and GPU clock limits, with ready-made modes (power test, full speed,
-video, games, quiet, minimal). It says what each one does, in Russian.
+video, games, quiet, minimal), and "logs": logs=0 stops every write to this card
+(no edge1-logs, edge1-boot.log or edge1-pstore.bin) once the build needs no more
+debugging. It says what each line does, in Russian. Edge1 Tools on the box changes
+the same lines.
 
 Do not edit the other files on a PC; rebuild the image instead.
 EOF

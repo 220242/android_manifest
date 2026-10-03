@@ -1,0 +1,33 @@
+# edge1-ctl (bin/edge1-ctl.sh): Edge1 Tools' root helper, started by init on the
+# app's properties (init/init.edge1.ctl.rc). It sets the CPU and GPU clock limits
+# and, on a debuggable build, edits the card's EDGE1BOOT partition that
+# edge1-bootwatch mounted: edge1-options.txt, the edge1-nolog marker, edge1-logs.
+type edge1_ctl, domain;
+type edge1_ctl_exec, exec_type, vendor_file_type, file_type;
+
+init_daemon_domain(edge1_ctl)
+
+# The script, and the toybox commands it runs.
+allow edge1_ctl vendor_shell_exec:file rx_file_perms;
+allow edge1_ctl vendor_toolbox_exec:file rx_file_perms;
+
+# Its lines in the kernel log.
+allow edge1_ctl kmsg_device:chr_file w_file_perms;
+
+# The limits: cpufreq's scaling_max_freq for each cluster and the GPU's devfreq
+# max_freq (/sys/class/devfreq links into the GPU's platform node).
+allow edge1_ctl sysfs_devices_system_cpu:dir r_dir_perms;
+allow edge1_ctl sysfs_devices_system_cpu:file rw_file_perms;
+allow edge1_ctl sysfs_devfreq:dir r_dir_perms;
+allow edge1_ctl sysfs_devfreq:lnk_file read;
+allow edge1_ctl sysfs_gpu:dir r_dir_perms;
+allow edge1_ctl sysfs_gpu:file rw_file_perms;
+
+# The card's partition exists only where edge1-bootwatch runs.
+userdebug_or_eng(`
+  allow edge1_ctl mnt_vendor_file:dir r_dir_perms;
+  allow edge1_ctl vfat:dir create_dir_perms;
+  allow edge1_ctl vfat:file create_file_perms;
+  allow edge1_ctl vfat:filesystem remount;
+  allow edge1_ctl self:global_capability_class_set sys_admin;
+')

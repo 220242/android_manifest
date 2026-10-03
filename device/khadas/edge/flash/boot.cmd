@@ -56,10 +56,33 @@ if test "${devtype}" = "mmc"; then
 fi
 if test "${devtype}" = "nvme"; then setenv edge1_dev f8000000.pcie; fi
 
+# Load addresses (RK3399 DRAM starts at 0). The kernel on a 2MiB boundary so booti
+# does not have to move it; the ramdisk 128MiB above it, clear of the 50MB Image
+# and its BSS; the dtb below the kernel, where U-Boot's own fdt_addr_r is. The log
+# buffer sits between the kernel's end and the ramdisk.
+setenv edge1_kaddr 0x02200000
+setenv edge1_raddr 0x0a200000
+setenv edge1_faddr 0x01f00000
+setenv edge1_laddr 0x09f00000
+
+# Logs off: "logs=0" in edge1-options.txt, the file on this FAT the owner edits on a
+# PC (or Edge1 Tools does, through bin/edge1-ctl.sh). Then this script writes nothing
+# to the card - neither edge1-pstore.bin nor edge1-boot.log. "env import -t" reads
+# name=value lines and skips "#" comments, -r takes CRLF (Notepad), and naming
+# "logs" imports that one variable and nothing else. The file goes to the log
+# buffer's address, nowhere near the ramoops region saved next.
+setenv logs
+setenv edge1_nolog
+if load ${devtype} ${devnum}:${distro_bootpart} ${edge1_laddr} edge1-options.txt; then
+	env import -t -r ${edge1_laddr} ${filesize} logs
+fi
+if test "${logs}" = "0"; then setenv edge1_nolog 1; fi
+
 # The previous kernel's log. The kernel keeps a ramoops region (its address is in
 # the dtb; build-bootfs.sh fills it in here) whose contents survive a warm reset - a
-# panic reboots by itself on a userdebug build. Saved to edge1-pstore.bin first,
-# before anything else touches RAM or a new kernel clears it. Every zone our kernel
+# panic reboots by itself on a userdebug build. Saved to edge1-pstore.bin before
+# anything but the few bytes of edge1-options.txt touches RAM, and before a new
+# kernel clears it. Every zone our kernel
 # has initialised starts with the ramoops signature "DBGC"; edge1_prev says whether
 # the console zone's is there, i.e. whether the file is worth decoding. (Not the
 # region's first word: the DRAM init's capacity probe can overwrite a word at a
@@ -72,17 +95,10 @@ if test -n "${edge1_paddr}"; then
 	if test -n "${edge1_pcons}"; then
 		if itest.l *${edge1_pcons} == 0x43474244; then setenv edge1_prev found; fi
 	fi
-	fatwrite ${devtype} ${devnum}:${distro_bootpart} ${edge1_paddr} edge1-pstore.bin ${edge1_psize}
+	if test -z "${edge1_nolog}"; then
+		fatwrite ${devtype} ${devnum}:${distro_bootpart} ${edge1_paddr} edge1-pstore.bin ${edge1_psize}
+	fi
 fi
-
-# Load addresses (RK3399 DRAM starts at 0). The kernel on a 2MiB boundary so booti
-# does not have to move it; the ramdisk 128MiB above it, clear of the 50MB Image
-# and its BSS; the dtb below the kernel, where U-Boot's own fdt_addr_r is. The log
-# buffer sits between the kernel's end and the ramdisk.
-setenv edge1_kaddr 0x02200000
-setenv edge1_raddr 0x0a200000
-setenv edge1_faddr 0x01f00000
-setenv edge1_laddr 0x09f00000
 
 # A record of how far this got, written to edge1-boot.log on this same FAT - which
 # a PC shows when the card is plugged in. Without a serial console this file is the
@@ -93,7 +109,7 @@ setenv edge1_laddr 0x09f00000
 # CONFIG_VERSION_VARIABLE, which that config does not have.) Sizes are hex, as
 # "load" leaves them in filesize.
 setenv edge1_stage started
-setenv edge1_log 'env export -t ${edge1_laddr} edge1_where edge1_dev edge1_prev edge1_stage edge1_ksize edge1_rsize edge1_dsize bootargs boot_targets fdtfile; fatwrite ${devtype} ${devnum}:${distro_bootpart} ${edge1_laddr} edge1-boot.log ${filesize}'
+setenv edge1_log 'if test -z "${edge1_nolog}"; then env export -t ${edge1_laddr} edge1_where edge1_dev edge1_prev edge1_stage edge1_ksize edge1_rsize edge1_dsize bootargs boot_targets fdtfile; fatwrite ${devtype} ${devnum}:${distro_bootpart} ${edge1_laddr} edge1-boot.log ${filesize}; fi'
 
 if load ${devtype} ${devnum}:${distro_bootpart} ${edge1_kaddr} Image; then
 	setenv edge1_ksize ${filesize}

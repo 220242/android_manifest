@@ -46,6 +46,22 @@ service edge1_bootwatch /vendor/bin/edge1-bootwatch.sh
 on boot && property:ro.debuggable=1
     start edge1_bootwatch
 
+# Edge1 Tools' root helper (bin/edge1-ctl.sh): CPU/GPU clock modes and the logs on
+# the card. Started from init.edge1.ctl.rc on /product - a vendor file may not watch
+# the sys.* / persist.sys.* properties the app (system user) sets - and init expands
+# the property into the arguments, so the script reads no system property itself.
+service edge1_ctl /vendor/bin/edge1-ctl.sh request ${sys.edge1.ctl:-none}
+    user root
+    group root
+    oneshot
+    disabled
+
+service edge1_ctl_boot /vendor/bin/edge1-ctl.sh boot ${persist.sys.edge1.perf:-none}
+    user root
+    group root
+    oneshot
+    disabled
+
 on early-init
     # Mali-T860 (Midgard) devfreq governor. simple_ondemand is what the
     # Rockchip 4.19 BSP validates the T860 OPP table against.

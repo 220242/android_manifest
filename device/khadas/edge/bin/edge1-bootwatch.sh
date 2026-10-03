@@ -53,6 +53,7 @@ SYNC=5
 DEV=/dev/block/by-name/bootfs
 MNT=/mnt/vendor/edge1-bootfs
 LOGS=$MNT/edge1-logs
+OPTS=$MNT/edge1-options.txt
 OUT=
 MAX_BOOTS=10
 # Below this much free space the streams stop: U-Boot must still be able to rewrite
@@ -116,6 +117,15 @@ snapshot() {
       done; echo
       timeout 20 dumpsys audio | head -n 600; echo
       timeout 20 dumpsys media.audio_flinger | head -n 300; } > "$s/audio.txt" 2>&1
+    # Who signed what: "signatures:[xxxxxxxx]" is the hash Android prints for a
+    # certificate. Card 22's Bluetooth app ran in the zygote domain - seinfo
+    # "default", its signature matched no mac_permissions signer - since the build
+    # signs with its own keys; local-config prints the same hashes for those keys.
+    { for p in com.android.bluetooth com.android.networkstack org.edge1.tools \
+               com.android.tv.settings com.android.shell; do
+          echo "== $p"
+          timeout 20 dumpsys package "$p" | grep -E "codePath=|sharedUser=|signatures=|pkgFlags="
+      done; } > "$s/packages.txt" 2>&1
     sync
     log "state written to EDGE1BOOT:edge1-logs/${OUT##*/}/$1"
 }
@@ -214,7 +224,7 @@ alive() {
 # The image ships one with ready-made modes, commented in Russian, the power test
 # switched on (build/build-bootfs.sh has the file and the reasons).
 apply_options() {
-    local f="$MNT/edge1-options.txt" key val applied="" bom big="" little="" gpu=""
+    local f="$OPTS" key val applied="" bom big="" little="" gpu=""
     [ -f "$f" ] || return
     # The file is edited in Notepad: it may come back with a UTF-8 BOM ahead of the
     # first line, CRLF endings, tabs, or a "# note" after a value.
@@ -227,6 +237,7 @@ apply_options() {
             cpu_big_max_mhz) big=$val ;;
             cpu_little_max_mhz) little=$val ;;
             gpu_max_mhz) gpu=$val ;;
+            logs) LOGS_ON=$val ;;
             *) log "options: unknown key $key" ;;
         esac
     done < "$f"
@@ -242,10 +253,28 @@ apply_options() {
     OPTIONS="$applied"
 }
 OPTIONS=
+# "logs=0" in edge1-options.txt (the owner, on a PC or in Edge1 Tools): no logs.
+LOGS_ON=1
+
+# Has "logs=0" turned up in the file since this boot started? Edge1 Tools writes
+# it through bin/edge1-ctl.sh while the bootwatch runs.
+logs_turned_off() {
+    grep -q '^logs=0' "$OPTS" 2> /dev/null
+}
 
 n=
 if [ -n "$mounted" ]; then
     apply_options
+    # logs=0: the clock limits are all there is to do. No logs, no snapshots, no
+    # thermal lines, no reboot on a boot that does not complete - the build is
+    # trusted. The partition stays mounted, read-only, for Edge1 Tools' changes to
+    # edge1-options.txt (edge1-ctl remounts it for each one). boot.scr has saved
+    # nothing either.
+    if [ "$LOGS_ON" = 0 ]; then
+        mount -o remount,ro "$MNT" || log "cannot remount $MNT read-only"
+        log "logs=0 in edge1-options.txt: options:${OPTIONS:- none}, nothing written"
+        exit 0
+    fi
     mkdir -p "$LOGS"
     # The two fixed directories of the old layout.
     rm -rf "$LOGS/boot-0" "$LOGS/boot-1"
@@ -284,6 +313,16 @@ done_at=
 while :; do
     sleep "$SYNC"
     t=$((t + SYNC))
+    # Turned off in Edge1 Tools while running: stop writing now, and leave the
+    # partition mounted read-only as a boot with logs=0 does.
+    if [ -n "$mounted" ] && logs_turned_off; then
+        stop_streams
+        [ -n "$done_at" ] && cmd wifi set-verbose-logging disabled > /dev/null 2>&1
+        sync
+        mount -o remount,ro "$MNT" || log "cannot remount $MNT read-only"
+        log "logs turned off in Edge1 Tools; nothing more written"
+        exit 0
+    fi
     thermal_line
     if [ -n "$mounted" ]; then
         alive

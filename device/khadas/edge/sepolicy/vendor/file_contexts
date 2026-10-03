@@ -80,6 +80,7 @@
 # loader reads them on behalf of the driver.
 /vendor/firmware(/.*)?              u:object_r:vendor_firmware_file:s0
 /vendor/bin/edge1-bootwatch\.sh      u:object_r:edge1_bootwatch_exec:s0
+/vendor/bin/edge1-ctl\.sh           u:object_r:edge1_ctl_exec:s0
 
 # minigbm and Mesa. The allocator service needs an exec type to get a domain: the
 # ninth card's init refused to start it - "File /vendor/bin/hw/android.hardware.

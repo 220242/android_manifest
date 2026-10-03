@@ -638,6 +638,12 @@ PRODUCT_COPY_FILES += \
 PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/init/init.edge1.standby.rc:$(TARGET_COPY_OUT_PRODUCT)/etc/init/init.edge1.standby.rc
 
+# Edge1 Tools' clock modes and logs switch: bin/edge1-ctl.sh (vendor, root) started
+# by triggers on the app's properties, which only a /product or /system rc may
+# watch. init/init.edge1.ctl.rc has the protocol.
+PRODUCT_COPY_FILES += \
+    $(LOCAL_PATH)/init/init.edge1.ctl.rc:$(TARGET_COPY_OUT_PRODUCT)/etc/init/init.edge1.ctl.rc
+
 # Java heap sizes. Nothing set them, so every Java process - system_server too -
 # ran with AndroidRuntime's built-in default, a 16MB heap: card 18's system_server
 # logged "Clamp target GC heap from 40MB to 16MB" a hundred times and stalled in
@@ -735,6 +741,7 @@ PRODUCT_PROPERTY_OVERRIDES += \
 PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/bin/edge1-install-internal.sh:$(TARGET_COPY_OUT_VENDOR)/bin/edge1-install-internal.sh \
     $(LOCAL_PATH)/bin/edge1-bootwatch.sh:$(TARGET_COPY_OUT_VENDOR)/bin/edge1-bootwatch.sh \
+    $(LOCAL_PATH)/bin/edge1-ctl.sh:$(TARGET_COPY_OUT_VENDOR)/bin/edge1-ctl.sh \
     $(LOCAL_PATH)/flash/partitions.tsv:$(TARGET_COPY_OUT_VENDOR)/etc/edge1-partitions.tsv
 
 # sgdisk writes the GPT on the target. It is not assumed to be present: it comes

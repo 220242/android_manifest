@@ -1,0 +1,18 @@
+# Khadas Edge1 - Edge1 Tools' requests to its root helper, bin/edge1-ctl.sh.
+#
+# Edge1 Tools runs as the system user (android:sharedUserId android.uid.system), so
+# it may set sys.* and persist.sys.* properties - the vendor's are out of its reach,
+# and a vendor init file may not trigger on these. Hence this file on /product, like
+# init.edge1.standby.rc: init reads its triggers itself. The services are the
+# vendor's (init.edge1.rc).
+#
+#   sys.edge1.ctl          <nonce>:perf:<big>:<little>:<gpu>  a clock mode, in MHz
+#                          <nonce>:logs-off | logs-on | logs-clear
+#                          (the nonce makes a repeated request a change too)
+#   persist.sys.edge1.perf <big>:<little>:<gpu>  the last mode, set again at boot
+#                          where no card's edge1-options.txt is in charge
+on property:sys.edge1.ctl=*
+    start edge1_ctl
+
+on property:sys.boot_completed=1
+    start edge1_ctl_boot

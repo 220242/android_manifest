@@ -122,3 +122,17 @@ for n in $NAMES; do
 done
 chmod 600 "$TREE_KEYS"/*.pk8
 say "keys: this machine's own, from $KEYS (back that directory up)"
+# Each certificate's hash as Android prints it ("signatures:[xxxxxxxx]" in dumpsys
+# package): Arrays.hashCode of the DER bytes. The bootwatch's packages.txt shows the
+# installed apps' - so a log says which key an app was really signed with.
+if command -v python3 >/dev/null; then
+    for n in $NAMES; do
+        h=$(openssl x509 -in "$TREE_KEYS/$n.x509.pem" -outform DER 2>/dev/null | python3 -c '
+import sys
+h = 1
+for b in sys.stdin.buffer.read():
+    h = (31 * h + (b - 256 if b > 127 else b)) & 0xffffffff
+print("%08x" % h)')
+        say "keys: $n signature hash $h"
+    done
+fi
