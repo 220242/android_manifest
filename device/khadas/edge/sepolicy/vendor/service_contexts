@@ -1,0 +1,7 @@
+# The IMapper 5 implementation (mapper.minigbm) is a native HAL that the VINTF
+# manifest declares as "mapper/minigbm", and every process that maps a graphics
+# buffer asks servicemanager whether it is declared. Unlabelled, the name fell to
+# default_android_service, which no app may find: in enforcing mode the answer
+# would be "not declared" and no app could draw. Cards 18 and 19 logged the
+# lookup as a denial from every graphics client.
+mapper/minigbm                              u:object_r:hal_graphics_mapper_service:s0

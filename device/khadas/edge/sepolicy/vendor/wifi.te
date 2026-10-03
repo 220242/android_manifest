@@ -1,0 +1,4 @@
+# The framework runs Wi-Fi without a vendor HAL here (device.mk), and then reads
+# the interface name from wifi.interface (wifi_hal_prop) itself - the property
+# the USB-adapter switch in init.edge1.rc sets.
+get_prop(system_server, wifi_hal_prop)

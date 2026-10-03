@@ -1,0 +1,10 @@
+# Shared memory is memfd on this kernel (no ashmem, see device.mk). A memfd is
+# labelled after the domain that created it - <domain>_tmpfs, or plain tmpfs for a
+# domain without its own tmpfs type, like the vendor HALs - and AOSP 14's policy,
+# written for ashmem, lets few of them be mapped by the other side. Cards 18-19:
+# SoundPool between system_server and audioserver, the HALs' fast message queues
+# (memfd:MessageQueue) between them and their clients, the codec service.
+allow audioserver { system_server_tmpfs tmpfs }:file { getattr map read write };
+allow system_server { audioserver_tmpfs tmpfs }:file { getattr map read write };
+allow mediaswcodec { system_server_tmpfs tmpfs }:file { getattr map read write };
+allow { hal_audio_default hal_tv_input_default } tmpfs:file { getattr map read write };

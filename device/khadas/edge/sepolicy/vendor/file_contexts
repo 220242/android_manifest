@@ -31,6 +31,10 @@
 # in every app process (rockchip-drm has no render node), and apps may use
 # gpu_device but not graphics_device. card1 is panfrost's primary node. GloDroid
 # labels both the same way.
+# The directory too: minigbm and Mesa list it to find the render node, and as
+# plain "device" every app was denied that (cards 18-19). gpu_device:dir is what
+# AOSP already lets every graphics client read.
+/dev/dri                            u:object_r:gpu_device:s0
 /dev/dri/card0                      u:object_r:gpu_device:s0
 /dev/dri/card1                      u:object_r:gpu_device:s0
 /dev/dri/renderD128                 u:object_r:gpu_device:s0
@@ -95,3 +99,11 @@
 /vendor/lib(64)?/dri(/.*)?                   u:object_r:same_process_hal_file:s0
 # No /vendor/lib/modules: this kernel builds every driver it needs in, so there is
 # no vendor_dlkm and nothing to load.
+
+# The kernel console (console=ttyS2, androidboot.console=ttyS2): init writes to it
+# and runs the userdebug console shell on it. As serial_device neither may.
+/dev/ttyS2                          u:object_r:console_device:s0
+
+# Compressed swap (fstab.edge1); AOSP labels zram as ram_device, which init's
+# swapon may not use. The same line GloDroid carries.
+/dev/block/zram0                    u:object_r:swap_block_device:s0

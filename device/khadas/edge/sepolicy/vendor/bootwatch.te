@@ -1,11 +1,21 @@
-# Khadas Edge1 - the bring-up boot watchdog and log collector (bin/edge1-bootwatch.sh).
-#
-# A domain of its own so init can start it: a vendor executable needs a domain to
-# transition into. init.edge1.rc starts it only when ro.debuggable=1, where the whole
-# policy runs permissive (androidboot.selinux=permissive), so no allow rules are
-# granted here - mounting the bootfs FAT, running logcat, dmesg and dumpsys,
-# setprop sys.powerctl and the /dev/kmsg writes are logged, not refused. On a user
-# build it never runs.
+# edge1-bootwatch (bin/edge1-bootwatch.sh): the bring-up log recorder, started
+# only on debuggable builds. It runs logcat, dmesg, dumpsys, getprop, ps, df and
+# the rest as root, reads half of sysfs and writes the card's FAT - a list of
+# rules that would be the whole policy over again. On userdebug it is permissive
+# and not audited, so its denials neither stop it nor bury everyone else's (it
+# was 263 of card 18's 437 distinct denials). user builds never start it.
 type edge1_bootwatch, domain;
 type edge1_bootwatch_exec, exec_type, vendor_file_type, file_type;
+
 init_daemon_domain(edge1_bootwatch)
+
+userdebug_or_eng(`
+  permissive edge1_bootwatch;
+  dontaudit edge1_bootwatch { file_type fs_type dev_type }:{ dir file lnk_file chr_file blk_file sock_file fifo_file } *;
+  dontaudit edge1_bootwatch property_type:file *;
+  dontaudit edge1_bootwatch domain:{ dir file lnk_file process } *;
+  dontaudit edge1_bootwatch self:{ capability capability2 } *;
+  dontaudit edge1_bootwatch { service_manager_type }:service_manager *;
+  dontaudit edge1_bootwatch domain:binder *;
+  dontaudit domain edge1_bootwatch:{ fd fifo_file } *;
+')

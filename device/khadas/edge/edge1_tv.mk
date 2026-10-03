@@ -22,6 +22,11 @@
 # after Android 9. Nothing from it is inherited here; the TV-specific pieces it
 # provided are re-expressed below against 14 APIs.
 # ---------------------------------------------------------------------------
+# The builder's language and time zone (build/local-config.sh writes this file).
+# First, before atv_base: the first entry of PRODUCT_LOCALES is the default one,
+# and inherited values keep the order of the inherit calls.
+$(call inherit-product-if-exists, vendor/edge1/region/region.mk)
+
 ATV_BASE := device/google/atv/products/atv_base.mk
 ifeq ($(wildcard $(ATV_BASE)),)
   $(error device/google/atv is not synced. Android TV requires it. \
@@ -202,10 +207,10 @@ PRODUCT_PROPERTY_OVERRIDES += \
 # which init loads with vendor_init's permissions, and these are system properties -
 # the board logged "avc: denied { set } for property=ro.adb.secure
 # scontext=u:r:vendor_init:s0" for the old lines. ro.adb.secure and
-# persist.sys.usb.config are gone rather than moved: core/main.mk sets
+# persist.sys.usb.config went rather than moved: core/main.mk sets
 # ro.adb.secure=1 on user builds and leaves it unset (no adb authentication) on
 # userdebug, and post_process_props.py adds adb to persist.sys.usb.config on every
-# debuggable build.
+# debuggable build. ro.adb.secure is back below, for every variant.
 #
 # ro.logd.size: logd's buffers default to 256KiB each, which a bring-up boot fills in
 # seconds. edge1-bootwatch copies them to the card, so make them worth copying: 2MiB,
@@ -214,4 +219,23 @@ ifneq ($(TARGET_BUILD_VARIANT),user)
 PRODUCT_PRODUCT_PROPERTIES += \
     service.adb.tcp.port=5555 \
     ro.logd.size=2097152
+endif
+
+# adb authentication on every build, userdebug too. Without it, the port above
+# handed a root shell (adb root works on userdebug) to anything on the same
+# network as the TV - fine on a bench, not in a living room. A computer is
+# allowed once: Settings > Device Preferences > Developer options > Wireless
+# debugging > "Pair device with pairing code", then "adb pair <ip>:<port>" with
+# the code on screen. After that "adb connect <ip>:5555" works as before.
+PRODUCT_PRODUCT_PROPERTIES += \
+    ro.adb.secure=1
+
+# Signing: this machine's own keys when build/local-config.sh has made the full
+# set (vendor/edge1-priv/keys, copied from ~/android_khadas/keys), AOSP's public
+# test keys otherwise. Every certificate a module names ("platform", "shared",
+# "media", ...) is looked up next to this one, hence the whole set or nothing.
+EDGE1_KEYS := vendor/edge1-priv/keys
+EDGE1_KEY_NAMES := releasekey platform shared media networkstack sdk_sandbox bluetooth nfc testkey
+ifeq ($(words $(wildcard $(foreach k,$(EDGE1_KEY_NAMES),$(EDGE1_KEYS)/$(k).pk8 $(EDGE1_KEYS)/$(k).x509.pem))),18)
+PRODUCT_DEFAULT_DEV_CERTIFICATE := $(EDGE1_KEYS)/releasekey
 endif

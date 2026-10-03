@@ -20,13 +20,19 @@ the board; there is **no serial adapter**. One iteration:
    eMMC), and send back from the card's `EDGE1BOOT` drive **`edge1-boot.log`**,
    **`edge1-pstore.bin`** and the whole **`edge1-logs`** folder (zipped), plus photos
    of the HDMI screen.
-4. Read `edge1-logs/boot-0/` first: `logcat.txt` and `dmesg.txt` are the whole boot,
-   streamed from its first line (main/system/crash/events; the kernel log); the
-   `120s`, `completed`, `timeout` subfolders hold getprop, ps, mounts, `dumpsys -l` and
-   SurfaceFlinger at that moment. `boot-1` is the boot before. Then
-   `build/edge1-pstore.py edge1-pstore.bin` → the last seconds before the reset:
-   kernel console, panic records, logcat (pmsg). Find the first fatal thing, fix it,
-   also fix whatever else the log shows, verify offline (below), push, reply.
+4. Read `edge1-logs/boots.txt` first: one line per boot - when it started, its options,
+   how long it lasted, whether it completed, whether its ramoops was saved. Then the
+   boot directories, `edge1-logs/boot-NNNNN/` (the last ten): `logcat.txt` and
+   `dmesg.txt` are the whole boot, streamed from its first line (main/system/crash/
+   events; the kernel log); `alive.txt` is when it was last seen; `pstore/` (copied by
+   the next boot from `/sys/fs/pstore`) is its last seconds if it ended in a reset; the
+   `120s`, `completed`, `timeout` subfolders hold getprop, ps, mounts, `dumpsys -l`,
+   SurfaceFlinger, connectivity and video state at that moment. Then
+   `build/edge1-pstore.py edge1-pstore.bin` → the last reset's region as U-Boot saved
+   it: kernel console, panic records, logcat (pmsg). Find the first fatal thing, fix
+   it, also fix whatever else the log shows, verify offline (below), push, reply.
+5. `EDGE1BOOT:edge1-options.txt` is read at every boot (CPU and GPU clock limits): the
+   owner can change it in Windows between two boots, without a build.
 
 Replies to the owner: **Russian, short, professional** — what broke, what was fixed,
 the exact command to run, what to send back. They value a lot of work per round trip:
@@ -37,7 +43,10 @@ the next failure before it costs a cycle.
 
 | Signal | Meaning |
 |---|---|
-| `edge1-logs/boot-0/logcat.txt`, `dmesg.txt` | streamed by `edge1-bootwatch` (userdebug) for the whole boot, synced every 10s; snapshots of state in `120s`, `completed` (30s after `sys.boot_completed`), `timeout` (300s, `persist.vendor.edge1.bootwatch.timeout`); `boot-1` is the boot before |
+| `edge1-logs/boots.txt` | a line per boot: start, options, last seen, completed or not, ramoops saved |
+| `edge1-logs/boot-NNNNN/logcat.txt`, `dmesg.txt` | streamed by `edge1-bootwatch` (userdebug) for the whole boot, synced every 5s; a `thermal` line every 5s in dmesg (temperatures, fan, CPU/GPU clocks, core rail voltages); snapshots of state in `120s`, `completed` (30s after `sys.boot_completed`), `timeout` (300s, `persist.vendor.edge1.bootwatch.timeout`); the last ten boots are kept |
+| `boot-NNNNN/pstore/` | that boot's ramoops, saved by the next boot: present when it ended in a reset |
+| ramoops readable but every line has bit errors | a hardware reset without a power cut (card 19): the DRAM went unrefreshed for a while - watchdog, PMIC or brown-out, not a kernel panic |
 | `edge1_stage=booti` in edge1-boot.log | U-Boot side fine; the kernel was started |
 | `edge1_prev=found` | `edge1-pstore.bin` holds the previous attempt's logs |
 | `edge1_prev=none`, file is `0xff` with flipped bits | power was cut — RAM decayed, no log |
@@ -98,6 +107,7 @@ not reachable from it.
 | 16 | **in the launcher** on HDMI, SystemUI up, F-Droid installed (signature matched), TvSettings works; no network (Ethernet unplugged), no Wi-Fi, no Bluetooth; TvSettings died in "Add accessory" (`BluetoothAdapter` null) | Wi-Fi: brcmfmac (built in) asked for firmware at 1.4s, before /vendor → firmware also in the ramdisk's `/lib/firmware/brcm`; `wpa_supplicant`/`hostapd` were never built (`WPA_SUPPLICANT_VERSION` unset; the probe cannot see Make guards) → set, with the module's own rc and our `wpa_supplicant.conf`; `android.hardware.wifi-service` had no legacy HAL and blocked Wi-Fi → removed, framework runs HAL-less. Bluetooth: kernel `hci_bcm` (`BT_HCIUART=y`, `POWER_SEQUENCING=y`) + Armbian's `BCM4359C0.hcd` (ramdisk + vendor) → hci0; the AOSP HAL binds it as an HCI user channel; `/dev/rfkill` back to root-only (the HAL soft-blocks hci0 if it can, then cannot bind); BT features back; A2DP source off (no BT audio provider). UI sounds (`AudioTv.mk`); `has_HDR_display=false`; snapshots add `connectivity.txt`; verify-tree [11] |
 | 17 | **Bluetooth works** (hci0 patched with BCM4359C0.hcd, HAL bound, adapter ON); Wi-Fi up (wlan0, supplicant, scans) but every association with the owner's WPA/WPA2 AP failed 4s in, `status_code=16`; developer options crash; userdata 1.6GiB | `brcmfmac.feature_disable=0x82000` (no firmware 4-way handshake/SAE; status 16 is brcmfmac's catch-all); bootwatch turns on Wi-Fi verbose logging; kernel patch 0003 (`/sys/class/android_usb` - UsbService needs it or `getCurrentFunctions()` throws in TvSettings); userdata 16GiB, image file ends 64MiB into it; USB Wi-Fi/BT adapter drivers + linux-firmware blobs (ramdisk + vendor), `persist.vendor.edge1.wifi.iface`; Edge1 Tools app (performance overlay + first-boot installer); bundled apps via `build/fetch-apps.sh` (the owner's `D:\android_khadas\apks` folder + VLC/Material Files/Aurora Store from F-Droid; Projectivy `com.spocky.projengmenu` made HOME) |
 | 18 | **Wi-Fi connected** (the MikroTik, 5GHz 11ac), developer options open, the overlay works (40-45C), nine apps installed from Edge1 Tools; then a **reset loop**: hard resets (no shutdown logged, boot reason plain "reboot") about 10s after each boot completed, once the overlay was set to start at boot; a panfrost job fault (DATA_INVALID_FAULT) the moment the overlay started; system_server ran with a 16MB Java heap | Java heap: nothing set `dalvik.vm.heap*`, so every process had AndroidRuntime's 16MB default → `phone-xhdpi-4096-dalvik-heap.mk`. Overlay: its EGL probe (the GPU fault) replaced by the sysfs driver name; at boot it waits 30s, and two boots in a row that do not last 3 minutes after it turn its autostart off. No automatic HOME (Edge1 Tools has a "Default launcher" button). Preinstall runs 3 minutes after boot; Edge1 Tools is not "stopped" at first boot (sysconfig). Fan: `pwm-fan` was `=m`, the fan never ran → `=y`. dex2oat on the A53s. Bootwatch: temperatures, fan and clocks in the kernel log every 5s, sync every 5s (was 10). Video: hantro built in, `/dev/video*` `/dev/media*` wildcards, `edge1-v4l2-probe` → `video.txt`, `docs/HW_DECODE.md` |
+| 19 | resets at different moments every boot: ~3s after the first boot completed, and on opening Edge1 Tools in the second; 40-57C; the ramoops region came back readable but with bit errors on every line - a hardware reset (unrefreshed DRAM), not a panic. Also: the PCIe controller stuck in deferred probe (its PHY was a module) and re-probed whenever any device bound | A log per boot (`boot-NNNNN`, ten kept, `boots.txt`, `alive.txt`, each boot's ramoops saved into its own folder by the next); `edge1-options.txt` on EDGE1BOOT with CPU/GPU clock limits, shipped at A72 1416MHz / GPU 600MHz as a power test; core rail voltages and GPU clock in the thermal line; PCIe PHY built in. Owner: no IR remote (driver not built). Toward a release build: SELinux rules for every non-bootwatch denial of cards 18-19 (bootwatch permissive + unaudited), checked offline with `build/dev/check-sepolicy.sh`; A2DP (the BT audio provider's VINTF fragment); exFAT + USB 3 disks; zram; standby without suspend; adb needs authorization; the builder's language/time zone; private signing keys (dev-keys) - docs/RELEASE.md |
 
 ## Lessons that cost a card each (check these first next time)
 
@@ -161,19 +171,32 @@ not reachable from it.
 * **A hard reset with nothing logged is not necessarily heat.** Card 18's overlay
   showed 40-45C; the resets came right as the overlay started (and with it a GPU job
   fault). Read the temperatures before blaming them - bootwatch now logs them.
+* **A module in defconfig can leave a built-in driver probing forever.** The PCIe
+  controller was `=y`, its PHY `=m`: the controller deferred and was re-probed every
+  time any other device bound, for the whole boot. A "deferred probe pending" line in
+  dmesg names the driver to look at.
+* **Ramoops with bit errors is a hardware reset.** A software reboot (panic, watchdog
+  in init, bootwatch) leaves it clean (card 16); a power cut leaves nothing (card 17);
+  card 19's was all there and flipped throughout - the DRAM lost refresh without losing
+  power. Look at power and voltages, not at the last log line.
+* **Product rc files run as init; vendor ones as vendor_init.** /sys/power/wake_lock
+  and swapon are init's (`init.edge1.standby.rc` is on /product for that), and
+  `swapon_all`/`mount_all` run in init itself even from a vendor file.
+* **SELinux before a build:** `build/dev/check-sepolicy.sh <system/sepolicy>` compiles
+  the vendor policy with AOSP's - every neverallow, and public types only for vendor.
 * **Images:** only the SD card is built during bring-up (`stage_images` in
   provision-wsl.sh, build-images.sh default); eMMC/NVMe are commented out.
 
 ## Open, in rough order
 
-* Card 19 (a fresh flash - card 18's `/data` keeps the overlay's autostart and the
-  loop): boots and stays up with the overlay on at boot; if it still resets, the
-  pstore of the reset (`edge1-pstore.bin`) and the `thermal` lines at the end of
-  `dmesg.txt` say what it was. `Clamp target GC heap` gone from logcat; bundled apps
-  installed by themselves about 3 minutes after the first boot (Edge1 Tools lists
-  them); HOME stays the AOSP launcher until the owner picks one with "Default
-  launcher"; the fan spins when the SoC passes 55C; `video.txt` in the snapshots
-  lists rkvdec (S264, VP9F) and hantro-vpu (MG2S, VP8F).
+* Card 20: does it still reset with the A72 at 1416MHz and the GPU at 600MHz
+  (edge1-options.txt)? `boots.txt` answers in a glance. If not, delete the two lines in
+  edge1-options.txt and see whether resets come back - then it is power (supply, or the
+  board's regulators at the top OPPs). Each reset's `pstore/` and the last `thermal`
+  lines (rail voltages, clocks) say more. Also: the PCIe controller probes once now
+  (link training fails on the empty slot); A2DP to a Bluetooth headset; an exFAT
+  stick shows up; `/proc/swaps` lists zram0 (misc.txt); the power key puts the TV to
+  standby and any key wakes it; the system language and time zone are the builder's.
 * Hardware video decode: docs/HW_DECODE.md. Phase 1 (decoders up, probed) is on
   card 19; next the FFmpeg Codec2 service (software), then v4l2-request for H.264
   and VP9. HEVC needs a newer kernel.

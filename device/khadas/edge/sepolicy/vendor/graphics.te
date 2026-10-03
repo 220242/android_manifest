@@ -1,0 +1,17 @@
+# Graphics on this board: Mesa (panfrost + kmsro) and minigbm in every process
+# that draws, drm_hwcomposer as the composer. Rules for what cards 18 and 19
+# logged as denied, permissive, in normal use.
+
+# drmGetDevice walks /sys/devices/platform/display-subsystem and ff9a0000.gpu
+# (both sysfs_gpu, genfs_contexts). AOSP grants these clients the files; the
+# directories have to be searchable on the way to them.
+allow { appdomain -isolated_app_all surfaceflinger system_server bootanim } sysfs_gpu:dir search;
+allow { hal_graphics_allocator hal_graphics_composer mediaswcodec } sysfs_gpu:dir search;
+allow { hal_graphics_allocator hal_graphics_composer mediaswcodec } sysfs_gpu:file r_file_perms;
+
+# The composer (android.hardware.graphics.composer@2.4-service with
+# drm_hwcomposer): it allocates its own buffers through the allocator, uses
+# vndbinder, and listens for HDMI hotplug uevents.
+hal_client_domain(hal_graphics_composer_default, hal_graphics_allocator)
+vndbinder_use(hal_graphics_composer_default)
+allow hal_graphics_composer_default self:netlink_kobject_uevent_socket { create bind read setopt };

@@ -172,6 +172,14 @@ Measured on the board — [`HARDWARE.md`](HARDWARE.md) has the readings:
   no automatic default launcher (a button in Edge1 Tools instead); the fan driver
   built in (it was a module, so the fan had never run); the decoders probed into the
   logs, first step of [`HW_DECODE.md`](HW_DECODE.md).
+* **Resets at random moments.** Card 19: one ~3 seconds after the first boot completed,
+  one as Edge1 Tools opened in the second, at 40-57C. The ramoops region came back
+  intact but with bit errors in every line: a hardware reset, the DRAM left without
+  refresh, not a kernel panic. Every boot now gets its own log folder (the last ten
+  kept) with its own ramoops if it ended in a reset, and the card ships an
+  `edge1-options.txt` that holds the big cores and the GPU below their top clocks - if
+  the resets stop, it is power. Also the steps toward a release build:
+  [`RELEASE.md`](RELEASE.md).
 
 What they did not establish, because none of the card's code ever ran: whether our U-Boot,
 our TPL's DDR init, or our SPL work on this board. The DDR-blob A/B, the SPL boot-order

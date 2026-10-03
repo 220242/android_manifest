@@ -35,3 +35,14 @@ and a name the platform does not already match. The module probe
 (build/windows/provision-wsl.sh, stage_probe) checks the second one against the
 synced system/sepolicy and stops the run before the build; verify-tree.sh check 9d
 checks the first offline.
+
+## The rest of this directory
+
+Rules for what the board logged as denied while permissive (cards 18-19), one file
+per area: graphics.te, memfd.te, storage.te, kernel.te, edge1_tools.te, wifi.te,
+plus the labels in file_contexts, genfs_contexts and service_contexts.
+bootwatch.te keeps the bring-up recorder permissive and unaudited on userdebug.
+
+Before a build, `build/dev/check-sepolicy.sh <system/sepolicy>` compiles all of it
+with AOSP 14's platform policy: every neverallow, and every type the vendor half
+names is one the vendor half can see.

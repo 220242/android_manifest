@@ -1,0 +1,7 @@
+# The SD card's controller (fe320000.mmc, sysfs_mmc_host): fsck.f2fs and
+# make_f2fs read the device's queue limits through it, vold writes uevent there
+# when it rescans block devices, and init sets discard_max_bytes.
+allow { fsck e2fs } sysfs_mmc_host:dir search;
+allow { fsck e2fs } sysfs_mmc_host:file r_file_perms;
+allow vold sysfs_mmc_host:file w_file_perms;
+allow init sysfs_mmc_host:file w_file_perms;

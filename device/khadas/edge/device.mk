@@ -461,17 +461,25 @@ PRODUCT_PROPERTY_OVERRIDES += \
 # node is therefore left at its default root-only mode (ueventd.edge1.rc); the
 # HAL logs "rfkill unavailable" and carries on.
 #
-# Not here yet: A2DP audio. The audio HAL's bluetooth module wants
-# IBluetoothAudioProviderFactory, which nothing on this image provides (card 16:
-# "Failed to create bluetooth audio provider factory"), so the A2DP source profile
-# is off until it does; remotes, keyboards and gamepads (HID host) do not need it.
+# A2DP audio (headphones, soundbars): the audio HAL's bluetooth module creates
+# the IBluetoothAudioProviderFactory itself, from android.hardware.bluetooth.audio-impl
+# linked into it - and servicemanager refused the registration up to card 18
+# ("Could not find ...IBluetoothAudioProviderFactory/default in the VINTF
+# manifest", then "Failed to create bluetooth audio provider factory. Status: -3"),
+# because the library's VINTF fragment is installed only when the library itself is
+# a product package; inside the audio APEX it is not. Listed here, the fragment
+# lands in /vendor/etc/vintf/manifest and the factory registers. Software SBC/AAC
+# encoding in the Bluetooth stack; no offload (this chip has no A2DP offload path
+# to the HDMI audio). system/sepolicy already labels the service (hal_audio_service)
+# and lets the Bluetooth app find it.
 PRODUCT_PACKAGES += \
-    android.hardware.bluetooth-service.default
+    android.hardware.bluetooth-service.default \
+    android.hardware.bluetooth.audio-impl
 
 PRODUCT_PROPERTY_OVERRIDES += \
     ro.vendor.bluetooth.device=bcm4359 \
     bluetooth.device.class_of_device?=38,4,36 \
-    bluetooth.profile.a2dp.source.enabled?=false \
+    bluetooth.profile.a2dp.source.enabled?=true \
     bluetooth.profile.hfp.ag.enabled?=false \
     bluetooth.profile.hid.host.enabled?=true
 
@@ -613,6 +621,12 @@ PRODUCT_PRODUCT_PROPERTIES += sys.use_memfd=true
 PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/init/init.edge1.memfd.rc:$(TARGET_COPY_OUT_PRODUCT)/etc/init/init.edge1.memfd.rc
 
+# Standby: the power key turns the display off and the CPUs stay up, so the IR
+# remote can wake the box again. init/init.edge1.standby.rc has the why, and the
+# property that allows real suspend. On /product for the same reason as memfd.
+PRODUCT_COPY_FILES += \
+    $(LOCAL_PATH)/init/init.edge1.standby.rc:$(TARGET_COPY_OUT_PRODUCT)/etc/init/init.edge1.standby.rc
+
 # Java heap sizes. Nothing set them, so every Java process - system_server too -
 # ran with AndroidRuntime's built-in default, a 16MB heap: card 18's system_server
 # logged "Clamp target GC heap from 40MB to 16MB" a hundred times and stalled in
@@ -644,11 +658,23 @@ PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/fstab.edge1:$(TARGET_COPY_OUT_VENDOR)/etc/fstab.edge1 \
     $(LOCAL_PATH)/fstab.edge1:$(TARGET_COPY_OUT_RAMDISK)/fstab.edge1
 
-# Input: the Edge1 has an IR receiver and a power/function key row.
+# Input: the power button (gpio-keys, vendor/product 0001:0001). The BSP's
+# rk29-keypad.kl and ff420030_pwm.kl are gone: those were the Rockchip kernel's
+# device names, and no device on this kernel is called either. The IR remote is
+# not used.
 PRODUCT_COPY_FILES += \
-    $(LOCAL_PATH)/input/Vendor_0001_Product_0001.kl:$(TARGET_COPY_OUT_VENDOR)/usr/keylayout/Vendor_0001_Product_0001.kl \
-    $(LOCAL_PATH)/input/rk29-keypad.kl:$(TARGET_COPY_OUT_VENDOR)/usr/keylayout/rk29-keypad.kl \
-    $(LOCAL_PATH)/input/ff420030_pwm.kl:$(TARGET_COPY_OUT_VENDOR)/usr/keylayout/ff420030_pwm.kl
+    $(LOCAL_PATH)/input/Vendor_0001_Product_0001.kl:$(TARGET_COPY_OUT_VENDOR)/usr/keylayout/Vendor_0001_Product_0001.kl
+
+# ---------------------------------------------------------------------------
+# USB drives. vold mounts FAT32 by itself, and exFAT - what large sticks and
+# cards come formatted with - once these two are in /system/bin
+# (system/vold/fs/Exfat.cpp, IsSupported) and the kernel has the filesystem
+# (kernel fragment). external/exfatprogs is part of AOSP 14's manifest. NTFS is
+# not something vold mounts at all in this release.
+# ---------------------------------------------------------------------------
+PRODUCT_PACKAGES += \
+    mkfs.exfat \
+    fsck.exfat
 
 # ---------------------------------------------------------------------------
 # Ethernet. Android TV boxes are usually wired, and the framework needs the

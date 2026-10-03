@@ -6,23 +6,30 @@
 # The board has no serial console. Two things make up for it:
 #
 # 1. The whole log, on the card. The card's first partition (bootfs) is the FAT that
-#    Windows shows as EDGE1BOOT. This script mounts it and, for as long as the board
-#    runs, streams into edge1-logs/boot-0/:
+#    Windows shows as EDGE1BOOT. This script mounts it and gives every boot a
+#    directory of its own, edge1-logs/boot-NNNNN (numbered on from
+#    edge1-logs/last-boot, the last MAX_BOOTS kept), and for as long as the board
+#    runs streams into it:
 #      logcat.txt   main, system, crash and events, from the start of logd's buffers
 #      dmesg.txt    the kernel log, from the first line of the boot
-#    Both are complete: they start with everything already buffered and follow from
-#    there, so nothing scrolls away, however fast a crash loop logs (the tenth card
-#    produced 85KB/s of logcat, which filled a 2MiB buffer in 20 seconds). Data is
-#    synced every SYNC seconds, so a sudden reset loses at most that much - and the
-#    last seconds before a panic are in edge1-pstore.bin anyway.
-#    Beside them, a snapshot of the system's state (getprop, ps, mounts, services,
-#    SurfaceFlinger, Wi-Fi/Bluetooth, video decoders) in a subdirectory named for
-#    when it was taken:
+#      alive.txt    how long this boot has run and whether it completed, rewritten
+#                   every SYNC seconds: after a reset it says when the boot died
+#    Both logs are complete: they start with everything already buffered and follow
+#    from there, so nothing scrolls away, however fast a crash loop logs (the tenth
+#    card produced 85KB/s of logcat, which filled a 2MiB buffer in 20 seconds).
+#    Data is synced every SYNC seconds, so a sudden reset loses at most that much.
+#    The seconds before a reset are not lost either: the kernel keeps them in RAM
+#    (ramoops), and the next boot copies them from /sys/fs/pstore into the dead
+#    boot's directory as pstore/ - so every boot that ended in a reset carries its
+#    own last words. edge1-logs/boots.txt has one line per boot: when it started,
+#    how long it lasted, whether it completed. (Card 19 reset at a different moment
+#    every time, and two directories were not enough to see a pattern.)
+#    Beside the logs, a snapshot of the system's state (getprop, ps, mounts,
+#    services, SurfaceFlinger, Wi-Fi/Bluetooth, video decoders) in a subdirectory
+#    named for when it was taken:
 #      120s       two minutes after "boot", whatever state Android is in
 #      completed  30s after sys.boot_completed, if it ever gets there
 #      timeout    TIMEOUT (300) seconds after "boot" without sys.boot_completed
-#    The boot before is kept as boot-1, so after a watchdog reboot the card holds
-#    both the hung boot and the one that followed.
 #
 # 2. A warm reboot instead of a hang. If Android has not set sys.boot_completed
 #    within TIMEOUT seconds, reboot - warm, so ramoops survives and the card's boot
@@ -46,9 +53,10 @@ SYNC=5
 DEV=/dev/block/by-name/bootfs
 MNT=/mnt/vendor/edge1-bootfs
 LOGS=$MNT/edge1-logs
-OUT=$LOGS/boot-0
+OUT=
+MAX_BOOTS=10
 # Below this much free space the streams stop: U-Boot must still be able to rewrite
-# edge1-pstore.bin and edge1-boot.log on the next boot. boot-1 goes first.
+# edge1-pstore.bin and edge1-boot.log on the next boot. The oldest boots go first.
 STOP_FREE_KIB=65536
 KEEP_FREE_KIB=131072
 
@@ -72,7 +80,7 @@ stop_streams() {
     streams=
 }
 
-# $1: subdirectory of boot-0.
+# $1: subdirectory of this boot's directory.
 snapshot() {
     s="$OUT/$1"
     mkdir -p "$s"
@@ -80,9 +88,12 @@ snapshot() {
     ps -A -o PID,PPID,USER,STAT,TIME,LABEL,NAME > "$s/ps.txt" 2>&1
     # Device node modes and labels too: card 15's display bug was a node mode that
     # a log could only hint at.
+    # And the sysfs paths SELinux labels are written against: wakeup sources and
+    # extcon devices differ by board, and each unlabelled one is a denial.
     { cat /proc/uptime; echo; cat /proc/mounts; echo; ls -l /dev/block/by-name; echo
-      ls -lZ /dev/dri /dev/snd /dev/cec* /dev/video* /dev/media* /dev/rfkill; } \
-        > "$s/misc.txt" 2>&1
+      ls -lZ /dev/dri /dev/snd /dev/cec* /dev/video* /dev/media* /dev/rfkill; echo
+      getenforce; cat /proc/swaps; echo
+      ls -l /sys/class/wakeup /sys/class/extcon; } > "$s/misc.txt" 2>&1
     timeout 20 dumpsys -l > "$s/services.txt" 2>&1
     timeout 20 dumpsys SurfaceFlinger > "$s/surfaceflinger.txt" 2>&1
     # Wi-Fi and Bluetooth: interfaces, rfkill switches, and what the framework
@@ -97,14 +108,15 @@ snapshot() {
     { for v in /sys/class/video4linux/*; do echo "$v: $(cat "$v/name" 2>&1)"; done; echo
       timeout 20 edge1-v4l2-probe; } > "$s/video.txt" 2>&1
     sync
-    log "state written to EDGE1BOOT:edge1-logs/boot-0/$1"
+    log "state written to EDGE1BOOT:edge1-logs/${OUT##*/}/$1"
 }
 
-# Temperatures, fan level and cluster clocks, one kernel log line. Written every
-# SYNC seconds, so dmesg.txt - and edge1-pstore.bin, which survives a reset - show
-# them right up to the end. Card 18 reset in a loop with nothing logged; at 40-45C
-# (its overlay) that was not the tsadc's 95C hardware shutdown, and this line is
-# what rules heat in or out next time without anyone watching.
+# Temperatures, fan level, CPU and GPU clocks and the core rails' voltages, one
+# kernel log line every SYNC seconds, so dmesg.txt - and the ramoops copy that
+# survives a reset - show them right up to the end. Cards 18 and 19 reset with
+# nothing logged at 40-57C, far from the tsadc's 95C shutdown; card 19's ramoops
+# came back with bits flipped all through it, which a software reboot does not do.
+# The clocks and voltages at the last line are what says whether it is power.
 # Local variables only: the main loop's t is a global, and a "t" here once set it
 # to a temperature in millidegrees - past TIMEOUT, so the watchdog would reboot.
 thermal_line() {
@@ -123,8 +135,24 @@ thermal_line() {
         case "$mc" in ''|*[!0-9]*) continue ;; esac
         line="$line ${p##*/}=$((mc / 1000))MHz"
     done
+    mc=$(cat /sys/class/devfreq/ff9a0000.gpu/cur_freq 2>/dev/null)
+    case "$mc" in ''|*[!0-9]*) ;; *) line="$line gpu=$((mc / 1000000))MHz" ;; esac
+    # The rails the big cores and the GPU run on, and the SoC's centre rail:
+    # what a reset under load would be about if it is about power.
+    for c in $RAILS; do
+        mc=$(cat "${c#*=}/microvolts" 2>/dev/null)
+        case "$mc" in ''|*[!0-9]*) ;; *) line="$line ${c%%=*}=$((mc / 1000))mV" ;; esac
+    done
     log "thermal$line"
 }
+
+# name=sysfs-dir for each regulator thermal_line reports, found once.
+RAILS=
+for r in /sys/class/regulator/regulator.*; do
+    case "$(cat "$r/name" 2>/dev/null)" in
+        vdd_cpu_b|vdd_gpu|vdd_center|vdd_log) RAILS="$RAILS $(cat "$r/name")=$r" ;;
+    esac
+done
 
 finish() {
     stop_streams
@@ -142,20 +170,95 @@ mounted=
 mkdir -p "$MNT" && mount -t vfat -o rw,noatime "$DEV" "$MNT" && mounted=1
 [ -n "$mounted" ] || log "cannot mount $DEV; no logs on the card this boot"
 
-if [ -n "$mounted" ]; then
-    # Only a boot that wrote something displaces boot-1, so a boot that dies before
-    # this point does not cost the one before it its logs.
-    if [ -d "$OUT" ]; then
-        rm -rf "$LOGS/boot-1"
-        mv "$OUT" "$LOGS/boot-1"
+# boot-NNNNN, five digits so that a plain ls lists them oldest first.
+boot_dir() { printf '%s/boot-%05d' "$LOGS" "$1"; }
+
+# The boots on the card, oldest first.
+boot_dirs() { ls -d "$LOGS"/boot-[0-9][0-9][0-9][0-9][0-9] 2>/dev/null; }
+
+# Drops the oldest boots beyond MAX_BOOTS, then more while space is short - never
+# the one just created.
+prune() {
+    set -- $(boot_dirs)
+    while [ $# -gt "$MAX_BOOTS" ]; do rm -rf "$1"; shift; done
+    while [ $# -gt 1 ] && [ "$(avail_kib)" -lt "$KEEP_FREE_KIB" ]; do rm -rf "$1"; shift; done
+}
+
+# alive.txt: rewritten every tick, so it holds the last moment this boot was seen.
+# Kernel uptime, so the numbers line up with dmesg.txt.
+uptime_s() { cut -d. -f1 /proc/uptime; }
+done_up=
+alive() {
+    [ -n "$OUT" ] || return
+    if [ -n "$done_up" ]; then
+        echo "up $(uptime_s)s, boot completed at ${done_up}s" > "$OUT/alive.txt"
+    else
+        echo "up $(uptime_s)s, boot not completed" > "$OUT/alive.txt"
     fi
-    [ "$(avail_kib)" -lt "$KEEP_FREE_KIB" ] && rm -rf "$LOGS/boot-1"
+}
+
+# edge1-options.txt on EDGE1BOOT: settings the owner can change in Windows between
+# two boots, without a rebuild. key=value lines, # for comments, CRLF allowed:
+#   cpu_big_max_mhz    top clock of the A72s (408..1800)
+#   cpu_little_max_mhz top clock of the A53s (408..1416)
+#   gpu_max_mhz        top clock of the Mali (200..800)
+# The image ships one that lowers the big cores and the GPU, as a test of the
+# power supply (build/build-bootfs.sh has the default and the reason).
+apply_options() {
+    local f="$MNT/edge1-options.txt" key val applied=""
+    [ -f "$f" ] || return
+    while IFS='=' read -r key val; do
+        key=$(echo "$key" | tr -d ' \r'); val=$(echo "$val" | tr -d ' \r')
+        case "$key" in ''|\#*) continue ;; esac
+        case "$val" in ''|*[!0-9]*) log "options: $key: not a number"; continue ;; esac
+        case "$key" in
+            cpu_big_max_mhz)
+                echo $((val * 1000)) > /sys/devices/system/cpu/cpufreq/policy4/scaling_max_freq ;;
+            cpu_little_max_mhz)
+                echo $((val * 1000)) > /sys/devices/system/cpu/cpufreq/policy0/scaling_max_freq ;;
+            gpu_max_mhz)
+                echo $((val * 1000000)) > /sys/class/devfreq/ff9a0000.gpu/max_freq ;;
+            *) log "options: unknown key $key"; continue ;;
+        esac && applied="$applied $key=$val"
+    done < "$f"
+    [ -n "$applied" ] && log "options applied:$applied"
+    OPTIONS="$applied"
+}
+OPTIONS=
+
+n=
+if [ -n "$mounted" ]; then
+    apply_options
+    mkdir -p "$LOGS"
+    # The two fixed directories of the old layout.
+    rm -rf "$LOGS/boot-0" "$LOGS/boot-1"
+    n=$(cat "$LOGS/last-boot" 2>/dev/null)
+    case "$n" in ''|*[!0-9]*) n=0 ;; esac
+    prev=$(boot_dir "$n")
+    n=$((n + 1))
+    [ "$n" -gt 99999 ] && n=1
+    echo "$n" > "$LOGS/last-boot"
+    OUT=$(boot_dir "$n")
     mkdir -p "$OUT"
+    # The previous boot's end, as the kernel kept it in RAM through the reset. It
+    # belongs to that boot, so it goes into that boot's directory.
+    if [ -d "$prev" ] && [ -n "$(ls /sys/fs/pstore 2>/dev/null)" ]; then
+        mkdir -p "$prev/pstore"
+        cp /sys/fs/pstore/* "$prev/pstore/" 2>/dev/null
+    fi
+    if [ -d "$prev" ]; then
+        echo "${prev##*/}: $(cat "$prev/alive.txt" 2>/dev/null || echo 'no record')$( \
+            [ -d "$prev/pstore" ] && echo ', pstore saved')" >> "$LOGS/boots.txt"
+    fi
+    echo "${OUT##*/}: started, clock $(date '+%Y-%m-%d %H:%M:%S')," \
+        "boot reason $(getprop ro.boot.bootreason), options:${OPTIONS:- none}" \
+        >> "$LOGS/boots.txt"
+    prune
     if [ "$(avail_kib)" -lt "$STOP_FREE_KIB" ]; then
         log "EDGE1BOOT is nearly full; no logs written"
     else
         start_streams
-        log "streaming logcat and dmesg to EDGE1BOOT:edge1-logs/boot-0"
+        log "streaming logcat and dmesg to EDGE1BOOT:edge1-logs/${OUT##*/}"
     fi
 fi
 
@@ -166,6 +269,7 @@ while :; do
     t=$((t + SYNC))
     thermal_line
     if [ -n "$mounted" ]; then
+        alive
         sync
         if [ -n "$streams" ] && [ "$(avail_kib)" -lt "$STOP_FREE_KIB" ]; then
             stop_streams
@@ -176,6 +280,7 @@ while :; do
     fi
     if [ -z "$done_at" ] && completed; then
         done_at=$t
+        done_up=$(uptime_s)
         # Wi-Fi verbose logging: wpa_supplicant's own debug lines in logcat. Card
         # 17's failed associations said no more than "status_code=16" without it.
         cmd wifi set-verbose-logging enabled > /dev/null 2>&1 \

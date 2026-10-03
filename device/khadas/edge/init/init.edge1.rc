@@ -74,29 +74,15 @@ on post-fs-data
     mkdir /data/vendor/media 0770 mediacodec media
     mkdir /data/vendor/tv 0770 system system
 
-on boot
-    # HDMI-CEC device node for the AIDL hdmi.cec service.
-    chown system system /dev/cec0
-    chmod 0660 /dev/cec0
+# No chown/chmod of device nodes here: ueventd.edge1.rc owns their modes (video,
+# media, cec, lirc, dri). This file set some of them a second time, by fixed
+# number, and once set /dev/dri/card0 back to 0660 after ueventd had made it
+# 0666 - which is why card 15's launcher and SystemUI could not open it from
+# their app uids while apps running as uid system drew fine.
 
-    # No chown/chmod of /dev/dri here: ueventd.edge1.rc owns those modes. This block
-    # set card0 back to 0660 at "boot", after ueventd had made it 0666, and that is
-    # why card 15's launcher and SystemUI still could not open it from their app
-    # uids ("Failed to initialize driver", then a RenderThread SIGSEGV in panfrost)
-    # while TvSettings and TvProvision, which run as uid system, drew fine.
-
-    # Video: mainline exposes rkvdec and RGA as V4L2 M2M devices, replacing
-    # /dev/mpp_service and /dev/rga. Which index each lands on depends on probe
-    # order, so the whole range is set rather than one node.
-    chown media media /dev/video0
-    chmod 0660 /dev/video0
-    chown media media /dev/video1
-    chmod 0660 /dev/video1
-    chown media media /dev/media0
-    chmod 0660 /dev/media0
-
-    # IR receiver on the Edge1 front edge.
-    chown system system /dev/lirc0
+# Compressed swap (fstab.edge1), after the boot rather than during it.
+on property:sys.boot_completed=1
+    swapon_all /vendor/etc/fstab.${ro.hardware}
 
 # ---------------------------------------------------------------------------
 # Wi-Fi / Bluetooth: AP6398S (Broadcom BCM4359).

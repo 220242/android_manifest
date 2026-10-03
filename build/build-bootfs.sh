@@ -255,6 +255,27 @@ else
     echo "    (the dtb has no ramoops region - an older kernel stage? - so the boot" >&2
     echo "     script will not save the previous kernel's log)" >&2
 fi
+# Settings the owner can change on a PC between two boots; edge1-bootwatch reads
+# them at every boot (userdebug). The default lowers the big cores and the GPU: card
+# 19 reset at random moments under load, at 40-57C, and its ramoops came back with
+# bits flipped throughout - a hardware reset, not a software one. If it does not
+# happen at these clocks and does at full ones, the board is short of power at the
+# top of its range.
+cat > "$WORK/edge1-options.txt" <<'EOF'
+# Khadas Edge1 - settings read at every boot. Edit this file on the PC, put the
+# card back, boot. Lines starting with # are ignored.
+#
+# Stability test: the big cores (A72) are held at 1416 MHz instead of 1800, and the
+# GPU at 600 MHz instead of 800. Card 19 restarted at random moments with the full
+# clocks; if it no longer does with these, the board is short of power at full
+# speed - try a stronger power supply (USB-C PD, 12V). For full speed, put # in
+# front of both lines.
+cpu_big_max_mhz=1416
+gpu_max_mhz=600
+#
+# Also possible:
+# cpu_little_max_mhz=1416
+EOF
 cat > "$WORK/README.txt" <<'EOF'
 Khadas Edge1 - Android TV 14, boot partition
 ============================================
@@ -283,13 +304,20 @@ edge1_prev in edge1-boot.log says whether it held one: "found" or "none".
 build/edge1-pstore.py in the source tree turns it into text.
 
 edge1-logs/ appears once Android has run on a userdebug build. edge1-bootwatch
-writes the whole boot there as it happens: logcat.txt and dmesg.txt, from the first
-line, for as long as the board runs. Beside them, folders 120s, completed and
-timeout hold a snapshot of the system's state (getprop, ps, services, the display).
+gives every boot a folder, boot-00001, boot-00002 and on (the last ten are kept),
+and writes the whole boot into it as it happens: logcat.txt and dmesg.txt, from the
+first line, for as long as the board runs, and alive.txt, which says how long the
+boot has been up. If a boot ended in a reset, the next one copies that boot's last
+seconds, kept by the kernel in RAM, into its folder as pstore/. Folders 120s,
+completed and timeout hold a snapshot of the system's state (getprop, ps, services,
+the display). boots.txt has a line per boot: when it started and how long it lasted.
 If Android has not finished booting after 5 minutes, the board reboots by itself,
-warm, so edge1-pstore.bin is saved too. boot-0 is the latest boot, boot-1 the one
-before it. Plain text, and the most complete record of a boot there is.
+warm, so edge1-pstore.bin is saved too. Plain text, and the most complete record of
+a boot there is.
 Send the whole edge1-logs folder (zip it), with edge1-boot.log and edge1-pstore.bin.
+
+edge1-options.txt is the one file here meant to be edited on a PC: settings read at
+every boot (CPU and GPU clock limits). It says what each line does.
 
 Do not edit the other files on a PC; rebuild the image instead.
 EOF
@@ -299,7 +327,8 @@ rm -f "$RESULT"
 # automounter show when the card is plugged into a desktop.
 mkfs.vfat -n EDGE1BOOT -C "$RESULT" $(( size_mib * 1024 )) >/dev/null
 mcopy -i "$RESULT" "$WORK/boot.scr" "$WORK/boot.cmd" "$WORK/Image" "$WORK/ramdisk.img" \
-      "$WORK/edge1.dtb" "$WORK/edge1-boot.log" "$WORK/README.txt" "${extra[@]}" ::
+      "$WORK/edge1.dtb" "$WORK/edge1-boot.log" "$WORK/README.txt" "$WORK/edge1-options.txt" \
+      "${extra[@]}" ::
 
 echo "==> bootfs.img (${size_mib}MiB FAT)"
 printf '    Image        %9s bytes (%s in memory with BSS)\n' "${V[KSZ]}" "${V[KIMAGE]}"

@@ -1,0 +1,9 @@
+# kdevtmpfs keeps the kernel's own devtmpfs up to date (loop devices, USB bus
+# nodes) even though Android's /dev is a tmpfs of init's; on it everything is
+# "device". Harmless either way, and denied it fills the log at every hotplug.
+# Character nodes and directories are allowed, as GloDroid does; block nodes may
+# not be (a platform neverallow keeps "device" block nodes from being created by
+# anyone), so those are only kept out of the log.
+allow kernel device:dir { add_name remove_name write create rmdir };
+allow kernel device:chr_file { create setattr getattr unlink };
+dontaudit kernel device:blk_file { create setattr getattr unlink };

@@ -65,6 +65,10 @@ had_apps=0; [[ -f "$apps_bp" ]] && had_apps=1
 has_apps=0; [[ -f "$apps_bp" ]] && has_apps=1
 (( had_apps == has_apps )) || changed=1
 
+# The builder's own settings: language, time zone, signing keys. Product config
+# reads them; they hold no module, so the finder cache is not concerned.
+"$(dirname "${BASH_SOURCE[0]}")/local-config.sh" "$TREE" || echo "local-config.sh failed; continuing with Android's defaults and the test keys" >&2
+
 if (( changed )); then
     # Soong's finder caches the tree walk. A changed device tree that the cache
     # predates would be found only on the second build, which is the kind of

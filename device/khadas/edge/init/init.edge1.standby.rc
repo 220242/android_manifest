@@ -1,0 +1,25 @@
+# Khadas Edge1 - standby: screen off, CPU kept awake.
+#
+# The power key (the board's, or a Bluetooth or USB remote's) puts Android to
+# sleep: the display goes off, HDMI drops its signal and the TV goes to standby.
+# What must not follow is system suspend. Suspend on this board has never been
+# tried, and woken from it the board needs an interrupt from a source marked as a
+# wakeup source - the power button is one, a USB gamepad or a Bluetooth remote is
+# not, as far as this kernel and DTS go. A box that sleeps on the remote's power
+# key and cannot be woken by it is a box that needs its power cable pulled. So a
+# wake lock is held from boot and the CPUs idle instead; any input device wakes
+# the display again.
+#
+# "setprop persist.vendor.edge1.suspend 1" (root) lets it suspend after all, for a
+# setup that only wakes it with the power button; 0 or clearing it takes it back.
+#
+# On /product, like init.edge1.memfd.rc: init runs product rc commands itself, and
+# /sys/power/wake_lock is writable by init, not by vendor_init.
+on boot
+    write /sys/power/wake_lock edge1_standby
+
+on property:sys.boot_completed=1 && property:persist.vendor.edge1.suspend=1
+    write /sys/power/wake_unlock edge1_standby
+
+on property:persist.vendor.edge1.suspend=0
+    write /sys/power/wake_lock edge1_standby

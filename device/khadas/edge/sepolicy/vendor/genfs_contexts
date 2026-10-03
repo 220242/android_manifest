@@ -26,3 +26,22 @@ genfscon sysfs /devices/platform/ff940000.hdmi                   u:object_r:sysf
 # device - it drives HDMI, and the kernel fragment does not build
 # BACKLIGHT_CLASS_DEVICE - so the directory never appears.
 genfscon sysfs /class/thermal                                    u:object_r:sysfs_thermal:s0
+
+# rockchip-drm's platform device. libdrm (drmGetDevice, in minigbm and Mesa) reads
+# its uevent in every process that draws; as plain sysfs that was denied to all of
+# them (cards 18-19). It is the display half of the GPU pair, so sysfs_gpu, which
+# AOSP lets graphics clients read.
+genfscon sysfs /devices/platform/display-subsystem               u:object_r:sysfs_gpu:s0
+
+# The thermal zones themselves (/sys/class/thermal only holds links to them):
+# the thermal service, the performance overlay and the bootwatch read them.
+genfscon sysfs /devices/virtual/thermal                          u:object_r:sysfs_thermal:s0
+
+# The USB PHYs' extcon devices, which system_server reads for cable state.
+genfscon sysfs /devices/platform/ff770000.syscon/ff770000.syscon:usb2phy@e450/extcon u:object_r:sysfs_extcon:s0
+genfscon sysfs /devices/platform/ff770000.syscon/ff770000.syscon:usb2phy@e460/extcon u:object_r:sysfs_extcon:s0
+
+# Wakeup sources system_suspend reads statistics from: the PMIC on i2c4 and the
+# power button. More may show up in misc.txt's /sys/class/wakeup listing.
+genfscon sysfs /devices/platform/ff3d0000.i2c/i2c-4/4-001b/wakeup u:object_r:sysfs_wakeup:s0
+genfscon sysfs /devices/platform/gpio-keys/wakeup                u:object_r:sysfs_wakeup:s0

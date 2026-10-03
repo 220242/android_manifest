@@ -80,3 +80,10 @@ odm          /odm          ext4  ro,barrier=1  wait,logical,first_stage_mount,av
 # the eMMC, the slot is a real removable slot again and this line comes back:
 #   /devices/platform/fe320000.mmc/mmc_host*  /storage/sdcard1  vfat  nosuid,nodev  wait,voldmanaged=sdcard1:auto
 /devices/platform/*.usb*                        /storage/usbotg   vfat  nosuid,nodev  wait,voldmanaged=usbotg:auto
+
+# ---- zram ----
+#
+# Compressed swap in RAM, half of it, LZ4 (the kernel's default compressor here).
+# Turned on by init.edge1.rc once the boot completes - swapon_all runs in init
+# itself, not vendor_init, so it has the rights for it.
+/dev/block/zram0                                none              swap  defaults      zramsize=50%
