@@ -32,7 +32,9 @@ the board; there is **no serial adapter**. One iteration:
    it: kernel console, panic records, logcat (pmsg). Find the first fatal thing, fix
    it, also fix whatever else the log shows, verify offline (below), push, reply.
 5. `EDGE1BOOT:edge1-options.txt` is read at every boot (CPU and GPU clock limits): the
-   owner can change it in Windows between two boots, without a build.
+   owner can change it in Windows between two boots, without a build. It ships with
+   six modes described in Russian - power test (on), full speed, video, games, quiet,
+   minimal - each setting all three limits; the lowest one left on wins.
 
 Replies to the owner: **Russian, short, professional** — what broke, what was fixed,
 the exact command to run, what to send back. They value a lot of work per round trip:

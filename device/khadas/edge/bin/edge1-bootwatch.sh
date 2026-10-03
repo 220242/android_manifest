@@ -211,25 +211,33 @@ alive() {
 #   cpu_big_max_mhz    top clock of the A72s (408..1800)
 #   cpu_little_max_mhz top clock of the A53s (408..1416)
 #   gpu_max_mhz        top clock of the Mali (200..800)
-# The image ships one that lowers the big cores and the GPU, as a test of the
-# power supply (build/build-bootfs.sh has the default and the reason).
+# The image ships one with ready-made modes, commented in Russian, the power test
+# switched on (build/build-bootfs.sh has the file and the reasons).
 apply_options() {
-    local f="$MNT/edge1-options.txt" key val applied=""
+    local f="$MNT/edge1-options.txt" key val applied="" bom big="" little="" gpu=""
     [ -f "$f" ] || return
+    # The file is edited in Notepad: it may come back with a UTF-8 BOM ahead of the
+    # first line, CRLF endings, tabs, or a "# note" after a value.
+    bom=$(printf '\357\273\277')
     while IFS='=' read -r key val; do
-        key=$(echo "$key" | tr -d ' \r'); val=$(echo "$val" | tr -d ' \r')
+        key=$(echo "${key#"$bom"}" | tr -d ' \t\r'); val=$(echo "${val%%#*}" | tr -d ' \t\r')
         case "$key" in ''|\#*) continue ;; esac
         case "$val" in ''|*[!0-9]*) log "options: $key: not a number"; continue ;; esac
         case "$key" in
-            cpu_big_max_mhz)
-                echo $((val * 1000)) > /sys/devices/system/cpu/cpufreq/policy4/scaling_max_freq ;;
-            cpu_little_max_mhz)
-                echo $((val * 1000)) > /sys/devices/system/cpu/cpufreq/policy0/scaling_max_freq ;;
-            gpu_max_mhz)
-                echo $((val * 1000000)) > /sys/class/devfreq/ff9a0000.gpu/max_freq ;;
-            *) log "options: unknown key $key"; continue ;;
-        esac && applied="$applied $key=$val"
+            cpu_big_max_mhz) big=$val ;;
+            cpu_little_max_mhz) little=$val ;;
+            gpu_max_mhz) gpu=$val ;;
+            *) log "options: unknown key $key" ;;
+        esac
     done < "$f"
+    # The last value of each key counts: of two modes left on, the lower one in the
+    # file. Each is written once, and only what was written is reported.
+    [ -n "$big" ] && echo $((big * 1000)) > /sys/devices/system/cpu/cpufreq/policy4/scaling_max_freq \
+        && applied="$applied cpu_big_max_mhz=$big"
+    [ -n "$little" ] && echo $((little * 1000)) > /sys/devices/system/cpu/cpufreq/policy0/scaling_max_freq \
+        && applied="$applied cpu_little_max_mhz=$little"
+    [ -n "$gpu" ] && echo $((gpu * 1000000)) > /sys/class/devfreq/ff9a0000.gpu/max_freq \
+        && applied="$applied gpu_max_mhz=$gpu"
     [ -n "$applied" ] && log "options applied:$applied"
     OPTIONS="$applied"
 }

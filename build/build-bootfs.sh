@@ -256,25 +256,83 @@ else
     echo "     script will not save the previous kernel's log)" >&2
 fi
 # Settings the owner can change on a PC between two boots; edge1-bootwatch reads
-# them at every boot (userdebug). The default lowers the big cores and the GPU: card
-# 19 reset at random moments under load, at 40-57C, and its ramoops came back with
-# bits flipped throughout - a hardware reset, not a software one. If it does not
-# happen at these clocks and does at full ones, the board is short of power at the
-# top of its range.
+# them at every boot (userdebug). In Russian, the owner's language: it is the one
+# file on the card meant to be edited by hand. Every mode sets all three limits, so
+# the last uncommented mode in the file wins whole. The one on is the power test:
+# card 19 reset at random moments under load, at 40-57C, its ramoops bit-flipped
+# throughout - a hardware reset; card 21 ran 14 minutes at these clocks without one.
+# The steps are rk3399.dtsi's OPP tables (6.12); the voltages are why the top steps
+# cost so much more power than the ones below them.
 cat > "$WORK/edge1-options.txt" <<'EOF'
-# Khadas Edge1 - settings read at every boot. Edit this file on the PC, put the
-# card back, boot. Lines starting with # are ignored.
+# Khadas Edge1 - настройки, которые читаются при каждой загрузке.
 #
-# Stability test: the big cores (A72) are held at 1416 MHz instead of 1800, and the
-# GPU at 600 MHz instead of 800. Card 19 restarted at random moments with the full
-# clocks; if it no longer does with these, the board is short of power at full
-# speed - try a stronger power supply (USB-C PD, 12V). For full speed, put # in
-# front of both lines.
+# Как менять: вставьте карту в ПК, откройте этот файл Блокнотом, поправьте,
+# сохраните, верните карту в плату и включите её. Строки с # в начале не
+# действуют. Работает на userdebug-сборке (её собирает Start-EdgeBuild.ps1).
+#
+# Что можно задать - верхний предел частоты, в МГц:
+#   cpu_big_max_mhz     2 быстрых ядра A72:  408 600 816 1008 1200 1416 1608 1800
+#   cpu_little_max_mhz  4 малых ядра A53:    408 600 816 1008 1200 1416
+#   gpu_max_mhz         графика Mali-T860:   200 297 400 500 600 800
+# Число между ступенями округляется вниз до ступени. Ниже предела частота
+# меняется как обычно - по нагрузке. Чем выше ступень, тем выше и напряжение:
+# A72 на 1800 потребляет почти вдвое больше, чем на 1416, GPU на 800 - почти
+# вдвое больше, чем на 600. Поэтому при слабом питании сбоят именно верхние.
+#
+# Режимы ниже. Включён один - строки без #. Чтобы выбрать другой, поставьте #
+# перед строками включённого и уберите # у строк нужного. Если включено
+# несколько, действует нижний: каждый режим задаёт все три предела.
+# Что применилось, видно в edge1-logs/boots.txt (options: ...).
+
+# === Тест питания (включён сейчас) ======================================
+# A72 1416, A53 1416, GPU 600. Верхние ступени выключены - самые
+# прожорливые. Карты 18-19 на полных частотах перезагружались в случайные
+# моменты; карта 21 в этом режиме проработала 14 минут без сбоев. Оставьте,
+# пока не будет ясно, что перезагрузок нет и при долгой работе.
 cpu_big_max_mhz=1416
+cpu_little_max_mhz=1416
 gpu_max_mhz=600
-#
-# Also possible:
-# cpu_little_max_mhz=1416
+
+# === Полная скорость ===================================================
+# A72 1800, A53 1416, GPU 800 - как задумано производителем. Нужен хороший
+# блок питания USB-C PD (лучше сетевой, 12 или 15 В); павербанк может на миг
+# проседать, и плата перезагрузится. Если с этим режимом перезагрузки
+# вернутся, а в тесте питания их нет - дело в питании.
+#cpu_big_max_mhz=1800
+#cpu_little_max_mhz=1416
+#gpu_max_mhz=800
+
+# === Видео ============================================================
+# A72 1800, A53 1416, GPU 600. Пока аппаратное декодирование не готово, видео
+# декодирует процессор, ему нужна вся скорость - особенно 4K и 1080p 60 к/с.
+# Графике хватает 600: меню рисуется в 1080p, на 4K его растягивает
+# видеовыход.
+#cpu_big_max_mhz=1800
+#cpu_little_max_mhz=1416
+#gpu_max_mhz=600
+
+# === Игры и эмуляторы =================================================
+# A72 1608, A53 1416, GPU 800. Для 3D важнее всего графика - она на
+# максимуме; быстрые ядра на ступень ниже, чтобы пик потребления был меньше.
+#cpu_big_max_mhz=1608
+#cpu_little_max_mhz=1416
+#gpu_max_mhz=800
+
+# === Тихий и холодный =================================================
+# A72 1200, A53 1200, GPU 400. Меньше нагрев, вентилятор тише, слабому
+# блоку питания легче. Для меню и музыки хватает с запасом, видео 1080p
+# обычно идёт; 4K-видео в этом режиме будет дёргаться.
+#cpu_big_max_mhz=1200
+#cpu_little_max_mhz=1200
+#gpu_max_mhz=400
+
+# === Минимальный (проверка) ===========================================
+# A72 816, A53 816, GPU 297. Для диагностики, не для просмотра: если плата
+# перезагружается даже так, причина не в нагрузке на питание - пришлите
+# edge1-logs (в папке перезагрузившейся загрузки будет pstore).
+#cpu_big_max_mhz=816
+#cpu_little_max_mhz=816
+#gpu_max_mhz=297
 EOF
 cat > "$WORK/README.txt" <<'EOF'
 Khadas Edge1 - Android TV 14, boot partition
@@ -317,7 +375,8 @@ a boot there is.
 Send the whole edge1-logs folder (zip it), with edge1-boot.log and edge1-pstore.bin.
 
 edge1-options.txt is the one file here meant to be edited on a PC: settings read at
-every boot (CPU and GPU clock limits). It says what each line does.
+every boot - CPU and GPU clock limits, with ready-made modes (power test, full speed,
+video, games, quiet, minimal). It says what each one does, in Russian.
 
 Do not edit the other files on a PC; rebuild the image instead.
 EOF
