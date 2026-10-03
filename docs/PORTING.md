@@ -280,7 +280,7 @@ device/khadas/edge/              the device tree
   fstab.edge1                    logical partitions, FBE v2
   init/, sepolicy/vendor/        board bring-up and SELinux
   audio/, media/, input/, permissions/, overlay/
-  wifi/firmware/brcm/            brcmfmac firmware + board NVRAM (AP6398S)
+  wifi/firmware/brcm/            AP6398S firmware: Wi-Fi + NVRAM, Bluetooth patchram
   kernel/edge1_mainline.config   arm64 defconfig -> Android 14 delta, 6.12
   flash/partitions.tsv           one layout: images, flash script, installer
   flash/boot.cmd                 the bootfs boot script, filled from boot.img

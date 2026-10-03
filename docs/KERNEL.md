@@ -25,7 +25,8 @@ userspace for them:
 | GPU | `drivers/gpu/drm/panfrost` | `external/mesa3d`, `libmesa_pipe_panfrost` → `libGLES_mesa` |
 | Display | `drivers/gpu/drm/rockchip` | `external/drm_hwcomposer` + minigbm |
 | Decode | `drivers/staging/media/rkvdec` | `external/v4l2_codec2` |
-| Wi-Fi | `brcmfmac` over SDIO | AOSP `wpa_supplicant` |
+| Wi-Fi | `brcmfmac` over SDIO | AOSP `wpa_supplicant`, no vendor Wi-Fi HAL |
+| Bluetooth | `hci_bcm` over uart0 (serdev) | AOSP AIDL HAL, HCI user channel |
 | Audio | `simple-audio-card` → HDMI codec | AOSP AIDL audio HAL over ALSA |
 
 Not one proprietary blob is required, and nothing in `hardware/rockchip` or
@@ -85,11 +86,17 @@ Two things about the fragment are worth knowing:
 panfrost and brcmfmac as modules. This layout has no `vendor_dlkm` and loads
 nothing in first-stage init, so a module here is a driver that does not exist.
 
-**Bluetooth has no transport.** `CONFIG_BT` is on, `BT_HCIUART_BCM` is not. uart0
-carries the BCM4359 and the DTS has a `brcm,bcm43438-bt` node, so the kernel driver
-would claim the port and do the firmware patch itself - while Android's Bluetooth
-HAL expects to open the tty and patch it from userspace. Leaving the transport out
-keeps `/dev/ttyS0` free until that is decided. See `STATUS.md`.
+**Bluetooth is the kernel's.** uart0 carries the BCM4359 and the DTS describes it as
+a serdev child (`brcm,bcm43438-bt`), so `BT_HCIUART_BCM` (built in, which takes
+`BT_HCIUART=y` and `POWER_SEQUENCING=y`) powers the chip, loads
+`brcm/BCM4359C0.hcd` and registers hci0. Android's Bluetooth HAL then binds hci0 as
+an HCI user channel; there is no tty for userspace to own.
+
+**Firmware for built-in drivers lives in the ramdisk.** brcmfmac and hci_bcm ask for
+their firmware within two seconds of power-on, before Android mounts `/vendor`. The
+firmware loader waits for the initramfs and searches `/lib/firmware`, so device.mk
+installs every file under `/vendor/firmware` into the ramdisk's `/lib/firmware` as
+well (verify-tree [11] checks it).
 
 ## Patches
 

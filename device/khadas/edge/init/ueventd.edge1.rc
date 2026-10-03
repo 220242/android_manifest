@@ -29,10 +29,11 @@
 /dev/cec0                 0660   system     system
 # IR receiver
 /dev/lirc0                0660   system     system
-# The Bluetooth HAL (android.hardware.bluetooth-service.default, user bluetooth)
-# toggles the radio through rfkill; at the default root-only mode it logged
-# "unable to open /dev/rfkill: Permission denied" on card 14.
-/dev/rfkill               0660   bluetooth  bluetooth
-# uart0, the BCM4359's Bluetooth transport. Left in place for whichever HAL ends
-# up owning it; see init.edge1.rc.
-/dev/ttyS0                0660   bluetooth  bluetooth
+# No /dev/rfkill entry, deliberately: it stays root-only. The Bluetooth HAL
+# (android.hardware.bluetooth-service.default, user bluetooth) soft-blocks the
+# Bluetooth rfkill switch before it binds to hci0, and the kernel will not open a
+# blocked hci0 - so a HAL that can reach rfkill locks itself out. Denied, it logs
+# "unable to open /dev/rfkill" and binds. See device.mk's Bluetooth section.
+#
+# No /dev/ttyS0 either: uart0 belongs to the kernel's hci_bcm (a serdev device),
+# so there is no tty node for it.

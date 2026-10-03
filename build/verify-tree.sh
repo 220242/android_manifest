@@ -1230,12 +1230,113 @@ for pmk in "$DEV/edge1_tv.mk" "$DEV/device.mk"; do
     bad=$(grep -nE '^[[:space:]]*(BOARD|TARGET)_[A-Z_0-9]+[[:space:]]*[:+?]?=' "$pmk" || true)
     if [[ -n "$bad" ]]; then
         while read -r l; do
-            warn "$(basename "$pmk"):$l is a board variable in a product makefile"
+            wrn "$(basename "$pmk"):$l is a board variable in a product makefile"
         done <<< "$bad"
     else
         ok "$(basename "$pmk") assigns no board variables"
     fi
 done
+echo
+
+# --- 11. connectivity: Wi-Fi and Bluetooth -----------------------------------
+# Card 16 booted to the launcher with neither: no supplicant on the image (its
+# Android.mk guard was unset, and the module probe cannot see Make guards), a
+# vendor Wi-Fi HAL that could never start, Wi-Fi firmware on /vendor that the
+# built-in driver asked for before /vendor existed, and no Bluetooth at all.
+echo "[11] connectivity: Wi-Fi and Bluetooth"
+if conn=$(python3 - "$DEV" <<'EOF'
+import os, re, sys
+dev = sys.argv[1]
+def mk(name):
+    path = os.path.join(dev, name)
+    if not os.path.exists(path):
+        return ''
+    # Comments out, continuations joined.
+    text = ''.join(l.rstrip('\n').split('#', 1)[0] + '\n' for l in open(path))
+    return text.replace('\\\n', ' ')
+dmk, bcm = mk('device.mk'), mk('BoardConfig.mk')
+pkgs = set()
+for m in re.finditer(r'^\s*PRODUCT_PACKAGES\s*\+?=(.*)$', dmk, re.M):
+    pkgs.update(t for t in m.group(1).split() if not t.startswith('$'))
+copies = re.findall(r'\S+:\$\(TARGET_COPY_OUT_[A-Z]+\)\S*', dmk)
+dests = {c.split(':', 1)[1] for c in copies}
+def board(var):
+    m = re.search(r'^\s*%s\s*:?=\s*(\S*)' % var, bcm, re.M)
+    return m.group(1) if m else ''
+frag = {}
+fpath = os.path.join(dev, 'kernel', 'edge1_mainline.config')
+for l in open(fpath):
+    m = re.match(r'(CONFIG_[A-Z0-9_]+)=(\S+)', l)
+    if m:
+        frag[m.group(1)] = m.group(2)
+out = []
+def ok(m): out.append('ok\t' + m)
+def err(m): out.append('err\t' + m)
+
+if pkgs & {'wpa_supplicant', 'hostapd'}:
+    if board('WPA_SUPPLICANT_VERSION') in ('VER_0_8_X', 'VER_2_1_DEVEL'):
+        ok('WPA_SUPPLICANT_VERSION is set, so wpa_supplicant/hostapd are real modules')
+    else:
+        err('device.mk asks for wpa_supplicant/hostapd but BoardConfig.mk does not set '
+            'WPA_SUPPLICANT_VERSION := VER_0_8_X; both are then silently not built')
+    if board('WIFI_HIDL_UNIFIED_SUPPLICANT_SERVICE_RC_ENTRY') == 'true':
+        ok('wpa_supplicant installs its own service rc')
+    else:
+        err('WIFI_HIDL_UNIFIED_SUPPLICANT_SERVICE_RC_ENTRY is not true and nothing else defines '
+            'service wpa_supplicant')
+if 'wpa_supplicant.conf' in pkgs:
+    err('wpa_supplicant.conf in PRODUCT_PACKAGES: only vendor Wi-Fi HAL dirs define that module; '
+        'copy a template to /vendor/etc/wifi instead')
+if '$(TARGET_COPY_OUT_VENDOR)/etc/wifi/wpa_supplicant.conf' in dests:
+    ok('/vendor/etc/wifi/wpa_supplicant.conf is installed')
+elif 'wpa_supplicant' in pkgs:
+    err('no /vendor/etc/wifi/wpa_supplicant.conf: the supplicant has no template to start from')
+if 'android.hardware.wifi-service' in pkgs and not board('BOARD_WLAN_DEVICE'):
+    err('android.hardware.wifi-service without BOARD_WLAN_DEVICE: its legacy HAL is the '
+        'fallback stub, IWifi never starts, and the framework will not run HAL-less while '
+        'IWifi is declared')
+else:
+    ok('no vendor Wi-Fi HAL without a legacy HAL beneath it')
+
+# Firmware for built-in drivers has to be in the ramdisk: they ask at 1-2s.
+builtin = frag.get('CONFIG_BRCMFMAC') == 'y' or frag.get('CONFIG_BT_HCIUART_BCM') == 'y'
+vfw = sorted(d.split('/firmware/', 1)[1] for d in dests
+             if d.startswith('$(TARGET_COPY_OUT_VENDOR)/firmware/'))
+if builtin:
+    for f in vfw:
+        if '$(TARGET_COPY_OUT_RAMDISK)/lib/firmware/' + f in dests:
+            ok('firmware %s is in the ramdisk too' % f)
+        else:
+            err('firmware %s only on /vendor, which a built-in driver cannot reach at probe time; '
+                'copy it to $(TARGET_COPY_OUT_RAMDISK)/lib/firmware/%s as well' % (f, f))
+
+bt_feature = any(d.endswith('/android.hardware.bluetooth.xml') for d in dests)
+if bt_feature:
+    need = {'CONFIG_BT': 'y', 'CONFIG_BT_HCIUART': 'y', 'CONFIG_BT_HCIUART_BCM': 'y'}
+    miss = [k for k, v in need.items() if frag.get(k) != v]
+    if miss:
+        err('Bluetooth declared but the kernel has no hci0 for the HAL: %s not =y' % ', '.join(miss))
+    else:
+        ok('Bluetooth declared, and hci_bcm is built in to provide hci0')
+    if not any(f.startswith('brcm/BCM') and f.endswith('.hcd') for f in vfw):
+        err('Bluetooth declared but no brcm/BCM*.hcd patchram is installed')
+    if 'android.hardware.bluetooth-service.default' not in pkgs:
+        err('Bluetooth declared but android.hardware.bluetooth-service.default is not installed')
+ue = os.path.join(dev, 'init', 'ueventd.edge1.rc')
+if any(re.match(r'\s*/dev/rfkill\s', l) for l in open(ue)):
+    err('ueventd.edge1.rc grants /dev/rfkill: the Bluetooth HAL then soft-blocks hci0 and '
+        'cannot bind it (-ERFKILL)')
+else:
+    ok('/dev/rfkill stays root-only')
+print('\n'.join(out))
+EOF
+); then
+    while IFS=$'\t' read -r kind msg; do
+        case "$kind" in ok) ok "$msg" ;; err) err "$msg" ;; esac
+    done <<< "$conn"
+else
+    err "connectivity check failed to run"
+fi
 echo
 
 echo "=========================================="

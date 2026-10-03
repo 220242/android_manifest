@@ -1,4 +1,4 @@
-# brcmfmac firmware for the AP6398S
+# Firmware for the AP6398S (BCM4359): Wi-Fi and Bluetooth
 
 `brcmfmac4359-sdio.bin` is the BCM4359 SDIO firmware, `brcmfmac4359-sdio.txt` the
 board NVRAM. Both come from this owner's OpenWrt build for the same board
@@ -6,9 +6,22 @@ board NVRAM. Both come from this owner's OpenWrt build for the same board
 are known to associate and pass traffic on mainline brcmfmac. The NVRAM's own
 header identifies it: `AP6398S_NVRAM_V2.0_20191009A`, `AP6359SA_V1.1NVRAM`.
 
-They install to `/vendor/firmware/brcm/`, which is both what
-`firmware_class.path` on the kernel command line points at and one of ueventd's
-default firmware directories.
+`BCM4359C0.hcd` is the Bluetooth patchram, loaded by the kernel's `hci_bcm`/`btbcm`
+over uart0 when hci0 is set up. It is Armbian's (github.com/armbian/firmware, commit
+`2a9e1c19460401443267926181191d57e3ff175d`, `brcm/BCM4359C0.hcd`, sha256
+`c4fed091688bcdd7a8bca2e8601f10eddddfca5d95a44f40a9fcc8a0868d7c8e`) - the file
+Armbian ships for its AP6398S boards. It identifies itself as
+`BCM4359C0 37.4MHz AMPAK AP6359S-0059`. btbcm names it from the controller's
+subversion (0x6106 -> `BCM4359C0`) and tries `BCM4359C0.khadas,edge-v.hcd` first.
+
+All three install twice: to `/vendor/firmware/brcm/`, which is what
+`firmware_class.path` on the kernel command line points at, and to the ramdisk's
+`/lib/firmware/brcm/`. The second copy is the one that is used. Both drivers are
+built into the kernel and ask for their firmware within two seconds of power-on,
+long before Android mounts /vendor; the firmware loader waits for the initramfs and
+searches `/lib/firmware` after `firmware_class.path`. On card 16, with the /vendor
+copy only, brcmfmac logged "Direct firmware load ... failed with error -2" at 1.4s
+and gave up, and there was no wlan0.
 
 The driver asks for `brcmfmac4359-sdio.<board-compatible>.txt` first and falls back
 to the plain name, which is what is installed. The board compatible comes from the

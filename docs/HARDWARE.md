@@ -168,14 +168,15 @@ From the first boot of this tree's kernel (card seven), read out of `edge1-pstor
 |---|---|
 | `brcmfmac4359-sdio.bin` | **the same name this tree installs** |
 | `brcmfmac4359-sdio.txt` | **the same name this tree installs** |
-| `BCM4359C0.hcd` | the Bluetooth patchram firmware. **We do not ship this.** |
+| `BCM4359C0.hcd` | the Bluetooth patchram firmware. Shipped since card 17 (Armbian's). |
 
 `wlan0` is up, so brcmfmac works with those files. Two things settled:
 
 * The board-suffixed NVRAM name (`brcmfmac4359-sdio.khadas,edge-v.txt`) that
   `wifi/firmware/brcm/README.md` raised as a possibility is **not** what this board
   uses. The plain `.txt` is. Our naming is correct as it stands.
-* Bluetooth needs `BCM4359C0.hcd`, which is a fact we did not have.
+* Bluetooth needs `BCM4359C0.hcd`, which is a fact we did not have. It is now in
+  `wifi/firmware/brcm/`, taken from github.com/armbian/firmware.
 
 ## Bluetooth: there is no /dev/ttyS0
 
@@ -191,6 +192,10 @@ This **corrects** the open question in `STATUS.md`, which framed it as the kerne
 `hci_bcm` and Android's HAL both wanting `/dev/ttyS0`. They cannot both want it: it is
 not there. Whatever the Bluetooth answer turns out to be, it starts from the serdev
 node and `BCM4359C0.hcd`, not from a tty.
+
+That is the answer taken: the kernel's `hci_bcm` binds the serdev node ("serial
+serial0: tty port ttyS0 registered" in the boot log is the serdev controller, not a
+tty), and Android's HAL uses the resulting hci0.
 
 `/dev/ttyS2` does exist, which confirms `console=ttyS2,1500000n8`.
 

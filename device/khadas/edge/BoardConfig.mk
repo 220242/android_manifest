@@ -526,24 +526,32 @@ DEVICE_MATRIX_FILE := device/khadas/edge/vintf/compatibility_matrix.xml
 #
 #   - No BOARD_WLAN_DEVICE. It selects a vendor wifi_hal under
 #     hardware/broadcom/wlan written for bcmdhd's private nl80211 commands, which
-#     brcmfmac does not implement. Which HAL to use instead is an open question -
-#     the module probe now dumps what the tree offers - so it is left unset rather
-#     than set to something that cannot work.
+#     brcmfmac does not implement. There is no vendor Wi-Fi HAL at all: the
+#     framework runs HAL-less over wificond and wpa_supplicant (device.mk).
 #   - No WIFI_DRIVER_FW_PATH_*. Those write firmware paths into bcmdhd's module
 #     parameters. brcmfmac asks the kernel firmware loader for
 #     brcm/brcmfmac4359-sdio.bin and its board nvram, which device.mk installs
-#     into /vendor/firmware/brcm.
+#     into the ramdisk and /vendor/firmware/brcm.
 #
 # The firmware and the board's NVRAM come from this owner's OpenWrt build for the
 # same board, where they are known to associate.
+#
+# WPA_SUPPLICANT_VERSION is what makes external/wpa_supplicant_8/Android.mk define
+# wpa_supplicant and hostapd at all; without it both names were silently dropped
+# from PRODUCT_PACKAGES (card 16: no supplicant on the image).
+# WIFI_HIDL_UNIFIED_SUPPLICANT_SERVICE_RC_ENTRY installs the module's own rc: a
+# disabled "wpa_supplicant" service that servicemanager starts on demand for
+# ISupplicant/default (-O/data/vendor/wifi/wpa/sockets, -g@android:wpa_wlan0).
+WPA_SUPPLICANT_VERSION := VER_0_8_X
+WIFI_HIDL_UNIFIED_SUPPLICANT_SERVICE_RC_ENTRY := true
 BOARD_WPA_SUPPLICANT_DRIVER := NL80211
 BOARD_HOSTAPD_DRIVER := NL80211
 
 BOARD_HAVE_BLUETOOTH := true
 # BOARD_HAVE_BLUETOOTH_BCM was set here. system/bt read it until Android 11; the
 # Bluetooth stack is an APEX module on 14 and nothing reads it. The Broadcom
-# specifics that matter now are the firmware patchram stage in init.edge1.rc and
-# bluetooth/bt_vendor.conf.
+# specifics are the kernel's now: hci_bcm loads the patchram and registers hci0
+# (kernel config fragment, device.mk's Bluetooth section).
 # BOARD_BLUETOOTH_BDROID_BUILDCFG_INCLUDE_DIR pointed at device/khadas/edge/bluetooth,
 # and that directory had no bdroid_buildcfg.h in it. soong_config.mk:147 passes this
 # to Soong as BtConfigIncludeDir and the Bluetooth stack includes the header from
@@ -554,7 +562,7 @@ BOARD_HAVE_BLUETOOTH := true
 # Left unset, exactly as BoardConfigGsiCommon.mk does, because there is nothing
 # board-specific to put in it: the files that were there (bt_vendor.conf,
 # vnd_edge1.txt) configured libbt-vendor, Broadcom's HIDL-era vendor library, which
-# this tree does not build. See init.edge1.rc for where Bluetooth stands.
+# this tree does not build.
 
 # ---------------------------------------------------------------------------
 # Misc.

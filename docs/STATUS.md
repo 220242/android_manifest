@@ -141,10 +141,16 @@ Measured on the board — [`HARDWARE.md`](HARDWARE.md) has the readings:
   their app uids - `init.edge1.rc` was chmod'ing `/dev/dri/card0` back to 0660 after
   ueventd had made it 0666. Removed. F-Droid is now preinstalled (fetched and
   signature-checked at build time).
-* **Known next: Wi-Fi.** brcmfmac is built in, so it asks for
-  `brcm/brcmfmac4359-sdio.bin` 1.8s into boot, long before `/vendor` is mounted, and
-  gets -2. Armbian loads it as a module, after its rootfs is up. Not a boot blocker;
-  the fix is to re-probe the SDIO host from init once `/vendor` is there.
+* **In the launcher.** Card 16: leanback launcher and SystemUI on HDMI, F-Droid
+  installed, TvSettings working - and no Wi-Fi or Bluetooth. Wi-Fi had three faults
+  stacked: brcmfmac (built in) asked for its firmware before `/vendor` was mounted;
+  `wpa_supplicant` and `hostapd` were never built (`WPA_SUPPLICANT_VERSION` unset);
+  and a vendor Wi-Fi HAL with no legacy HAL beneath it kept the framework from
+  starting Wi-Fi at all. Now: firmware in the ramdisk too, the supplicant built, no
+  vendor HAL (the framework runs HAL-less, as GloDroid does). Bluetooth: the kernel's
+  `hci_bcm` loads `BCM4359C0.hcd` (Armbian's) and registers hci0, and AOSP's default
+  HAL binds it as an HCI user channel; the features are declared again, which also
+  stops TvSettings dying in "Add accessory". UI sounds added.
 
 What they did not establish, because none of the card's code ever ran: whether our U-Boot,
 our TPL's DDR init, or our SPL work on this board. The DDR-blob A/B, the SPL boot-order
@@ -428,7 +434,8 @@ none of that work is reusable anywhere else.
 | GPU | `drivers/gpu/drm/panfrost` | `external/mesa3d` → `libGLES_mesa` |
 | Display | `drivers/gpu/drm/rockchip` | `external/drm_hwcomposer` + minigbm |
 | Decode | `staging/media/rkvdec` (H.264 only) | `external/v4l2_codec2` |
-| Wi-Fi | `brcmfmac` over SDIO | AOSP `wpa_supplicant` |
+| Wi-Fi | `brcmfmac` over SDIO | AOSP `wpa_supplicant`, no vendor Wi-Fi HAL |
+| Bluetooth | `hci_bcm` over uart0 (serdev) | AOSP AIDL HAL, HCI user channel |
 | Audio | `simple-audio-card` → HDMI | AOSP AIDL audio HAL over ALSA |
 | Boot | mainline U-Boot + TF-A, or the eMMC's own U-Boot via `boot.scr` | ordinary GPT, Android boot image v2 |
 
@@ -473,9 +480,11 @@ Rockchip's own gralloc did.
    `PRODUCT_PACKAGES`, and it needs a codec2 store config and a `media_codecs_c2.xml`
    beside it. Until then the software codecs carry playback: 1080p yes, 4K no.
    6.12's rkvdec is H.264 only in any case, so HEVC and VP9 stay in software regardless.
-6. **Bluetooth is unresolved.** Measured on the board: there is no `/dev/ttyS0` —
-   `ttyS1` through `ttyS7` exist and uart0 is not presented as a tty. The firmware name
-   is `BCM4359C0.hcd`, which this tree does not ship. See [`HARDWARE.md`](HARDWARE.md).
+6. **Bluetooth is wired, not yet seen working.** uart0 is a serdev controller (no
+   `/dev/ttyS0`), so the kernel's `hci_bcm` owns it, loads `BCM4359C0.hcd` from the
+   ramdisk and registers hci0; AOSP's default AIDL HAL binds hci0 as an HCI user
+   channel. A2DP audio is off (no Bluetooth audio provider yet). Card 17 is the first
+   test. See [`HARDWARE.md`](HARDWARE.md).
 7. **The device targets FCM level 7, not 8.** Forced rather than chosen — see below.
    The vendor image's HAL surface is Android-13-era.
 8. **Codec performance numbers are placeholders.** `media/media_codecs_performance.xml`

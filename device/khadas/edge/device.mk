@@ -64,15 +64,15 @@ PRODUCT_COPY_FILES += \
     frameworks/native/data/etc/android.hardware.wifi.direct.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/android.hardware.wifi.direct.xml \
     $(LOCAL_PATH)/permissions/khadas_edge_excluded_hardware.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/khadas_edge_excluded_hardware.xml
 
-# No android.hardware.bluetooth / bluetooth_le, for now. With the feature declared,
-# system_server starts the Bluetooth service, and com.android.bluetooth aborts at
-# once - "Can't start stack, last instance: starting HciHalHidl", after "HalVersionManager
-# No supported HAL version" - because no Bluetooth HAL is running yet (the BCM4359
-# needs its firmware patch loaded first; see init.edge1.rc). It restarted every few
-# seconds on card 14. Without the feature SystemServer logs "No Bluetooth Service
-# (Bluetooth Hardware Not Present)" and leaves it. The two lines come back with the HAL:
-#   frameworks/native/data/etc/android.hardware.bluetooth.xml
-#   frameworks/native/data/etc/android.hardware.bluetooth_le.xml
+# Bluetooth features. Off for cards 15-16: with them declared and no working HAL,
+# com.android.bluetooth aborted at once ("Can't start stack, last instance:
+# starting HciHalHidl") and restarted every few seconds; without them
+# BluetoothAdapter is null and TvSettings' "Add accessory" died on it
+# (NullPointerException in BluetoothDevicePairer.start, card 16). Back now that
+# the kernel brings up hci0 for the HAL - see the Bluetooth section below.
+PRODUCT_COPY_FILES += \
+    frameworks/native/data/etc/android.hardware.bluetooth.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/android.hardware.bluetooth.xml \
+    frameworks/native/data/etc/android.hardware.bluetooth_le.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/android.hardware.bluetooth_le.xml
 
 # android.hardware.opengles.aep.xml was copied here, carried over from the BSP
 # where the Mali blob supported the Android Extension Pack. AEP requires GLES 3.1
@@ -128,6 +128,11 @@ PRODUCT_PACKAGES += \
     DocumentsUI \
     privapp_whitelist_com.android.documentsui \
     LiveTv
+
+# UI sound effects (D-pad ticks, keyboard clicks), which atv_base does not bring:
+# card 16's AudioService logged "SoundPool could not load file" for all six. The
+# TV set is the one Google's own TV products use.
+$(call inherit-product-if-exists, frameworks/base/data/sounds/AudioTv.mk)
 
 # Leanback/TV device overlays (density, HDMI-driven screen config, no rotation).
 DEVICE_PACKAGE_OVERLAYS += $(LOCAL_PATH)/overlay
@@ -248,10 +253,14 @@ PRODUCT_PROPERTY_OVERRIDES += \
 # survive, but a BOARD_* variable assigned from the product side is the kind of
 # ordering dependency that breaks quietly when the build system moves.
 
+# has_HDR_display was true, carried over from the BSP's hwcomposer. Nothing in
+# this display path passes HDR metadata to the TV (drm_hwcomposer reports no HDR
+# capabilities), so claiming HDR only invites apps to pick HDR streams that would
+# then be shown as SDR, washed out.
 PRODUCT_PROPERTY_OVERRIDES += \
     ro.surface_flinger.max_frame_buffer_acquired_buffers=3 \
     ro.surface_flinger.has_wide_color_display=false \
-    ro.surface_flinger.has_HDR_display=true \
+    ro.surface_flinger.has_HDR_display=false \
     debug.sf.disable_backpressure=1
 
 # sys.hwc.device.primary=HDMI-A / sys.hwc.device.extend=DP were set here. Both
@@ -365,37 +374,52 @@ PRODUCT_PROPERTY_OVERRIDES += \
 # Wi-Fi.
 #
 # A10: android.hardware.wifi@1.3, wifi.supplicant@1.2, wifi.hostapd@1.1
-# A14: android.hardware.wifi-V1 (AIDL), wifi.supplicant-V3 (AIDL),
-#      wifi.hostapd-V1 (AIDL).
+# A14: wifi.supplicant-V3 (AIDL), wifi.hostapd-V2 (AIDL), and no IWifi.
 #
-# All three AOSP defaults are driver-agnostic nl80211 implementations, so the
-# BCM4359 needs no vendor Wi-Fi HAL - which is just as well, because the vendor
-# one that exists is written for bcmdhd's private nl80211 commands and this kernel
-# runs brcmfmac.
+# No vendor Wi-Fi HAL (android.hardware.wifi-service). It was installed until card
+# 16, and with nothing beneath it - its legacy HAL, libwifi-hal, picks a vendor
+# implementation by BOARD_WLAN_DEVICE, and every one of those speaks a vendor
+# driver's private nl80211 commands, which brcmfmac does not have - it failed
+# every start: "Can not initialize the vendor function pointer table", and the
+# framework, seeing IWifi declared, refused to bring Wi-Fi up at all ("Failed to
+# start vendor HAL"). With no IWifi declared the framework runs HAL-less
+# (WifiNative "Vendor Hal not supported"): wificond scans, wpa_supplicant
+# associates, the interface is wifi.interface. Lost: STA+AP concurrency, link
+# layer stats, RTT - nothing a TV box uses. GloDroid ships mainline brcmfmac
+# boards the same way.
 #
-# brcmfmac loads one firmware image plus the board NVRAM through the kernel
-# firmware loader, unlike bcmdhd which took separate STA/AP/P2P images through
-# module parameters. Both files come from this owner's OpenWrt build for the same
-# board - see wifi/firmware/brcm/README.md.
+# wpa_supplicant and hostapd exist only when BoardConfig.mk sets
+# WPA_SUPPLICANT_VERSION (external/wpa_supplicant_8/Android.mk), and the module
+# probe greps for LOCAL_MODULE names without evaluating that guard - so on card 16
+# neither was on the image and the framework logged "No HIDL or AIDL service
+# available for SupplicantStaIfaceHal". wpa_supplicant.conf is not a package
+# here: the module of that name is defined by wpa_supplicant_conf.mk, which only
+# vendor Wi-Fi HAL directories include. The template is ours, below.
 #
-# What is not settled: android.hardware.wifi-service needs a legacy HAL
-# underneath for link statistics, RTT and roaming control, and brcmfmac provides
-# none of those vendor commands. Basic STA association is expected to work;
-# anything that asks the HAL for vendor features will not. The module probe dumps
-# what the tree offers here.
+# Firmware: brcmfmac is built in and probes at 1.4s, before /vendor is mounted,
+# so the files are in the ramdisk's /lib/firmware as well - see the kernel config
+# fragment. The /vendor copies serve any later reload.
 # ---------------------------------------------------------------------------
 PRODUCT_PACKAGES += \
-    android.hardware.wifi-service \
     wpa_supplicant \
-    wpa_supplicant.conf \
     hostapd \
     wificond
 
 PRODUCT_COPY_FILES += \
+    $(LOCAL_PATH)/wifi/wpa_supplicant.conf:$(TARGET_COPY_OUT_VENDOR)/etc/wifi/wpa_supplicant.conf \
     $(LOCAL_PATH)/wifi/wpa_supplicant_overlay.conf:$(TARGET_COPY_OUT_VENDOR)/etc/wifi/wpa_supplicant_overlay.conf \
-    $(LOCAL_PATH)/wifi/p2p_supplicant_overlay.conf:$(TARGET_COPY_OUT_VENDOR)/etc/wifi/p2p_supplicant_overlay.conf \
+    $(LOCAL_PATH)/wifi/p2p_supplicant_overlay.conf:$(TARGET_COPY_OUT_VENDOR)/etc/wifi/p2p_supplicant_overlay.conf
+
+# AP6398S firmware: Wi-Fi image + board NVRAM, and the Bluetooth patchram.
+# Each into /vendor/firmware and the ramdisk; wifi/firmware/brcm/README.md has
+# where they come from.
+PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/wifi/firmware/brcm/brcmfmac4359-sdio.bin:$(TARGET_COPY_OUT_VENDOR)/firmware/brcm/brcmfmac4359-sdio.bin \
-    $(LOCAL_PATH)/wifi/firmware/brcm/brcmfmac4359-sdio.txt:$(TARGET_COPY_OUT_VENDOR)/firmware/brcm/brcmfmac4359-sdio.txt
+    $(LOCAL_PATH)/wifi/firmware/brcm/brcmfmac4359-sdio.txt:$(TARGET_COPY_OUT_VENDOR)/firmware/brcm/brcmfmac4359-sdio.txt \
+    $(LOCAL_PATH)/wifi/firmware/brcm/BCM4359C0.hcd:$(TARGET_COPY_OUT_VENDOR)/firmware/brcm/BCM4359C0.hcd \
+    $(LOCAL_PATH)/wifi/firmware/brcm/brcmfmac4359-sdio.bin:$(TARGET_COPY_OUT_RAMDISK)/lib/firmware/brcm/brcmfmac4359-sdio.bin \
+    $(LOCAL_PATH)/wifi/firmware/brcm/brcmfmac4359-sdio.txt:$(TARGET_COPY_OUT_RAMDISK)/lib/firmware/brcm/brcmfmac4359-sdio.txt \
+    $(LOCAL_PATH)/wifi/firmware/brcm/BCM4359C0.hcd:$(TARGET_COPY_OUT_RAMDISK)/lib/firmware/brcm/BCM4359C0.hcd
 
 PRODUCT_PROPERTY_OVERRIDES += \
     wifi.interface=wlan0 \
@@ -406,30 +430,32 @@ PRODUCT_PROPERTY_OVERRIDES += \
 # Bluetooth.
 #
 # A10: android.hardware.bluetooth@1.0 over a Broadcom H4 UART with libbt-vendor.
-# A14: android.hardware.bluetooth-V1 (AIDL). AOSP's
-#      android.hardware.bluetooth-service.default speaks H4 directly, which the
-#      BCM4359 supports once firmware patchram is loaded - handled by the
-#      init.edge1.rc brcm_patchram_plus stage rather than by a HAL.
+# A14: android.hardware.bluetooth-V1 (AIDL), AOSP's default service.
 # ---------------------------------------------------------------------------
-# brcm_patchram_plus is a Broadcom tool from the Rockchip vendor tree, not AOSP,
-# The BCM4359 still needs its firmware patch loaded over uart0 before an HCI device
-# exists, and that question is open: the kernel's hci_bcm driver would do it and
-# then own the port, while this HAL expects to open the tty itself. See
-# init.edge1.rc. The service is installed either way - it costs nothing and is what
-# a solution would plug into.
+# The kernel does the Broadcom part: hci_bcm owns uart0 (a serdev child in the
+# DTS), powers the BCM4359, loads brcm/BCM4359C0.hcd and registers hci0. The AOSP
+# HAL tries an HCI user channel on hci0 before any tty (net_bluetooth_mgmt.cpp)
+# and passes raw HCI to the stack from there - no libbt-vendor, no
+# brcm_patchram_plus. Card 14's crash loop was this HAL waiting for an hci0 that
+# never came.
+#
+# One trap in that HAL: before binding it soft-blocks the Bluetooth rfkill switch
+# it finds in /dev/rfkill, and the kernel refuses to open a blocked hci0
+# (hci_dev_open_sync: -ERFKILL) - so with /dev/rfkill readable the bind fails. The
+# node is therefore left at its default root-only mode (ueventd.edge1.rc); the
+# HAL logs "rfkill unavailable" and carries on.
+#
+# Not here yet: A2DP audio. The audio HAL's bluetooth module wants
+# IBluetoothAudioProviderFactory, which nothing on this image provides (card 16:
+# "Failed to create bluetooth audio provider factory"), so the A2DP source profile
+# is off until it does; remotes, keyboards and gamepads (HID host) do not need it.
 PRODUCT_PACKAGES += \
     android.hardware.bluetooth-service.default
-
-# bluetooth/bt_vendor.conf was copied here. It configured libbt-vendor - the
-# Broadcom vendor library of the HIDL era - with the UART, baud rates and the
-# BCM4359C0.hcd patchram path. Nothing in this build reads it, so the file and the
-# whole bluetooth/ directory are gone: installing a config nothing reads is worse
-# than having none, because it suggests Bluetooth is configured.
 
 PRODUCT_PROPERTY_OVERRIDES += \
     ro.vendor.bluetooth.device=bcm4359 \
     bluetooth.device.class_of_device?=38,4,36 \
-    bluetooth.profile.a2dp.source.enabled?=true \
+    bluetooth.profile.a2dp.source.enabled?=false \
     bluetooth.profile.hfp.ag.enabled?=false \
     bluetooth.profile.hid.host.enabled?=true
 

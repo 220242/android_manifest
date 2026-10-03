@@ -30,10 +30,10 @@ the userspace that spoke to them.
 | `audio.effect@5.0` | `audio.effect-V2` (AIDL) | `audio.effect.service-aidl.example` | AOSP |
 | `tv.input@1.0` | `tv.input-V1` (AIDL) | AOSP example — no tuner inputs on this board | AOSP |
 | `tv.cec@1.0` | `tv.hdmi.cec-V1` + `tv.hdmi.connection-V1` | AOSP service over `/dev/cec0` | AOSP |
-| `wifi@1.3` | `wifi-V1` (AIDL) | `android.hardware.wifi-service` over brcmfmac | AOSP |
+| `wifi@1.3` | none | the framework runs HAL-less over brcmfmac | see below |
 | `wifi.supplicant@1.2` | `wifi.supplicant-V3` (AIDL) | AOSP `wpa_supplicant` | AOSP |
-| `wifi.hostapd@1.1` | `wifi.hostapd-V1` (AIDL) | AOSP `hostapd` | AOSP |
-| `bluetooth@1.0` | `bluetooth-V1` (AIDL) | AOSP `-service.default` | blocked, see below |
+| `wifi.hostapd@1.1` | `wifi.hostapd-V2` (AIDL) | AOSP `hostapd` | AOSP |
+| `bluetooth@1.0` | `bluetooth-V1` (AIDL) | AOSP `-service.default` over the kernel's hci0 | AOSP, see below |
 | `health@2.0` | `health-V2` (AIDL) | AOSP `-service.example` | AOSP |
 | `light@2.0` | `light-V2` (AIDL) | AOSP example | AOSP, degraded |
 | `power@1.0` | `power-V4` (AIDL) | AOSP example | AOSP, degraded |
@@ -97,21 +97,25 @@ preceded it.
 What this costs: minigbm's rockchip backend does not implement the RK3399's AFBC
 layouts, so composition moves more bytes than Rockchip's own gralloc did.
 
-### Wi-Fi needs no vendor HAL, and Bluetooth is blocked on the UART
+### Wi-Fi needs no vendor HAL, and Bluetooth needs no vendor tool
 
-AOSP's `wifi-service`, `wpa_supplicant` and `hostapd` are driver-agnostic nl80211
-implementations, so the AP6398S needs only brcmfmac and its firmware — which
-`device.mk` installs into `/vendor/firmware/brcm` from this board's own OpenWrt
-build. Three HIDL components are deleted rather than ported.
+AOSP's `wpa_supplicant` and `hostapd` are driver-agnostic nl80211 implementations,
+so the AP6398S needs only brcmfmac and its firmware. `android.hardware.wifi-service`
+is not: it sits on a legacy HAL (libwifi-hal) chosen by `BOARD_WLAN_DEVICE`, and every
+choice speaks a vendor driver's private commands. Installed without one (until card
+16) it failed every start and the framework would not bring Wi-Fi up while IWifi was
+declared. Not installed, the framework runs HAL-less: wificond scans, the supplicant
+associates. Two build details matter: `WPA_SUPPLICANT_VERSION := VER_0_8_X` in
+BoardConfig.mk, without which external/wpa_supplicant_8 defines neither binary, and
+the firmware in the ramdisk as well as `/vendor`, because the built-in driver asks
+for it before `/vendor` is mounted.
 
-Bluetooth is not the same, and the reason is the hardware. AOSP's
-`bluetooth-service.default` speaks H4 over a UART, and the BCM4359 needs its
-firmware patch loaded before an HCI device exists. Two ways to do that pull in
-opposite directions: the kernel's `hci_bcm` does it itself but then owns the port,
-while the Android HAL expects to open the tty and patch from userspace with
-`brcm_patchram_plus` — a Rockchip vendor tool this tree no longer carries. The
-kernel transport is left out of the config so `/dev/ttyS0` stays free until that is
-decided. Wi-Fi is unaffected either way.
+Bluetooth: uart0 is a serdev controller in the DTS, so the kernel's `hci_bcm` owns
+it, loads `BCM4359C0.hcd` and registers hci0. AOSP's `bluetooth-service.default`
+tries an HCI user channel on hci0 before any tty (`net_bluetooth_mgmt.cpp`), so it
+needs neither `libbt-vendor` nor `brcm_patchram_plus`. It does soft-block rfkill
+before binding, which makes the kernel refuse the bind, so `/dev/rfkill` stays
+root-only and the HAL skips that step.
 
 ### KeyMint is software, so attestation is gone
 

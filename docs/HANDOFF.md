@@ -95,6 +95,7 @@ not reachable from it.
 | 13 | audio HAL up; audioserver waited for `IModule/bluetooth` (declared by the APEX's VINTF, no module in our XML) → AudioService hung, watchdog ×6; composer still headless | bluetooth module added, usb removed (exactly the APEX's declared set; verify-tree checks); the composer opens card0 only when SurfaceFlinger registers (52.98s, after the allocator) → kernel patch: no implicit DRM master on open, `SET_MASTER` for whoever asks while none exists; kernel patch mechanism in build-kernel.sh; bootwatch timeout 300s |
 | 14 | **boot completed** (`sys.boot_completed=1`); boot animation on HDMI at 1920x1080@60 (Samsung EDID) - the DRM-master patch worked; then black: FallbackHome, "no home" | no launcher/setup wizard/IME in AOSP's atv_base → TvSampleLeanbackLauncher, TvProvision, LeanbackIME, DocumentsUI (+ allowlists); SystemUI crash loop = minigbm mapper could not open card0 (0660) in app processes → card0/card1 0666 + gpu_device; Bluetooth crash loop (no HAL) → BT features off; cgroup v1 moves by system_server EACCES → kernel patch 0002 (CAP_SYS_NICE); /dev/rfkill for the BT HAL; images: SD card only |
 | 15 | leanback launcher found ("real home found"), TvProvision ran; launcher and SystemUI still crash-looped: "Failed to initialize driver" only in app-uid processes | init.edge1.rc chmod'ed `/dev/dri/card0` back to 0660 at `boot`, after ueventd set 0666 → chmod removed (ueventd alone owns node modes; verify-tree guards it); F-Droid preinstalled via `build/fetch-fdroid.sh`; snapshots list `/dev` node modes; HDMI-CEC investigated and dropped by the owner |
+| 16 | **in the launcher** on HDMI, SystemUI up, F-Droid installed (signature matched), TvSettings works; no network (Ethernet unplugged), no Wi-Fi, no Bluetooth; TvSettings died in "Add accessory" (`BluetoothAdapter` null) | Wi-Fi: brcmfmac (built in) asked for firmware at 1.4s, before /vendor → firmware also in the ramdisk's `/lib/firmware/brcm`; `wpa_supplicant`/`hostapd` were never built (`WPA_SUPPLICANT_VERSION` unset; the probe cannot see Make guards) → set, with the module's own rc and our `wpa_supplicant.conf`; `android.hardware.wifi-service` had no legacy HAL and blocked Wi-Fi → removed, framework runs HAL-less. Bluetooth: kernel `hci_bcm` (`BT_HCIUART=y`, `POWER_SEQUENCING=y`) + Armbian's `BCM4359C0.hcd` (ramdisk + vendor) → hci0; the AOSP HAL binds it as an HCI user channel; `/dev/rfkill` back to root-only (the HAL soft-blocks hci0 if it can, then cannot bind); BT features back; A2DP source off (no BT audio provider). UI sounds (`AudioTv.mk`); `has_HDR_display=false`; snapshots add `connectivity.txt`; verify-tree [11] |
 
 ## Lessons that cost a card each (check these first next time)
 
@@ -117,19 +118,37 @@ not reachable from it.
   checks they apply): 0001 DRM master, 0002 cgroup v1 CAP_SYS_NICE.
 * **F-Droid** comes from `build/fetch-fdroid.sh` (run by place-device.sh): downloaded
   on the owner's machine (f-droid.org is not reachable from this sandbox), accepted only
-  with F-Droid's signing certificate (SHA-256 43238d51...a9c9ccab, from memory - if the
-  script reports a different one, check it against f-droid.org before trusting it),
+  with F-Droid's signing certificate (SHA-256 43238d51...a9c9ccab; card 16's F-Droid
+  was accepted, so the pinned value matches what f-droid.org serves),
   cached in `~/.cache/edge1`; on failure the image is built without it.
+* **The module probe greps `LOCAL_MODULE`/`name:` text; it cannot see Make guards.**
+  `wpa_supplicant` and `hostapd` passed it for 16 cards while
+  `external/wpa_supplicant_8/Android.mk` skipped them (no `WPA_SUPPLICANT_VERSION`), and
+  PRODUCT_PACKAGES drops unknown names silently. When a HAL "is not there", check the
+  module's guard before anything else.
+* **Built-in drivers load firmware before `/vendor` exists.** brcmfmac and hci_bcm ask
+  within 2s of power-on; their firmware goes to the ramdisk's `/lib/firmware` as well
+  (verify-tree [11] checks every `/vendor/firmware` file has a ramdisk twin).
+* **No vendor Wi-Fi HAL on brcmfmac.** A declared IWifi that cannot start blocks Wi-Fi;
+  undeclared, the framework runs HAL-less (wificond + wpa_supplicant), as GloDroid does.
+* **Bluetooth = kernel hci_bcm + AOSP's default AIDL HAL over an HCI user channel**, and
+  `/dev/rfkill` must stay root-only (the HAL soft-blocks hci0 when it can, and the kernel
+  then refuses the bind with -ERFKILL).
 * **Images:** only the SD card is built during bring-up (`stage_images` in
   provision-wsl.sh, build-images.sh default); eMMC/NVMe are commented out.
 
 ## Open, in rough order
 
-* Card 16: the leanback launcher on HDMI and SystemUI up (no "Failed to initialize
-  driver", no RenderThread SIGSEGV in panfrost); `misc.txt` shows `/dev/dri/card0`
-  `crw-rw-rw-` and `gpu_device`; no "AddTidToCgroup ... Permission denied" (patch 0002);
-  F-Droid in /product/app (or fetch-fdroid's warning in the build log). Then: remote
-  and keyboard input, Ethernet/Wi-Fi in TvSettings, sound over HDMI.
+* Card 17: Wi-Fi - dmesg has `brcmfmac: ... Firmware: BCM4359/9 wl0: ...` (no "error
+  -2"), `connectivity.txt` lists wlan0, `dumpsys wifi` shows the supplicant and scan
+  results, and TvSettings joins a network. Bluetooth - dmesg has `Bluetooth: hci0: BCM:
+  ... BCM4359C0` and the patchram loaded, logcat has `NetBluetoothMgmt ... hci interface
+  0 ready`, the adapter turns on (`dumpsys bluetooth_manager`), and a remote or gamepad
+  pairs from TvSettings > Remotes & Accessories. Also: UI click sounds over HDMI.
+* Bluetooth audio (A2DP source): needs an `IBluetoothAudioProviderFactory` service
+  (hardware/interfaces/bluetooth/audio/aidl/default) and
+  `bluetooth.profile.a2dp.source.enabled` back to true. SELinux for the BT HAL's HCI
+  socket and the supplicant is unwritten (permissive).
 * HDMI-CEC (owner: not needed now). Findings for later: every AOSP 14 CEC HAL
   (`tv.hdmi.cec`, `tv.hdmi.connection`, `tv.cec@1.1`) is a mock that reads/writes FIFOs,
   and `CONFIG_DRM_DW_HDMI_CEC` is `=m` (modules are not loaded), so there is no
@@ -137,8 +156,6 @@ not reachable from it.
   the Linux CEC API (CEC_ADAP_S_LOG_ADDRS, CEC_TRANSMIT/RECEIVE, CEC_DQEVENT state
   changes as hotplug + physical address); the mocks in
   hardware/interfaces/tv/hdmi/{cec,connection}/aidl/default are the template.
-* Bluetooth: features removed until a HAL runs (BCM4359 firmware patch); put
-  `android.hardware.bluetooth*.xml` back with it.
 * init.rc's blkio.weight / cpuctl uclamp.latency_sensitive writes fail (ACK-only
   files); harmless.
 * Real HDMI audio (hotplug, AUDIO_DEVICE_OUT_HDMI, passthrough) needs a HAL module that
@@ -146,12 +163,9 @@ not reachable from it.
 * system_server's `LowMemDetector` PSI trigger fails with EINVAL (unprivileged
   triggers need a 2s-multiple window on 6.x); `libprocessgroup` AddTidToCgroup EACCES
   on `foreground`; idmap2 fails one auto-generated RRO. None fatal so far.
-* Wi-Fi: brcmfmac is built in and asks for firmware at 1.8s, before `/vendor` exists.
-  Re-probe the SDIO host (`fe310000.mmc`) from init after `/vendor` mounts, or enable the
-  firmware sysfs fallback.
 * vold: the boot card is no longer voldmanaged (fstab). When the system moves to the
   eMMC, the installer has to put the `sdcard1` line back for that install.
 * `prng_seeder` (no `/dev/hw_random`: the 6.12 rockchip-rng driver knows only rk3568);
   `flags_health_check` floods the console with permissive denials whenever an
-  "updatable" process crash-loops; SELinux enforcing; Bluetooth (`BCM4359C0.hcd`); the
+  "updatable" process crash-loops; SELinux enforcing; the
   eMMC installer; our own U-Boot in TST mode.

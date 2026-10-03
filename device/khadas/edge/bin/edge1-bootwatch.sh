@@ -16,7 +16,7 @@
 #    synced every SYNC seconds, so a sudden reset loses at most that much - and the
 #    last seconds before a panic are in edge1-pstore.bin anyway.
 #    Beside them, a snapshot of the system's state (getprop, ps, mounts, services,
-#    SurfaceFlinger) in a subdirectory named for when it was taken:
+#    SurfaceFlinger, Wi-Fi/Bluetooth) in a subdirectory named for when it was taken:
 #      120s       two minutes after "boot", whatever state Android is in
 #      completed  30s after sys.boot_completed, if it ever gets there
 #      timeout    TIMEOUT (300) seconds after "boot" without sys.boot_completed
@@ -82,6 +82,14 @@ snapshot() {
         > "$s/misc.txt" 2>&1
     timeout 20 dumpsys -l > "$s/services.txt" 2>&1
     timeout 20 dumpsys SurfaceFlinger > "$s/surfaceflinger.txt" 2>&1
+    # Wi-Fi and Bluetooth: interfaces, rfkill switches, and what the framework
+    # made of them.
+    { ip addr; echo; ls -l /sys/class/bluetooth; echo
+      for r in /sys/class/rfkill/rfkill*; do
+          echo "$r: $(cat "$r/name" "$r/type" "$r/soft" "$r/hard" 2>&1 | tr '\n' ' ')"
+      done; echo
+      timeout 20 dumpsys wifi | head -n 400; echo
+      timeout 20 dumpsys bluetooth_manager | head -n 300; } > "$s/connectivity.txt" 2>&1
     sync
     log "state written to EDGE1BOOT:edge1-logs/boot-0/$1"
 }

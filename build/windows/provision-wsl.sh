@@ -492,9 +492,8 @@ PY_INNER
         echo
 
         echo "##### WI-FI HAL options for brcmfmac #####"
-        # android.hardware.wifi-service wants a legacy HAL underneath, and the one
-        # in the tree is written for bcmdhd's private nl80211 commands. This is
-        # what the tree actually offers.
+        # The image carries no vendor Wi-Fi HAL (the framework runs HAL-less over
+        # brcmfmac); this lists what the tree would offer if one is wanted later.
         for d in hardware/interfaces/wifi/aidl/default hardware/broadcom/wlan; do
             if [[ -d "$TREE/$d" ]]; then
                 echo "  $d:"

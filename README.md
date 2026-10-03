@@ -48,6 +48,7 @@ Rockchip HIDL stack meant re-writing all of it:
 | Display | `drivers/gpu/drm/rockchip` | `external/drm_hwcomposer` + minigbm |
 | Decode | `drivers/staging/media/rkvdec` | `external/v4l2_codec2` (not wired up yet) |
 | Wi-Fi | `brcmfmac` over SDIO | AOSP `wpa_supplicant` |
+| Bluetooth | `hci_bcm` over uart0 | AOSP AIDL Bluetooth HAL |
 | Audio | `simple-audio-card` → HDMI codec | AOSP AIDL audio HAL over ALSA |
 
 Nothing in `hardware/rockchip` or `vendor/rockchip` is used, and the manifest no
@@ -155,9 +156,10 @@ Kati parse time. Step by step in [`docs/PORTING.md`](docs/PORTING.md).
 * **Hardware video decode is not wired up.** `rkvdec` is in the kernel and
   `external/v4l2_codec2` is in the tree, but no Codec2 service is installed, so the
   software codecs carry playback — 1080p rather than 4K.
-* **Bluetooth is unresolved.** The kernel's `hci_bcm` and Android's Bluetooth HAL
-  both want to own `/dev/ttyS0`. The kernel transport is left out of the config so
-  the port stays free until that is decided.
+* **Wi-Fi and Bluetooth are wired but not yet seen working** (card 17). The kernel
+  drivers load their firmware from the ramdisk; Wi-Fi runs without a vendor HAL,
+  Bluetooth through the kernel's `hci_bcm` and AOSP's HAL. Bluetooth audio (A2DP) is
+  not there yet.
 * **Verified boot is `orange` and SELinux is permissive on userdebug.** No bootloader
   in the chain computes a vbmeta digest yet (`avb verify` in U-Boot is the fix), and the
   first boot of a new port is not the moment to enforce policy that has never met a
