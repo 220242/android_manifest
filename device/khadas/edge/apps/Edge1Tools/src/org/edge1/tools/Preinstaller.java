@@ -18,7 +18,12 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -26,8 +31,9 @@ import java.util.concurrent.TimeUnit;
  * Installs the APKs build/fetch-apps.sh put in /system_ext/etc/edge1-preinstall as
  * ordinary apps, through PackageInstaller - silently, since the platform signature
  * gives this app INSTALL_PACKAGES. Each file is installed once: an app the owner
- * later uninstalls stays uninstalled. preinstall.conf may name one of them as the
- * launcher; it becomes the HOME role holder once, after it is installed.
+ * later uninstalls stays uninstalled. Two files of one package (the apks folder's
+ * and F-Droid's) install once, the folder's preferred. preinstall.conf may name a
+ * launcher package; it becomes the HOME role holder once, after it is installed.
  */
 final class Preinstaller {
     static final String TAG = "Edge1Preinstall";
@@ -47,15 +53,32 @@ final class Preinstaller {
     static void run(Context context, boolean force) {
         PackageManager pm = context.getPackageManager();
         SharedPreferences prefs = Prefs.get(context);
+        // One file per package. The folder and F-Droid can both supply an app; the
+        // folder's copy (not marked "fetched") wins, then the higher version.
+        List<String> fetched = confAll("fetched");
+        Map<String, File> chosen = new LinkedHashMap<>();
+        Map<String, PackageInfo> infos = new HashMap<>();
         for (File apk : bundled()) {
-            String key = apk.getName();
             PackageInfo archive = pm.getPackageArchiveInfo(apk.getPath(), 0);
             if (archive == null) {
-                status(prefs, key, "unreadable APK");
+                status(prefs, apk.getName(), "unreadable APK");
                 continue;
             }
             String pkg = archive.packageName;
-            if (installedVersion(pm, pkg) >= archive.getLongVersionCode()) {
+            File prev = chosen.get(pkg);
+            if (prev == null || preferred(apk, archive, prev, infos.get(pkg), fetched)) {
+                if (prev != null) status(prefs, prev.getName(), "same app as " + apk.getName());
+                chosen.put(pkg, apk);
+                infos.put(pkg, archive);
+            } else {
+                status(prefs, apk.getName(), "same app as " + prev.getName());
+            }
+        }
+        for (Map.Entry<String, File> e : chosen.entrySet()) {
+            String pkg = e.getKey();
+            File apk = e.getValue();
+            String key = apk.getName();
+            if (installedVersion(pm, pkg) >= infos.get(pkg).getLongVersionCode()) {
                 prefs.edit().putString(Prefs.DONE_PREFIX + key, pkg).apply();
                 status(prefs, key, "installed (" + pkg + ")");
                 continue;
@@ -73,6 +96,15 @@ final class Preinstaller {
             }
         }
         setHomeOnce(context, prefs, pm);
+    }
+
+    /** Is a better than b, two files of the same package? */
+    private static boolean preferred(File a, PackageInfo ai, File b, PackageInfo bi,
+            List<String> fetched) {
+        boolean aFetched = fetched.contains(a.getName());
+        boolean bFetched = fetched.contains(b.getName());
+        if (aFetched != bFetched) return !aFetched;
+        return ai.getLongVersionCode() > bi.getLongVersionCode();
     }
 
     private static long installedVersion(PackageManager pm, String pkg) {
@@ -142,19 +174,17 @@ final class Preinstaller {
         }
     }
 
-    /** Make preinstall.conf's launcher the default HOME app, once. */
+    /** Make preinstall.conf's launcher (a package name) the default HOME app, once. */
     private static void setHomeOnce(Context context, SharedPreferences prefs, PackageManager pm) {
         if (prefs.getBoolean(Prefs.HOME_SET, false)) return;
-        String file = conf("home");
-        if (file == null) return;
-        PackageInfo archive = pm.getPackageArchiveInfo(new File(DIR, file).getPath(), 0);
-        if (archive == null || installedVersion(pm, archive.packageName) < 0) return;
+        String pkg = conf("home");
+        if (pkg == null || pkg.isEmpty() || installedVersion(pm, pkg) < 0) return;
         RoleManager roles = context.getSystemService(RoleManager.class);
         if (roles == null || !roles.isRoleAvailable(RoleManager.ROLE_HOME)) return;
         final boolean[] ok = {false};
         final CountDownLatch done = new CountDownLatch(1);
         try {
-            roles.addRoleHolderAsUser(RoleManager.ROLE_HOME, archive.packageName, 0,
+            roles.addRoleHolderAsUser(RoleManager.ROLE_HOME, pkg, 0,
                     Process.myUserHandle(), context.getMainExecutor(), success -> {
                         ok[0] = success;
                         done.countDown();
@@ -165,18 +195,25 @@ final class Preinstaller {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
-        Log.i(TAG, "default launcher " + archive.packageName + ": " + (ok[0] ? "set" : "not set"));
+        Log.i(TAG, "default launcher " + pkg + ": " + (ok[0] ? "set" : "not set"));
         if (ok[0]) prefs.edit().putBoolean(Prefs.HOME_SET, true).apply();
     }
 
-    /** A "key=value" line of preinstall.conf. */
+    /** The first "key=value" line of preinstall.conf. */
     static String conf(String key) {
+        List<String> all = confAll(key);
+        return all.isEmpty() ? null : all.get(0);
+    }
+
+    /** Every "key=value" line of preinstall.conf with that key. */
+    static List<String> confAll(String key) {
+        List<String> out = new ArrayList<>();
         String text = Sampler.read(new File(DIR, "preinstall.conf").getPath());
-        if (text == null) return null;
+        if (text == null) return out;
         for (String line : text.split("\n")) {
             line = line.trim();
-            if (line.startsWith(key + "=")) return line.substring(key.length() + 1).trim();
+            if (line.startsWith(key + "=")) out.add(line.substring(key.length() + 1).trim());
         }
-        return null;
+        return out;
     }
 }

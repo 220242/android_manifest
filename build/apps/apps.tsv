@@ -1,26 +1,18 @@
 # Apps installed on first boot by Edge1 Tools (device/khadas/edge/apps/Edge1Tools).
-# build/fetch-apps.sh downloads each into ~/.cache/edge1/apps and puts it on the
-# image as /system_ext/etc/edge1-preinstall/<name>.apk; on first boot they are
-# installed as ordinary apps - updatable, and removable from Settings.
 #
-# Columns, tab-separated: name <TAB> sources <TAB> role
-#   sources  tried in order, separated by "|":
-#              fdroid:<package>             F-Droid's signed index; the APK's SHA-256
-#                                           is checked against it
-#              github:<owner>/<repo>:<re>   the latest release's asset matching <re>
-#                                           (an arm64-v8a build preferred)
-#              url:<https url>              a fixed download link
-#            Non-F-Droid downloads come over HTTPS from the project's own release
-#            page; the first certificate seen is pinned in the cache, and a later
-#            download signed by another key is refused.
-#   role     "home" makes it the default launcher once installed; "-" for none.
+# Two sources, read by build/fetch-apps.sh:
 #
-# More apps, or ones with no stable download link (LazyMedia Deluxe, say): drop
-# the .apk into D:\android_khadas\apks (or ~/android_khadas/apks in WSL) and
-# rebuild. A dropped file named like an entry here replaces that entry.
-Projectivy	github:spocky/miproja1:\.apk$	home
-SmartTube	url:https://github.com/yuliskov/SmartTube/releases/download/latest/smarttube_stable.apk|github:yuliskov/SmartTube:stable.*\.apk$	-
-VLC	fdroid:org.videolan.vlc	-
-MaterialFiles	fdroid:me.zhanghai.android.files|github:zhanghai/MaterialFiles:\.apk$	-
-TVBro	fdroid:com.phlox.tvwebbrowser|github:truefedex/tv-bro:\.apk$	-
-AuroraStore	fdroid:com.aurora.store	-
+#   1. The apks folder: D:\android_khadas\apks on Windows (or ~/android_khadas/apks
+#      in WSL, or EDGE1_APKS_DIR). Every .apk in it goes onto the image as it is.
+#      This is the way to add anything - Projectivy, SmartTube, LazyMedia Deluxe ...
+#   2. This list: apps downloaded from F-Droid and nowhere else, checked against
+#      F-Droid's signed index. An entry is skipped when the folder already has a
+#      file named like it (or starting with its name: VLC-Android-3.6.5.apk for VLC).
+#
+# Columns, tab-separated: name <TAB> F-Droid package name
+#
+# Projectivy Launcher (com.spocky.projengmenu) becomes the default launcher once it
+# is installed, wherever it came from.
+VLC	org.videolan.vlc
+MaterialFiles	me.zhanghai.android.files
+AuroraStore	com.aurora.store

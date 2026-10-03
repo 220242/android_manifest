@@ -1351,31 +1351,21 @@ APPS_TSV="$ROOT/build/apps/apps.tsv"
 if [[ -f "$APPS_TSV" ]]; then
     if out=$(python3 - "$APPS_TSV" <<'EOF'
 import re, sys
-bad, homes, names = [], 0, set()
+bad, names = [], set()
 for n, line in enumerate(open(sys.argv[1]), 1):
     line = line.rstrip("\n")
     if not line.strip() or line.startswith("#"):
         continue
     f = line.split("\t")
-    if len(f) != 3:
-        bad.append(f"line {n}: {len(f)} tab-separated fields, want 3"); continue
-    name, sources, role = f
+    if len(f) != 2:
+        bad.append(f"line {n}: {len(f)} tab-separated fields, want 2 (name, F-Droid package)"); continue
+    name, pkg = f
     if not re.fullmatch(r"[A-Za-z0-9_.-]+", name) or name in names:
         bad.append(f"line {n}: bad or repeated name {name!r}")
     names.add(name)
-    for src in sources.split("|"):
-        kind, _, arg = src.partition(":")
-        ok = (kind == "fdroid" and re.fullmatch(r"[A-Za-z0-9_.]+", arg)) or \
-             (kind == "url" and arg.startswith("https://")) or \
-             (kind == "github" and re.fullmatch(r"[\w.-]+/[\w.-]+:.+", arg))
-        if not ok:
-            bad.append(f"line {n}: bad source {src!r}")
-    if role not in ("-", "home"):
-        bad.append(f"line {n}: role must be - or home")
-    homes += role == "home"
-if homes > 1:
-    bad.append("more than one app has the home role")
-print("\n".join(bad) if bad else f"{len(names)} apps")
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)+", pkg):
+        bad.append(f"line {n}: {pkg!r} is not a package name")
+print("\n".join(bad) if bad else f"{len(names)} F-Droid apps")
 sys.exit(1 if bad else 0)
 EOF
 ); then

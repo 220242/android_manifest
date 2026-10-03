@@ -157,9 +157,9 @@ Measured on the board — [`HARDWARE.md`](HARDWARE.md) has the readings:
   (`brcmfmac.feature_disable=0x82000`). Developer options crashed because mainline has
   no `/sys/class/android_usb`, which UsbService needs (kernel patch 0003). userdata is
   16GiB now. Also new: USB Wi-Fi/Bluetooth adapter support, the Edge1 Tools app
-  (performance overlay, first-boot installer) and bundled apps - Projectivy Launcher,
-  VLC, SmartTube, Material Files, TV Bro, Aurora Store, plus any APK dropped into
-  `D:\android_khadas\apks`.
+  (performance overlay, first-boot installer) and bundled apps: every APK dropped into
+  `D:\android_khadas\apks`, plus VLC, Material Files and Aurora Store from F-Droid
+  (nothing else is downloaded). Projectivy Launcher becomes the default launcher.
 
 What they did not establish, because none of the card's code ever ran: whether our U-Boot,
 our TPL's DDR init, or our SPL work on this board. The DDR-blob A/B, the SPL boot-order

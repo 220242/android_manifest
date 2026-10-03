@@ -4,36 +4,34 @@
 #
 #   usage: fetch-apps.sh <tree-dir>
 #
-# Called by place-device.sh, like fetch-fdroid.sh. The list is build/apps/apps.tsv
-# (what each column means is written there). For every entry this script finds an
-# APK - from the cache, or by downloading it - and writes, under
-# <tree>/vendor/edge1/apps/:
+# Called by place-device.sh, like fetch-fdroid.sh. Two sources:
 #
-#   <name>.apk        the app, byte for byte as published
-#   preinstall.conf   which of them becomes the default launcher
+#   1. The apks folder - every *.apk in it, taken as it is (the owner's own
+#      choice): EDGE1_APKS_DIR, ~/android_khadas/apks, or <drive>:\android_khadas\apks
+#      on Windows (/mnt/<drive>/android_khadas/apks).
+#   2. build/apps/apps.tsv - apps downloaded from F-Droid, and from nowhere else.
+#      F-Droid's index (index-v1.jar) must carry a valid signature by F-Droid's key
+#      and each APK must match the SHA-256 that index gives for it. Downloads are
+#      cached in ~/.cache/edge1/apps; EDGE1_APPS_REFRESH=1 fetches current releases.
+#
+# Both end up under <tree>/vendor/edge1/apps/:
+#
+#   <name>.apk        each app, byte for byte
+#   preinstall.conf   the launcher to make default, and which files came from F-Droid
 #   Android.bp        a prebuilt_etc per file, into /system_ext/etc/edge1-preinstall/
 #   apps.mk           PRODUCT_PACKAGES for those modules; device.mk pulls it in with
 #                     inherit-product-if-exists
 #
 # They go onto the image as files, not as system apps. Edge1 Tools installs them
 # with PackageInstaller on first boot, so they end up as ordinary apps: updatable,
-# removable, with their native libraries extracted the usual way. As prebuilt
-# system apps, a third-party APK with compressed native libraries cannot work:
-# the build would have to rewrite it (and break its v2 signature), and Android does
-# not extract libraries for an unupdated system app.
+# removable, with their native libraries extracted the usual way. (As prebuilt
+# system apps, a third-party APK with compressed native libraries cannot work: the
+# build would have to rewrite it, breaking its v2 signature, and Android does not
+# extract libraries for an unupdated system app.)
 #
-# Downloads are cached in ~/.cache/edge1/apps and reused; EDGE1_APPS_REFRESH=1
-# fetches the current release of each again. Integrity:
-#   F-Droid  the index (index-v1.jar) must carry a valid signature by F-Droid's
-#            key, and each APK must match the SHA-256 that index gives for it.
-#   others   HTTPS from the project's own GitHub release; the signing certificate
-#            of the first download is pinned in the cache (<name>.cert), and a later
-#            one signed by a different key is refused, keeping the cached copy.
-#
-# Plus anything dropped into an apks/ folder: EDGE1_APKS_DIR, ~/android_khadas/apks,
-# or <drive>:\android_khadas\apks on Windows (/mnt/<drive>/android_khadas/apks).
-# A dropped file is taken as it is - it is the owner's own choice - and one named
-# like a list entry (Projectivy.apk, say) replaces that entry.
+# When the folder and F-Droid both supply the same app, the device installs the
+# folder's copy: Edge1 Tools compares package names, which it can read and this
+# script cannot.
 #
 # A failure costs that app, never the build: it is reported and left out.
 set -euo pipefail
@@ -46,9 +44,11 @@ readonly CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/edge1/apps"
 readonly DST="$TREE/vendor/edge1/apps"
 readonly FDROID_REPO="${EDGE1_FDROID_REPO:-https://f-droid.org/repo}"
 # F-Droid's signing key: the one its client APK is signed with (fetch-fdroid.sh)
-# and the one its repository index is signed with.
-# (Both can be pointed elsewhere for a test against a local mirror.)
+# and the one its repository index is signed with. Overridable for a test against
+# a local mirror, like the repository URL.
 readonly FDROID_KEY="${EDGE1_FDROID_KEY:-43238d512c1e5eb2d6569f4a3afbf5523418b82e0a3ed1552770abb9a9c9ccab}"
+# Made the default launcher once it is installed: Projectivy Launcher.
+readonly HOME_PACKAGE="${EDGE1_HOME_PACKAGE-com.spocky.projengmenu}"
 readonly REFRESH="${EDGE1_APPS_REFRESH:-0}"
 
 say()  { echo "fetch-apps: $*"; }
@@ -56,7 +56,20 @@ warn() { echo "fetch-apps: $*" >&2; }
 
 mkdir -p "$CACHE"
 
-valid_apk() { unzip -l "$1" 2>/dev/null | grep -qE '[[:space:]]AndroidManifest\.xml$'; }
+# A zip with an AndroidManifest.xml in it. Not "unzip -l | grep -q": under pipefail
+# grep's early exit kills unzip with SIGPIPE on any APK of a few thousand entries,
+# and the pipeline then reports failure for a perfectly good file - which is how
+# every APK, downloaded or dropped in, was refused the first time this ran.
+valid_apk() {
+    python3 - "$1" <<'PY'
+import sys, zipfile
+try:
+    with zipfile.ZipFile(sys.argv[1]) as z:
+        z.getinfo("AndroidManifest.xml")
+except Exception:
+    sys.exit(1)
+PY
+}
 safe_name() { printf '%s' "$1" | tr -c 'A-Za-z0-9_.-' '_'; }
 
 # dl <url> <file>: atomically, or not at all.
@@ -132,97 +145,24 @@ fetch_fdroid() {   # <package> <out>
         warn "$1: $apk does not match the SHA-256 in F-Droid's index"
         rm -f "$2.new"; return 1
     fi
-    mv -f "$2.new" "$2"
-    echo "F-Droid $1 $ver"
-}
-
-# github_asset <owner/repo> <regex>: download URL of the best-matching asset of the
-# latest release.
-github_asset() {
-    local rel
-    rel="$(curl -fsSL --retry 2 --connect-timeout 20 \
-               -H 'Accept: application/vnd.github+json' \
-               "https://api.github.com/repos/$1/releases/latest")" || return 1
-    printf '%s' "$rel" | python3 -c '
-import json, re, sys
-rel = json.load(sys.stdin)
-pat = re.compile(sys.argv[1], re.I)
-def rank(n):
-    n = n.lower()
-    return 3 if ("arm64" in n or "aarch64" in n) else 2 if "universal" in n \
-        else 0 if re.search(r"x86|armeabi|armv7", n) else 1
-assets = [a for a in rel.get("assets", []) if pat.search(a["name"])]
-if not assets:
-    sys.exit(1)
-best = max(assets, key=lambda a: rank(a["name"]))
-print(best["browser_download_url"], rel.get("tag_name", "?"))
-' "$2"
-}
-
-# pin_ok <name> <apk>: the TOFU certificate check for non-F-Droid sources.
-pin_ok() {
-    local fp pin="$CACHE/$1.cert"
-    fp="$(python3 "$APKCERT" cert "$2")" || { warn "$1: no readable signature"; return 1; }
-    if [[ -s "$pin" && "$(cat "$pin")" != "$fp" ]]; then
-        warn "$1: signed by $fp, but $(cat "$pin") was pinned on the first download;"
-        warn "  refusing it. Delete $pin if the developer really changed keys."
-        return 1
+    if ! valid_apk "$2.new"; then
+        warn "$1: $apk is not an APK"
+        rm -f "$2.new"; return 1
     fi
-    [[ -s "$pin" ]] || echo "$fp" > "$pin"
-}
-
-fetch_one() {   # <name> <sources>; fills $CACHE/<name>.apk
-    local name="$1" out="$CACHE/$1.apk" src kind arg url tag info
-    IFS='|' read -r -a srcs <<< "$2"
-    for src in "${srcs[@]}"; do
-        kind="${src%%:*}"; arg="${src#*:}"
-        case "$kind" in
-            fdroid)
-                info="$(fetch_fdroid "$arg" "$out")" || continue ;;
-            github)
-                read -r url tag < <(github_asset "${arg%%:*}" "${arg#*:}") \
-                    || { warn "$name: no matching asset in ${arg%%:*}'s latest release"; continue; }
-                dl "$url" "$out.new" || { warn "$name: download failed: $url"; continue; }
-                valid_apk "$out.new" && pin_ok "$name" "$out.new" || { rm -f "$out.new"; continue; }
-                mv -f "$out.new" "$out"; info="GitHub ${arg%%:*} $tag" ;;
-            url)
-                dl "$arg" "$out.new" || { warn "$name: download failed: $arg"; continue; }
-                valid_apk "$out.new" && pin_ok "$name" "$out.new" || { rm -f "$out.new"; continue; }
-                mv -f "$out.new" "$out"; info="$arg" ;;
-            *)  warn "$name: unknown source kind '$kind'"; continue ;;
-        esac
-        valid_apk "$out" || { warn "$name: not an APK"; rm -f "$out"; continue; }
-        echo "$info" > "$CACHE/$name.from"
-        return 0
-    done
-    return 1
+    mv -f "$2.new" "$2"
+    echo "F-Droid $1 $ver" > "$CACHE/$(basename "$2" .apk).from"
 }
 
 # ---------------------------------------------------------------------------
-# The list, then the drop-in folders.
+# The folder first, then the F-Droid list.
 # ---------------------------------------------------------------------------
-declare -A PICK=() ROLE=() FROM=()
+declare -A PICK=() FROM=() FETCHED=()
 declare -a ORDER=()
 
-while IFS=$'\t' read -r name sources role; do
-    case "$name" in ''|\#*) continue ;; esac
-    name="$(safe_name "$name")"
-    ROLE[$name]="${role:--}"
-    if [[ "$REFRESH" == 1 || ! -s "$CACHE/$name.apk" ]]; then
-        say "$name: fetching"
-        if ! fetch_one "$name" "$sources"; then
-            if [[ -s "$CACHE/$name.apk" ]]; then
-                warn "$name: every source failed; using the cached copy"
-            else
-                warn "$name: every source failed; the image is built without it"
-                continue
-            fi
-        fi
-    fi
-    PICK[$name]="$CACHE/$name.apk"
-    FROM[$name]="$(cat "$CACHE/$name.from" 2>/dev/null || echo cache)"
-    ORDER+=("$name")
-done < "$LIST"
+add() {   # <name> <file> <from>
+    [[ -n "${PICK[$1]:-}" ]] || ORDER+=("$1")
+    PICK[$1]="$2"; FROM[$1]="$3"
+}
 
 dropdirs=()
 [[ -n "${EDGE1_APKS_DIR:-}" ]] && dropdirs+=("$EDGE1_APKS_DIR")
@@ -232,15 +172,42 @@ for d in "${dropdirs[@]}"; do
     [[ -d "$d" ]] || continue
     for f in "$d"/*.apk "$d"/*.APK; do
         [[ -f "$f" ]] || continue
-        name="$(safe_name "$(basename "${f%.*}")")"
         if ! valid_apk "$f"; then
-            warn "$f is not an APK; skipped"; continue
+            warn "$f is not an APK (no AndroidManifest.xml in it); skipped"; continue
         fi
-        [[ -n "${PICK[$name]:-}" ]] || ORDER+=("$name")
-        PICK[$name]="$f"; FROM[$name]="$f (dropped in)"
-        ROLE[$name]="${ROLE[$name]:--}"
+        add "$(safe_name "$(basename "${f%.*}")")" "$f" "$f"
     done
 done
+
+while IFS=$'\t' read -r name pkg; do
+    case "$name" in ''|\#*) continue ;; esac
+    name="$(safe_name "$name")"
+    # The folder supplies it already: a file named like the entry, or starting
+    # with its name ("VLC-Android-3.6.5-arm64-v8a.apk" for VLC).
+    key="$(printf '%s' "$name" | tr -cd 'A-Za-z0-9' | tr 'A-Z' 'a-z')"
+    have=""
+    for n in "${ORDER[@]}"; do
+        k="$(printf '%s' "$n" | tr -cd 'A-Za-z0-9' | tr 'A-Z' 'a-z')"
+        [[ "$k" == "$key"* ]] && { have="$n"; break; }
+    done
+    if [[ -n "$have" ]]; then
+        say "$name: the folder has it ($have.apk); not downloading"
+        continue
+    fi
+    if [[ "$REFRESH" == 1 || ! -s "$CACHE/$name.apk" ]] || ! valid_apk "$CACHE/$name.apk"; then
+        say "$name: fetching $pkg from F-Droid"
+        if ! fetch_fdroid "$pkg" "$CACHE/$name.apk"; then
+            if [[ -s "$CACHE/$name.apk" ]] && valid_apk "$CACHE/$name.apk"; then
+                warn "$name: download failed; using the cached copy"
+            else
+                warn "$name: download failed; the image is built without it"
+                continue
+            fi
+        fi
+    fi
+    add "$name" "$CACHE/$name.apk" "$(cat "$CACHE/$name.from" 2>/dev/null || echo "F-Droid $pkg")"
+    FETCHED[$name]=1
+done < "$LIST"
 
 # ---------------------------------------------------------------------------
 # Write vendor/edge1/apps, touching only what changed.
@@ -257,34 +224,44 @@ write_if_changed() {   # $1 file; content on stdin
     if cmp -s "$tmp" "$1"; then rm -f "$tmp"; else mv -f "$tmp" "$1"; fi
 }
 
+# Soong module names allow fewer characters than file names do, so two files can
+# map to one module ("a-b.apk", "a_b.apk"); a repeat gets a number.
+declare -A MOD=() SEEN=()
+for name in "${ORDER[@]}"; do
+    m="edge1_preinstall_$(printf '%s' "$name" | tr -c 'A-Za-z0-9_' '_')"
+    base="$m"; i=2
+    while [[ -n "${SEEN[$m]:-}" ]]; do m="${base}_$i"; i=$((i + 1)); done
+    SEEN[$m]=1; MOD[$name]="$m"
+done
+
 keep=" "
 total=0
 for name in "${ORDER[@]}"; do
     cmp -s "${PICK[$name]}" "$DST/$name.apk" || cp -f "${PICK[$name]}" "$DST/$name.apk"
     keep+="$name.apk "
     bytes=$(stat -c %s "$DST/$name.apk"); total=$(( total + bytes ))
-    say "$(printf '%-14s %6s  %s' "$name" "$(numfmt --to=iec "$bytes" 2>/dev/null || echo "$bytes")" "${FROM[$name]}")"
+    say "$(printf '%-28s %6s  %s' "$name" "$(numfmt --to=iec "$bytes" 2>/dev/null || echo "$bytes")" "${FROM[$name]}")"
 done
 for f in "$DST"/*.apk; do
     [[ -f "$f" && "$keep" != *" $(basename "$f") "* ]] && rm -f "$f"
 done
 
-home=""
-for name in "${ORDER[@]}"; do [[ "${ROLE[$name]}" == home ]] && home="$name.apk"; done
 {
     echo "# Generated by build/fetch-apps.sh in the edge1 manifest repo. Do not edit."
-    [[ -n "$home" ]] && echo "home=$home"
+    [[ -n "$HOME_PACKAGE" ]] && echo "home=$HOME_PACKAGE"
+    for name in "${ORDER[@]}"; do
+        [[ -n "${FETCHED[$name]:-}" ]] && echo "fetched=$name.apk"
+    done
     true
 } | write_if_changed "$DST/preinstall.conf"
 
 {
     echo "// Generated by build/fetch-apps.sh in the edge1 manifest repo. Do not edit."
     for name in "${ORDER[@]}"; do
-        mod="edge1_preinstall_$(printf '%s' "$name" | tr -c 'A-Za-z0-9_' '_')"
         cat <<EOF
 
 prebuilt_etc {
-    name: "$mod",
+    name: "${MOD[$name]}",
     src: "$name.apk",
     filename: "$name.apk",
     sub_dir: "edge1-preinstall",
@@ -307,9 +284,9 @@ EOF
     echo "# Generated by build/fetch-apps.sh in the edge1 manifest repo. Do not edit."
     echo "PRODUCT_PACKAGES += \\"
     for name in "${ORDER[@]}"; do
-        echo "    edge1_preinstall_$(printf '%s' "$name" | tr -c 'A-Za-z0-9_' '_') \\"
+        echo "    ${MOD[$name]} \\"
     done
     echo "    edge1_preinstall_conf"
 } | write_if_changed "$DST/apps.mk"
 
-say "${#ORDER[@]} app(s), $(numfmt --to=iec "$total" 2>/dev/null || echo "$total") -> vendor/edge1/apps${home:+ (launcher: ${home%.apk})}"
+say "${#ORDER[@]} app(s), $(numfmt --to=iec "$total" 2>/dev/null || echo "$total") -> vendor/edge1/apps${HOME_PACKAGE:+ (default launcher if installed: $HOME_PACKAGE)}"

@@ -122,10 +122,11 @@ $(call inherit-product-if-exists, vendor/edge1/fdroid/fdroid.mk)
 # Edge1 Tools (apps/Edge1Tools): the performance overlay (FPS of the app in front,
 # per-core CPU load and clocks, GPU clock, temperatures, memory, display mode,
 # hardware decoders) and the first-boot installer for the bundled apps.
-# The bundled apps themselves - Projectivy Launcher, VLC, SmartTube, a file
-# manager, a TV browser, Aurora Store, and anything dropped into the apks folder -
-# come from build/fetch-apps.sh, which writes vendor/edge1/apps/apps.mk (or
-# nothing, if every download failed). See build/apps/apps.tsv.
+# The bundled apps themselves - every APK in D:\android_khadas\apks, plus VLC,
+# Material Files and Aurora Store from F-Droid - come from build/fetch-apps.sh,
+# which writes vendor/edge1/apps/apps.mk (or nothing, if there is no app at all).
+# Projectivy Launcher, if among them, becomes the default launcher. See
+# build/apps/apps.tsv.
 PRODUCT_PACKAGES += \
     Edge1Tools
 $(call inherit-product-if-exists, vendor/edge1/apps/apps.mk)
