@@ -32,6 +32,18 @@
             </intent-filter>
         </activity>
 
+        <!-- Settings' main screen shows a Sound entry for the system app that handles
+             com.android.tv.settings.SOUND; SoundActivity says what comes with it. -->
+        <activity
+            android:name=".SoundActivity"
+            android:label="@string/sound_title"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.android.tv.settings.SOUND" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
         <service
             android:name=".HudService"
             android:exported="false"

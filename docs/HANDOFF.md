@@ -109,6 +109,7 @@ not reachable from it.
 | 18 | **Wi-Fi connected** (the MikroTik, 5GHz 11ac), developer options open, the overlay works (40-45C), nine apps installed from Edge1 Tools; then a **reset loop**: hard resets (no shutdown logged, boot reason plain "reboot") about 10s after each boot completed, once the overlay was set to start at boot; a panfrost job fault (DATA_INVALID_FAULT) the moment the overlay started; system_server ran with a 16MB Java heap | Java heap: nothing set `dalvik.vm.heap*`, so every process had AndroidRuntime's 16MB default → `phone-xhdpi-4096-dalvik-heap.mk`. Overlay: its EGL probe (the GPU fault) replaced by the sysfs driver name; at boot it waits 30s, and two boots in a row that do not last 3 minutes after it turn its autostart off. No automatic HOME (Edge1 Tools has a "Default launcher" button). Preinstall runs 3 minutes after boot; Edge1 Tools is not "stopped" at first boot (sysconfig). Fan: `pwm-fan` was `=m`, the fan never ran → `=y`. dex2oat on the A53s. Bootwatch: temperatures, fan and clocks in the kernel log every 5s, sync every 5s (was 10). Video: hantro built in, `/dev/video*` `/dev/media*` wildcards, `edge1-v4l2-probe` → `video.txt`, `docs/HW_DECODE.md` |
 | 19 | resets at different moments every boot: ~3s after the first boot completed, and on opening Edge1 Tools in the second; 40-57C; the ramoops region came back readable but with bit errors on every line - a hardware reset (unrefreshed DRAM), not a panic. Also: the PCIe controller stuck in deferred probe (its PHY was a module) and re-probed whenever any device bound | A log per boot (`boot-NNNNN`, ten kept, `boots.txt`, `alive.txt`, each boot's ramoops saved into its own folder by the next); `edge1-options.txt` on EDGE1BOOT with CPU/GPU clock limits, shipped at A72 1416MHz / GPU 600MHz as a power test; core rail voltages and GPU clock in the thermal line; PCIe PHY built in. Owner: no IR remote (driver not built). Toward a release build: SELinux rules for every non-bootwatch denial of cards 18-19 (bootwatch permissive + unaudited), checked offline with `build/dev/check-sepolicy.sh`; A2DP (the BT audio provider's VINTF fragment); exFAT + USB 3 disks; zram; standby without suspend; adb needs authorization; the builder's language/time zone; private signing keys (dev-keys) - docs/RELEASE.md |
 | 20 | first build stopped at the module probe (a false sepolicy duplicate, fixed); the second came back with edge1-boot.log (`booti`, `edge1_prev=none`), a ramoops region cleared as by a power cut, the default edge1-options.txt, and **no edge1-logs** - Android apparently never got as far as its log recorder. The owner: **a black screen from the start, no "android" text** - so not even the kernel console came up, i.e. the kernel stopped before the display driver (~1.1s), where the PCIe probe runs. Power: a **Baseus 100W GaN power bank** (USB-C PD) | The PCIe controller out of the kernel: building its PHY in was the build's one change that runs early in the kernel and can hang it (mainline's RK3399 PCIe PHY is what Armbian patches; the slot is empty). The bootwatch itself was run under mksh, Android's shell, and works. Bundled apps: offered one by one in Edge1 Tools, installed only on request |
+| 21 | **Android up again**: boot completed at 111s, ran 833s with the power-test clocks (A72 1416MHz, GPU 600MHz) and no reset - one boot in `boots.txt`; SmartTube played. `video.txt` exactly as planned: rkvdec `S264` up to 4096x2560 and `VP9F` 4096x2304, hantro `MG2S` 1920x1088 and `VP8F` 3840x2160, `/dev/media0` hantro, `/dev/media1` rkvdec. The owner could not tell whether there was sound, and an Xbox pad has no volume keys: the HAL opened ALSA card 0 36 times, so it played - at **media volume 2 of 15** (`volume_changed` in the logcat), about -40 dB | `ro.config.media_vol_default=15`, and the TV volume curve for "Speaker" (the HDMI output). **Settings > Sound & display**: Edge1 Tools' `SoundActivity` handles `com.android.tv.settings.SOUND`, so TvSettings lists it on its main screen - volume -/+, a left/right test tone, where the sound goes, and a button to TvSettings' Display & Sound (which Device Preferences hides once a Sound handler exists). Bootwatch: `audio.txt` (ALSA state, `dumpsys audio`, `dumpsys media.audio_flinger`) |
 
 ## Lessons that cost a card each (check these first next time)
 
@@ -189,38 +190,34 @@ not reachable from it.
   native command's stdout, not its stderr - local-config's key failure was invisible.
 * **SELinux before a build:** `build/dev/check-sepolicy.sh <system/sepolicy>` compiles
   the vendor policy with AOSP's - every neverallow, and public types only for vendor.
+* **Volume on a TV box.** AudioService starts a television's media volume at a quarter
+  (`MAX/4`, 3 of 15) and keeps only real HDMI/ARC devices at full volume. This board's
+  HDMI is the HAL's "Speaker", so Android's volume scales the signal: near silence
+  that looks like no sound. `ro.config.media_vol_default` sets the start; the volume
+  itself is in `dumpsys audio` (`audio.txt`).
 * **Images:** only the SD card is built during bring-up (`stage_images` in
   provision-wsl.sh, build-images.sh default); eMMC/NVMe are commented out.
 
 ## Open, in rough order
 
-* Card 21: does Android start again (an edge1-logs folder on EDGE1BOOT)? If not, a
-  photo of the HDMI screen where it stops - the kernel console is on it.
-  Power: the board runs from a power bank. A PD power bank renegotiates and can drop
-  its output for a moment (another device plugged into it, a load step, its own
-  low-current logic) - a short dip resets the board without clearing RAM, which is
-  card 19's bit-flipped ramoops exactly. Asked the owner to try a mains USB-C PD
-  charger (12V/15V); if the resets stop, that was it. Then, as
-  planned for card 20: does it still reset with the A72 at 1416MHz and the GPU at 600MHz
-  (edge1-options.txt)? `boots.txt` answers in a glance. If not, delete the two lines in
-  edge1-options.txt and see whether resets come back - then it is power (supply, or the
-  board's regulators at the top OPPs). Each reset's `pstore/` and the last `thermal`
-  lines (rail voltages, clocks) say more. Also: A2DP to a Bluetooth headset; an exFAT
-  stick shows up; `/proc/swaps` lists zram0 (misc.txt); the power key puts the TV to
-  standby and any key wakes it; the system language and time zone are the builder's.
-  The bundled apps are no longer installed by themselves (the owner's call): Edge1
-  Tools lists them with a button each - "Install", "Update", "installed".
-  The first card-20 build stopped at the module probe: its sepolicy check took
-  `get_prop(system_server, ...)` for a declaration of `system_server` (fixed), and
-  the key set was never made (make_key always exits 1; fixed, the files are checked).
-* Hardware video decode: docs/HW_DECODE.md. Phase 1 (decoders up, probed) is on
-  card 19; next the FFmpeg Codec2 service (software), then v4l2-request for H.264
-  and VP9. HEVC needs a newer kernel.
+* Card 22 (sound): the first boot starts at media volume 15 of 15 - a fresh flash
+  clears /data, a kept /data keeps the old level. Settings shows "Sound & display"
+  ("Звук и экран") on its main screen: -/+ change the level, the test sound plays left
+  then right, and the bottom button opens Display & Sound. `audio.txt` in each
+  snapshot: `dumpsys audio` has the stream volumes. If still silent at 15,
+  `audio.txt`'s `hw_params`/`status` while something plays say whether ALSA runs.
+  Power: card 21 ran 833s with the test clocks and did not reset, from the Baseus
+  power bank. Next: a longer session the same way; then the two lines in
+  edge1-options.txt commented out (full clocks) - if resets come back, it is power at
+  the top OPPs (try a mains USB-C PD charger, 12V/15V). Each reset's `pstore/` and the
+  last `thermal` lines (rails, clocks) say more. Not yet tried by the owner: A2DP
+  headphones, an exFAT stick, standby with the power key.
+* Hardware video decode: docs/HW_DECODE.md. Phase 1 confirmed on card 21 (both
+  decoders and their formats in `video.txt`); next the FFmpeg Codec2 service
+  (software), then v4l2-request for H.264 and VP9. HEVC needs a newer kernel.
 * Bluetooth pairing of a remote/gamepad not yet tried by the owner.
-* Bluetooth audio (A2DP source): needs an `IBluetoothAudioProviderFactory` service
-  (hardware/interfaces/bluetooth/audio/aidl/default) and
-  `bluetooth.profile.a2dp.source.enabled` back to true. SELinux for the BT HAL's HCI
-  socket and the supplicant is unwritten (permissive).
+* Bluetooth audio (A2DP source): the provider factory registers since the card 19 round
+  (`android.hardware.bluetooth.audio-impl`); not tried with headphones yet.
 * HDMI-CEC (owner: not needed now). Findings for later: every AOSP 14 CEC HAL
   (`tv.hdmi.cec`, `tv.hdmi.connection`, `tv.cec@1.1`) is a mock that reads/writes FIFOs,
   and `CONFIG_DRM_DW_HDMI_CEC` is `=m` (modules are not loaded), so there is no

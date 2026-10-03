@@ -31,11 +31,15 @@ their TV box, what is done, and the order the rest goes in.
 * **TV-box basics:** standby that the remote can wake (screen off, no suspend),
   A2DP Bluetooth audio, exFAT and USB 3 drives, zram, the builder's language and time
   zone as the defaults.
+* **Sound settings:** Settings > Sound & display (Edge1 Tools): media volume, a test
+  sound, the output in use. The volume starts at the top, so the TV's remote sets the
+  loudness - it started at 2-3 of 15 before, which was near silence over HDMI.
 
 ## Left, in order
 
 1. **Stability.** Cards 18-19 reset at random under load; nothing goes out like that.
-   Card 20 tests whether it is power (lower clocks in `edge1-options.txt`).
+   Card 21 ran 14 minutes without a reset at lower clocks (`edge1-options.txt`); next
+   longer sessions, then full clocks, to tell whether it is power.
 2. **SELinux enforcing on userdebug.** With the denials of a full permissive card at
    (near) zero, take `androidboot.selinux=permissive` out of the userdebug command line
    (BoardConfig.mk) for one card. Whatever is still missing shows as a denial with

@@ -21,4 +21,21 @@
     <string name="app_installed">%1$s %2$s - installed</string>
     <string name="app_installing">Installing %1$s…</string>
     <string name="app_failed">%1$s - failed (%2$s), press to retry</string>
+    <string name="sound_title">Sound</string>
+    <string name="sound_level">Volume: %1$d of %2$d</string>
+    <string name="sound_level_off">Volume: off (0 of %1$d)</string>
+    <string name="sound_fixed">Volume: fixed by the system</string>
+    <string name="sound_quieter">−  Quieter</string>
+    <string name="sound_louder">Louder  +</string>
+    <string name="sound_test">Test sound: left speaker, then right</string>
+    <string name="sound_output">Sound goes to: %1$s</string>
+    <string name="sound_output_hdmi">HDMI (the TV)</string>
+    <string name="sound_output_none">nowhere</string>
+    <string name="sound_note">This is the level the box sends over HDMI; at the top it is the full signal and the TV\'s remote sets how loud it is. Bluetooth headphones have a level of their own, set here while they play.</string>
+    <string name="sound_display_settings">Display &amp; sound: resolution, HDR, system sounds, surround…</string>
+    <string name="sound_open">Sound and volume</string>
+    <!-- TvSettings reads these two and drawable/sound_icon by name for the Sound
+         entry on its main screen (SoundActivity says more). -->
+    <string name="sound_pref_title">Sound &amp; display</string>
+    <string name="sound_pref_summary">Volume, test sound, resolution</string>
 </resources>

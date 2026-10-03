@@ -107,6 +107,15 @@ snapshot() {
     # Video decoders: the V4L2 nodes and what each one decodes. docs/HW_DECODE.md.
     { for v in /sys/class/video4linux/*; do echo "$v: $(cat "$v/name" 2>&1)"; done; echo
       timeout 20 edge1-v4l2-probe; } > "$s/video.txt" 2>&1
+    # Sound: the ALSA side (hw_params is "closed" unless something plays) and the
+    # framework's - volumes per stream and device, the output in use. Card 21 played
+    # at 2 of 15, which only a volume_changed line in the logcat gave away.
+    { cat /proc/asound/cards /proc/asound/pcm; echo
+      for f in /proc/asound/card*/pcm*p/sub0/hw_params /proc/asound/card*/pcm*p/sub0/status; do
+          echo "$f:"; cat "$f"
+      done; echo
+      timeout 20 dumpsys audio | head -n 600; echo
+      timeout 20 dumpsys media.audio_flinger | head -n 300; } > "$s/audio.txt" 2>&1
     sync
     log "state written to EDGE1BOOT:edge1-logs/${OUT##*/}/$1"
 }

@@ -1,6 +1,7 @@
 package org.edge1.tools;
 
 import android.app.Activity;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.os.Handler;
@@ -18,8 +19,8 @@ import java.util.Locale;
 
 /**
  * The settings screen: overlay on/off, its corner, autostart, the default launcher,
- * and the apps on this image - each with a button of its own, installed only when
- * pressed.
+ * the sound screen (also in Settings), and the apps on this image - each with a button
+ * of its own, installed only when pressed.
  */
 public class MainActivity extends Activity {
     private Button hud;
@@ -77,6 +78,8 @@ public class MainActivity extends Activity {
             refresh();
         });
         launcher = button(list, v -> Launchers.cycle(this, ok -> refresh()));
+        button(list, v -> startActivity(new Intent(this, SoundActivity.class)))
+                .setText(R.string.sound_open);
 
         notice = text(list, 16);
         appsTitle = text(list, 20);

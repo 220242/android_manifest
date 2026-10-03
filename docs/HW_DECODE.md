@@ -58,6 +58,11 @@ side of this board is the opposite: H.264 and VP9.
   `/dev/media*` its driver. The bootwatch writes it into every snapshot as
   `video.txt`. Expected: rkvdec with `S264` and `VP9F`, hantro-vpu with `MG2S`
   and `VP8F`, rockchip-rga.
+* **Confirmed on card 21:** `/dev/video3` rkvdec, `S264` 1x1..4096x2560 and `VP9F`
+  1x1..4096x2304; `/dev/video2` hantro-vpu decoder, `MG2S` 48x48..1920x1088 and
+  `VP8F` 48x48..3840x2160; `/dev/video1` the hantro JPEG encoder; `/dev/video0` RGA.
+  Media controllers: `/dev/media0` hantro-vpu, `/dev/media1` rkvdec. Every capture
+  format is NV12.
 
 ### Phase 2 - the FFmpeg Codec2 service, software only
 

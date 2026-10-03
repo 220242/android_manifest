@@ -21,4 +21,19 @@
     <string name="app_installed">%1$s %2$s - установлено</string>
     <string name="app_installing">Устанавливается %1$s…</string>
     <string name="app_failed">%1$s - ошибка (%2$s), нажмите ещё раз</string>
+    <string name="sound_title">Звук</string>
+    <string name="sound_level">Громкость: %1$d из %2$d</string>
+    <string name="sound_level_off">Громкость: выключена (0 из %1$d)</string>
+    <string name="sound_fixed">Громкость: задана системой</string>
+    <string name="sound_quieter">−  Тише</string>
+    <string name="sound_louder">Громче  +</string>
+    <string name="sound_test">Проверить звук: левый, затем правый динамик</string>
+    <string name="sound_output">Звук идёт на: %1$s</string>
+    <string name="sound_output_hdmi">HDMI (телевизор)</string>
+    <string name="sound_output_none">никуда</string>
+    <string name="sound_note">Это уровень, который приставка отдаёт по HDMI; на максимуме сигнал полный, а громкость задаёт пульт телевизора. У Bluetooth-наушников свой уровень - его меняют здесь, пока они играют.</string>
+    <string name="sound_display_settings">Экран и звук: разрешение, HDR, системные звуки, объёмный звук…</string>
+    <string name="sound_open">Звук и громкость</string>
+    <string name="sound_pref_title">Звук и экран</string>
+    <string name="sound_pref_summary">Громкость, проверка звука, разрешение</string>
 </resources>
