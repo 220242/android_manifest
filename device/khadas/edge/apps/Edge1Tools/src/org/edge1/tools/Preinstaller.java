@@ -1,7 +1,6 @@
 package org.edge1.tools;
 
 import android.app.PendingIntent;
-import android.app.role.RoleManager;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -10,7 +9,6 @@ import android.content.SharedPreferences;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageInstaller;
 import android.content.pm.PackageManager;
-import android.os.Process;
 import android.util.Log;
 
 import java.io.File;
@@ -32,13 +30,20 @@ import java.util.concurrent.TimeUnit;
  * ordinary apps, through PackageInstaller - silently, since the platform signature
  * gives this app INSTALL_PACKAGES. Each file is installed once: an app the owner
  * later uninstalls stays uninstalled. Two files of one package (the apks folder's
- * and F-Droid's) install once, the folder's preferred. preinstall.conf may name a
- * launcher package; it becomes the HOME role holder once, after it is installed.
+ * and F-Droid's) install once, the folder's preferred. Runs are serialized: a press
+ * of "install now" while the boot run is going waits for it.
+ *
+ * Nothing here changes the default launcher any more. Card 18 made Projectivy HOME
+ * by itself and then reset in a loop, each time seconds after the boot completed,
+ * as the launcher and the overlay started; whatever the trigger, something the
+ * owner did not choose should not be what runs at every boot. MainActivity has a
+ * button for it.
  */
 final class Preinstaller {
     static final String TAG = "Edge1Preinstall";
     static final File DIR = new File("/system_ext/etc/edge1-preinstall");
     private static final String ACTION_RESULT = "org.edge1.tools.INSTALL_RESULT";
+    private static final Object LOCK = new Object();
 
     private Preinstaller() {}
 
@@ -51,6 +56,12 @@ final class Preinstaller {
 
     /** @param force install even the ones that were installed once and removed since */
     static void run(Context context, boolean force) {
+        synchronized (LOCK) {
+            runLocked(context, force);
+        }
+    }
+
+    private static void runLocked(Context context, boolean force) {
         PackageManager pm = context.getPackageManager();
         SharedPreferences prefs = Prefs.get(context);
         // One file per package. The folder and F-Droid can both supply an app; the
@@ -95,7 +106,6 @@ final class Preinstaller {
                 status(prefs, key, "failed: " + result);
             }
         }
-        setHomeOnce(context, prefs, pm);
     }
 
     /** Is a better than b, two files of the same package? */
@@ -172,37 +182,6 @@ final class Preinstaller {
         } finally {
             context.unregisterReceiver(receiver);
         }
-    }
-
-    /** Make preinstall.conf's launcher (a package name) the default HOME app, once. */
-    private static void setHomeOnce(Context context, SharedPreferences prefs, PackageManager pm) {
-        if (prefs.getBoolean(Prefs.HOME_SET, false)) return;
-        String pkg = conf("home");
-        if (pkg == null || pkg.isEmpty() || installedVersion(pm, pkg) < 0) return;
-        RoleManager roles = context.getSystemService(RoleManager.class);
-        if (roles == null || !roles.isRoleAvailable(RoleManager.ROLE_HOME)) return;
-        final boolean[] ok = {false};
-        final CountDownLatch done = new CountDownLatch(1);
-        try {
-            roles.addRoleHolderAsUser(RoleManager.ROLE_HOME, pkg, 0,
-                    Process.myUserHandle(), context.getMainExecutor(), success -> {
-                        ok[0] = success;
-                        done.countDown();
-                    });
-            done.await(30, TimeUnit.SECONDS);
-        } catch (RuntimeException e) {
-            Log.w(TAG, "could not set the launcher", e);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
-        Log.i(TAG, "default launcher " + pkg + ": " + (ok[0] ? "set" : "not set"));
-        if (ok[0]) prefs.edit().putBoolean(Prefs.HOME_SET, true).apply();
-    }
-
-    /** The first "key=value" line of preinstall.conf. */
-    static String conf(String key) {
-        List<String> all = confAll(key);
-        return all.isEmpty() ? null : all.get(0);
     }
 
     /** Every "key=value" line of preinstall.conf with that key. */

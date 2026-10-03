@@ -16,7 +16,8 @@
 #    synced every SYNC seconds, so a sudden reset loses at most that much - and the
 #    last seconds before a panic are in edge1-pstore.bin anyway.
 #    Beside them, a snapshot of the system's state (getprop, ps, mounts, services,
-#    SurfaceFlinger, Wi-Fi/Bluetooth) in a subdirectory named for when it was taken:
+#    SurfaceFlinger, Wi-Fi/Bluetooth, video decoders) in a subdirectory named for
+#    when it was taken:
 #      120s       two minutes after "boot", whatever state Android is in
 #      completed  30s after sys.boot_completed, if it ever gets there
 #      timeout    TIMEOUT (300) seconds after "boot" without sys.boot_completed
@@ -39,7 +40,9 @@ TIMEOUT=300
 t_prop="$(getprop persist.vendor.edge1.bootwatch.timeout)"
 case "$t_prop" in ''|*[!0-9]*) ;; *) [ "$t_prop" -ge 60 ] && TIMEOUT=$t_prop ;; esac
 TIMEOUT=$(( (TIMEOUT + 9) / 10 * 10 ))
-SYNC=10
+# 5s, not 10: card 18 reset about ten seconds after each boot completed, and a
+# 10s sync lost exactly the seconds that mattered.
+SYNC=5
 DEV=/dev/block/by-name/bootfs
 MNT=/mnt/vendor/edge1-bootfs
 LOGS=$MNT/edge1-logs
@@ -90,8 +93,37 @@ snapshot() {
       done; echo
       timeout 20 dumpsys wifi | head -n 400; echo
       timeout 20 dumpsys bluetooth_manager | head -n 300; } > "$s/connectivity.txt" 2>&1
+    # Video decoders: the V4L2 nodes and what each one decodes. docs/HW_DECODE.md.
+    { for v in /sys/class/video4linux/*; do echo "$v: $(cat "$v/name" 2>&1)"; done; echo
+      timeout 20 edge1-v4l2-probe; } > "$s/video.txt" 2>&1
     sync
     log "state written to EDGE1BOOT:edge1-logs/boot-0/$1"
+}
+
+# Temperatures, fan level and cluster clocks, one kernel log line. Written every
+# SYNC seconds, so dmesg.txt - and edge1-pstore.bin, which survives a reset - show
+# them right up to the end. Card 18 reset in a loop with nothing logged; at 40-45C
+# (its overlay) that was not the tsadc's 95C hardware shutdown, and this line is
+# what rules heat in or out next time without anyone watching.
+# Local variables only: the main loop's t is a global, and a "t" here once set it
+# to a temperature in millidegrees - past TIMEOUT, so the watchdog would reboot.
+thermal_line() {
+    local line="" z mc c p
+    for z in /sys/class/thermal/thermal_zone*; do
+        mc=$(cat "$z/temp" 2>/dev/null) || continue
+        case "$mc" in ''|*[!0-9-]*) continue ;; esac
+        line="$line $(cat "$z/type" 2>/dev/null | sed 's/-thermal//')=$((mc / 1000))C"
+    done
+    for c in /sys/class/thermal/cooling_device*; do
+        [ "$(cat "$c/type" 2>/dev/null)" = pwm-fan ] || continue
+        line="$line fan=$(cat "$c/cur_state" 2>/dev/null)/$(cat "$c/max_state" 2>/dev/null)"
+    done
+    for p in /sys/devices/system/cpu/cpufreq/policy*; do
+        mc=$(cat "$p/scaling_cur_freq" 2>/dev/null) || continue
+        case "$mc" in ''|*[!0-9]*) continue ;; esac
+        line="$line ${p##*/}=$((mc / 1000))MHz"
+    done
+    log "thermal$line"
 }
 
 finish() {
@@ -132,6 +164,7 @@ done_at=
 while :; do
     sleep "$SYNC"
     t=$((t + SYNC))
+    thermal_line
     if [ -n "$mounted" ]; then
         sync
         if [ -n "$streams" ] && [ "$(avail_kib)" -lt "$STOP_FREE_KIB" ]; then

@@ -97,6 +97,7 @@ not reachable from it.
 | 15 | leanback launcher found ("real home found"), TvProvision ran; launcher and SystemUI still crash-looped: "Failed to initialize driver" only in app-uid processes | init.edge1.rc chmod'ed `/dev/dri/card0` back to 0660 at `boot`, after ueventd set 0666 → chmod removed (ueventd alone owns node modes; verify-tree guards it); F-Droid preinstalled via `build/fetch-fdroid.sh`; snapshots list `/dev` node modes; HDMI-CEC investigated and dropped by the owner |
 | 16 | **in the launcher** on HDMI, SystemUI up, F-Droid installed (signature matched), TvSettings works; no network (Ethernet unplugged), no Wi-Fi, no Bluetooth; TvSettings died in "Add accessory" (`BluetoothAdapter` null) | Wi-Fi: brcmfmac (built in) asked for firmware at 1.4s, before /vendor → firmware also in the ramdisk's `/lib/firmware/brcm`; `wpa_supplicant`/`hostapd` were never built (`WPA_SUPPLICANT_VERSION` unset; the probe cannot see Make guards) → set, with the module's own rc and our `wpa_supplicant.conf`; `android.hardware.wifi-service` had no legacy HAL and blocked Wi-Fi → removed, framework runs HAL-less. Bluetooth: kernel `hci_bcm` (`BT_HCIUART=y`, `POWER_SEQUENCING=y`) + Armbian's `BCM4359C0.hcd` (ramdisk + vendor) → hci0; the AOSP HAL binds it as an HCI user channel; `/dev/rfkill` back to root-only (the HAL soft-blocks hci0 if it can, then cannot bind); BT features back; A2DP source off (no BT audio provider). UI sounds (`AudioTv.mk`); `has_HDR_display=false`; snapshots add `connectivity.txt`; verify-tree [11] |
 | 17 | **Bluetooth works** (hci0 patched with BCM4359C0.hcd, HAL bound, adapter ON); Wi-Fi up (wlan0, supplicant, scans) but every association with the owner's WPA/WPA2 AP failed 4s in, `status_code=16`; developer options crash; userdata 1.6GiB | `brcmfmac.feature_disable=0x82000` (no firmware 4-way handshake/SAE; status 16 is brcmfmac's catch-all); bootwatch turns on Wi-Fi verbose logging; kernel patch 0003 (`/sys/class/android_usb` - UsbService needs it or `getCurrentFunctions()` throws in TvSettings); userdata 16GiB, image file ends 64MiB into it; USB Wi-Fi/BT adapter drivers + linux-firmware blobs (ramdisk + vendor), `persist.vendor.edge1.wifi.iface`; Edge1 Tools app (performance overlay + first-boot installer); bundled apps via `build/fetch-apps.sh` (the owner's `D:\android_khadas\apks` folder + VLC/Material Files/Aurora Store from F-Droid; Projectivy `com.spocky.projengmenu` made HOME) |
+| 18 | **Wi-Fi connected** (the MikroTik, 5GHz 11ac), developer options open, the overlay works (40-45C), nine apps installed from Edge1 Tools; then a **reset loop**: hard resets (no shutdown logged, boot reason plain "reboot") about 10s after each boot completed, once the overlay was set to start at boot; a panfrost job fault (DATA_INVALID_FAULT) the moment the overlay started; system_server ran with a 16MB Java heap | Java heap: nothing set `dalvik.vm.heap*`, so every process had AndroidRuntime's 16MB default → `phone-xhdpi-4096-dalvik-heap.mk`. Overlay: its EGL probe (the GPU fault) replaced by the sysfs driver name; at boot it waits 30s, and two boots in a row that do not last 3 minutes after it turn its autostart off. No automatic HOME (Edge1 Tools has a "Default launcher" button). Preinstall runs 3 minutes after boot; Edge1 Tools is not "stopped" at first boot (sysconfig). Fan: `pwm-fan` was `=m`, the fan never ran → `=y`. dex2oat on the A53s. Bootwatch: temperatures, fan and clocks in the kernel log every 5s, sync every 5s (was 10). Video: hantro built in, `/dev/video*` `/dev/media*` wildcards, `edge1-v4l2-probe` → `video.txt`, `docs/HW_DECODE.md` |
 
 ## Lessons that cost a card each (check these first next time)
 
@@ -146,21 +147,36 @@ not reachable from it.
 * **brcmfmac reports every connect failure as status 16.** Card 17's associations
   failed inside the firmware's own WPA handshake; `brcmfmac.feature_disable=0x82000`
   moves it to wpa_supplicant, where a wrong key says so.
+* **Nothing sets the Java heap unless the device does.** Without `dalvik.vm.heapsize`
+  every Java process, system_server included, gets AndroidRuntime's built-in 16MB
+  ("Clamp target GC heap from 40MB to 16MB" in logcat). Device trees inherit one of
+  `frameworks/native/build/*-dalvik-heap.mk`; this one did not until card 18.
+* **Android 14 installs system apps "stopped"** (`config_stopSystemPackagesByDefault`):
+  no BOOT_COMPLETED until the app is opened once. A system app that must run at first
+  boot needs `<initial-package-state package=".." stopped="false"/>` in a sysconfig
+  file (Edge1 Tools: `edge1-tools.xml`).
+* **defconfig's `=m` is "off" here** (no modules are shipped): the fan driver
+  (`SENSORS_PWM_FAN`) sat at `=m` until card 18. check-kernel-fragment only proves
+  what the fragment names; anything the board needs that it does not name, check.
+* **A hard reset with nothing logged is not necessarily heat.** Card 18's overlay
+  showed 40-45C; the resets came right as the overlay started (and with it a GPU job
+  fault). Read the temperatures before blaming them - bootwatch now logs them.
 * **Images:** only the SD card is built during bring-up (`stage_images` in
   provision-wsl.sh, build-images.sh default); eMMC/NVMe are commented out.
 
 ## Open, in rough order
 
-* Card 18: Wi-Fi associates with the MikroTik (if not, logcat now has the
-  supplicant's own lines - verbose logging is on); developer options open; userdata
-  is 16GiB (Settings > Storage); bundled apps installed after first boot (Edge1 Tools
-  lists each one's status), Projectivy is HOME; the overlay (Edge1 Tools > Performance
-  overlay) shows FPS, CPU, GPU, temperatures. `fetch-apps` lines in the build log list
-  every APK taken (the owner's folder: Aurora, LazyMedia Deluxe, Projectivy, SmartTube,
-  TV Bro, app-release-universal; F-Droid: VLC, Material Files). Only F-Droid is
-  downloaded - the owner's call after GitHub downloads failed.
-* Hardware video decode: rkvdec (H.264) is in the kernel but no Codec2 service is
-  installed; the overlay's "HW decode: none" is that. HEVC/VP9 need a newer kernel.
+* Card 19 (a fresh flash - card 18's `/data` keeps the overlay's autostart and the
+  loop): boots and stays up with the overlay on at boot; if it still resets, the
+  pstore of the reset (`edge1-pstore.bin`) and the `thermal` lines at the end of
+  `dmesg.txt` say what it was. `Clamp target GC heap` gone from logcat; bundled apps
+  installed by themselves about 3 minutes after the first boot (Edge1 Tools lists
+  them); HOME stays the AOSP launcher until the owner picks one with "Default
+  launcher"; the fan spins when the SoC passes 55C; `video.txt` in the snapshots
+  lists rkvdec (S264, VP9F) and hantro-vpu (MG2S, VP8F).
+* Hardware video decode: docs/HW_DECODE.md. Phase 1 (decoders up, probed) is on
+  card 19; next the FFmpeg Codec2 service (software), then v4l2-request for H.264
+  and VP9. HEVC needs a newer kernel.
 * Bluetooth pairing of a remote/gamepad not yet tried by the owner.
 * Bluetooth audio (A2DP source): needs an `IBluetoothAudioProviderFactory` service
   (hardware/interfaces/bluetooth/audio/aidl/default) and

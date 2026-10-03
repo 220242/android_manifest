@@ -125,8 +125,8 @@ $(call inherit-product-if-exists, vendor/edge1/fdroid/fdroid.mk)
 # The bundled apps themselves - every APK in D:\android_khadas\apks, plus VLC,
 # Material Files and Aurora Store from F-Droid - come from build/fetch-apps.sh,
 # which writes vendor/edge1/apps/apps.mk (or nothing, if there is no app at all).
-# Projectivy Launcher, if among them, becomes the default launcher. See
-# build/apps/apps.tsv.
+# None becomes the default launcher by itself: Edge1 Tools has a button for that.
+# See build/apps/apps.tsv.
 PRODUCT_PACKAGES += \
     Edge1Tools
 $(call inherit-product-if-exists, vendor/edge1/apps/apps.mk)
@@ -478,18 +478,17 @@ PRODUCT_PROPERTY_OVERRIDES += \
 # ---------------------------------------------------------------------------
 # Media / codecs.
 #
-# Rockchip VPU: H.264/H.265/VP9 decode to 4K60, H.264 encode.
-# A10 shipped OMX IL components; Codec2 is mandatory for new codecs on 14, so
-# the OMX components are kept only as a fallback behind the Codec2 store.
+# Software decoding for now: the framework's own Codec2 store (libcodec2_soft_*),
+# no vendor Codec2 service - AOSP 14 has no c2@1.2-service.software to add. The
+# mainline kernel's decoders are V4L2 stateless ("request API") devices -
+# rkvdec: H.264 and VP9 to 4K; hantro: MPEG-2 and VP8 - which neither Rockchip's
+# MPP (BSP kernels only) nor AOSP's v4l2_codec2 (stateful decoders only) can
+# drive. The way there is FFmpeg's v4l2-request hwaccel inside an FFmpeg Codec2
+# service: docs/HW_DECODE.md has the plan and its state. edge1-v4l2-probe lists
+# what the decoders offer into every bootwatch snapshot (video.txt).
 # ---------------------------------------------------------------------------
-# Rockchip MPP userspace: Android 10 revisions, not yet building against the 14
-# VNDK, so gated with the rest.
-
-# No vendor Codec2 service. The probe shows AOSP 14 has no
-# c2@1.2-service.software - the software codecs live in the framework's own
-# Codec2 store (libcodec2_soft_*), which needs no vendor HAL. 4K HEVC/VP9 will
-# not play at full rate without the MPP hardware decoder, but SD/HD software
-# decode works.
+PRODUCT_PACKAGES_DEBUG += \
+    edge1-v4l2-probe
 
 PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/media/media_profiles_edge1.xml:$(TARGET_COPY_OUT_VENDOR)/etc/media_profiles_V1_0.xml
@@ -498,10 +497,9 @@ PRODUCT_PROPERTY_OVERRIDES += \
     debug.stagefright.ccodec=4 \
     media.c2.dmabuf.padding=512
 
-# The hardware codec list is installed only when the Rockchip Codec2 store is
-# actually built. Copying it unconditionally would advertise c2.rk.* decoders
-# with no component registered, and MediaCodec.configure() then throws instead of
-# falling back to a software codec.
+# No hardware codec list (media_codecs.xml) until a Codec2 service registers
+# components for it: one that advertised decoders nothing implements would make
+# MediaCodec.configure() throw instead of falling back to a software codec.
 
 # DRM: Widevine L3 only. L1 needs an OP-TEE trusted app, and this board has no
 # provisioned TEE.
@@ -614,6 +612,25 @@ PRODUCT_PACKAGES += edge1_no_configstore
 PRODUCT_PRODUCT_PROPERTIES += sys.use_memfd=true
 PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/init/init.edge1.memfd.rc:$(TARGET_COPY_OUT_PRODUCT)/etc/init/init.edge1.memfd.rc
+
+# Java heap sizes. Nothing set them, so every Java process - system_server too -
+# ran with AndroidRuntime's built-in default, a 16MB heap: card 18's system_server
+# logged "Clamp target GC heap from 40MB to 16MB" a hundred times and stalled in
+# blocking GCs, worst while it registered nine new apps. AOSP's figures for a 4GB
+# device: apps grow to 192MB, largeHeap apps and system_server to 512MB.
+$(call inherit-product, frameworks/native/build/phone-xhdpi-4096-dalvik-heap.mk)
+
+# App compilation on the little cluster. dex2oat used all six cores ("threads: 6")
+# for every install, so card 18's nine installs in a row kept the A72s flat out,
+# the board barely usable, for minutes. On the four A53s an install takes a little
+# longer and the rest of the system keeps the big cores. Boot-time compilation
+# keeps the defaults, so a first boot is no slower. Product properties for the
+# same reason as above.
+PRODUCT_PRODUCT_PROPERTIES += \
+    dalvik.vm.dex2oat-cpu-set=0,1,2,3 \
+    dalvik.vm.dex2oat-threads=4 \
+    dalvik.vm.background-dex2oat-cpu-set=0,1,2,3 \
+    dalvik.vm.background-dex2oat-threads=2
 
 # init / fstab.
 # ---------------------------------------------------------------------------

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 14 installs system apps "stopped" (config_stopSystemPackagesByDefault):
+  no BOOT_COMPLETED until someone opens them. Edge1 Tools has to see the first boot
+  to install the bundled apps by itself, so it starts out not stopped.
+-->
+<config>
+    <initial-package-state package="org.edge1.tools" stopped="false" />
+</config>

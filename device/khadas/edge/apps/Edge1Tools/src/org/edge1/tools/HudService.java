@@ -25,10 +25,14 @@ import java.util.Locale;
 /**
  * The performance overlay: a small text panel over everything, refreshed once a
  * second. It neither takes focus nor touches, so the remote keeps driving the app
- * underneath.
+ * underneath. Started at boot, it waits BOOT_DELAY_MS before it shows, and once it
+ * has been up SETTLE_MS it clears BootReceiver's count of failed autostarts.
  */
 public class HudService extends Service {
     private static final String CHANNEL = "hud";
+    private static final String EXTRA_DELAY_MS = "delay_ms";
+    static final long BOOT_DELAY_MS = 30 * 1000;
+    static final long SETTLE_MS = 3 * 60 * 1000;
     private static volatile boolean running;
 
     private WindowManager wm;
@@ -36,6 +40,12 @@ public class HudService extends Service {
     private Handler handler;
     private TaskFps fps;
     private final Sampler sampler = new Sampler();
+
+    private boolean scheduled;
+
+    private final Runnable show = this::show;
+    private final Runnable settled = () ->
+            Prefs.get(this).edit().remove(Prefs.HUD_BOOT_TRIES).apply();
 
     private final Runnable tick = new Runnable() {
         @Override
@@ -51,7 +61,12 @@ public class HudService extends Service {
     }
 
     static void start(Context context) {
-        context.startForegroundService(new Intent(context, HudService.class));
+        start(context, 0);
+    }
+
+    static void start(Context context, long delayMs) {
+        context.startForegroundService(new Intent(context, HudService.class)
+                .putExtra(EXTRA_DELAY_MS, delayMs));
     }
 
     static void stop(Context context) {
@@ -83,18 +98,26 @@ public class HudService extends Service {
         int pad = (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 6,
                 getResources().getDisplayMetrics());
         view.setPadding(pad, pad / 2, pad, pad / 2);
-        wm.addView(view, layoutParams());
         running = true;
-
-        new Thread(sampler::probeStatic, "edge1-hud-probe").start();
-        handler.post(tick);
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        // A position change while running: move the panel.
-        if (view != null) wm.updateViewLayout(view, layoutParams());
+        if (!scheduled) {
+            scheduled = true;
+            handler.postDelayed(show, intent == null ? 0 : intent.getLongExtra(EXTRA_DELAY_MS, 0));
+        } else if (view.isAttachedToWindow()) {
+            // A position change while running: move the panel.
+            wm.updateViewLayout(view, layoutParams());
+        }
         return START_STICKY;
+    }
+
+    private void show() {
+        wm.addView(view, layoutParams());
+        new Thread(sampler::probeStatic, "edge1-hud-probe").start();
+        handler.post(tick);
+        handler.postDelayed(settled, SETTLE_MS);
     }
 
     private WindowManager.LayoutParams layoutParams() {
@@ -145,7 +168,13 @@ public class HudService extends Service {
     @Override
     public void onDestroy() {
         running = false;
-        if (handler != null) handler.removeCallbacks(tick);
+        // Stopped, not reset: the board was up, whatever the time.
+        Prefs.get(this).edit().remove(Prefs.HUD_BOOT_TRIES).apply();
+        if (handler != null) {
+            handler.removeCallbacks(show);
+            handler.removeCallbacks(tick);
+            handler.removeCallbacks(settled);
+        }
         if (fps != null) fps.stop();
         if (view != null) {
             try {

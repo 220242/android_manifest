@@ -24,7 +24,7 @@ userspace for them:
 |---|---|---|
 | GPU | `drivers/gpu/drm/panfrost` | `external/mesa3d`, `libmesa_pipe_panfrost` → `libGLES_mesa` |
 | Display | `drivers/gpu/drm/rockchip` | `external/drm_hwcomposer` + minigbm |
-| Decode | `drivers/staging/media/rkvdec` | `external/v4l2_codec2` |
+| Decode | `rkvdec` (staging), `hantro` - V4L2 stateless | none yet: `v4l2_codec2` is stateful-only; FFmpeg v4l2-request, [`HW_DECODE.md`](HW_DECODE.md) |
 | Wi-Fi | `brcmfmac` over SDIO | AOSP `wpa_supplicant`, no vendor Wi-Fi HAL |
 | Bluetooth | `hci_bcm` over uart0 (serdev) | AOSP AIDL HAL, HCI user channel |
 | Audio | `simple-audio-card` → HDMI codec | AOSP AIDL audio HAL over ALSA |
@@ -85,6 +85,9 @@ Two things about the fragment are worth knowing:
 **Everything is built in, nothing is a module.** arm64 `defconfig` builds DRM,
 panfrost and brcmfmac as modules. This layout has no `vendor_dlkm` and loads
 nothing in first-stage init, so a module here is a driver that does not exist.
+The fragment only fixes what it names: the fan (`SENSORS_PWM_FAN`) and the hantro
+decoder stayed `=m`, and absent, until card 18 - a driver nobody listed is worth a
+look at `.config` before a card.
 
 **Bluetooth is the kernel's.** uart0 carries the BCM4359 and the DTS describes it as
 a serdev child (`brcm,bcm43438-bt`), so `BT_HCIUART_BCM` (built in, which takes

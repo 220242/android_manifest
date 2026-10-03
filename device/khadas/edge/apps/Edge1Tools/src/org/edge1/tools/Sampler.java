@@ -2,12 +2,6 @@ package org.edge1.tools;
 
 import android.media.MediaCodecInfo;
 import android.media.MediaCodecList;
-import android.opengl.EGL14;
-import android.opengl.EGLConfig;
-import android.opengl.EGLContext;
-import android.opengl.EGLDisplay;
-import android.opengl.EGLSurface;
-import android.opengl.GLES20;
 
 import java.io.File;
 import java.io.IOException;
@@ -32,9 +26,9 @@ final class Sampler {
     private String gpuRenderer;
     private String hwDecoders;
 
-    /** One-time facts, worked out on a background thread: GL renderer, HW codecs. */
+    /** One-time facts, worked out on a background thread: GPU driver, HW codecs. */
     synchronized void probeStatic() {
-        if (gpuRenderer == null) gpuRenderer = glRenderer();
+        if (gpuRenderer == null) gpuRenderer = gpuDriver();
         if (hwDecoders == null) hwDecoders = hardwareVideoDecoders();
     }
 
@@ -189,44 +183,19 @@ final class Sampler {
         }
     }
 
-    /** GL_RENDERER from a throwaway 1x1 pbuffer context. */
-    private static String glRenderer() {
-        EGLDisplay dpy = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY);
-        if (dpy == EGL14.EGL_NO_DISPLAY) return "?";
-        int[] version = new int[2];
-        if (!EGL14.eglInitialize(dpy, version, 0, version, 1)) return "?";
-        EGLContext ctx = EGL14.EGL_NO_CONTEXT;
-        EGLSurface surf = EGL14.EGL_NO_SURFACE;
+    /**
+     * The GPU's kernel driver ("panfrost"), from sysfs. This used to create a
+     * throwaway EGL context to read GL_RENDERER; the GPU logged a job fault
+     * (DATA_INVALID_FAULT) the moment it did, on card 18, and nothing here is worth
+     * a GPU fault.
+     */
+    private static String gpuDriver() {
+        File[] devs = new File("/sys/class/devfreq").listFiles((d, n) -> n.contains("gpu"));
+        if (devs == null || devs.length == 0) return "?";
         try {
-            int[] attrs = {
-                EGL14.EGL_RENDERABLE_TYPE, EGL14.EGL_OPENGL_ES2_BIT,
-                EGL14.EGL_SURFACE_TYPE, EGL14.EGL_PBUFFER_BIT,
-                EGL14.EGL_NONE
-            };
-            EGLConfig[] configs = new EGLConfig[1];
-            int[] count = new int[1];
-            if (!EGL14.eglChooseConfig(dpy, attrs, 0, configs, 0, 1, count, 0) || count[0] < 1) {
-                return "?";
-            }
-            ctx = EGL14.eglCreateContext(dpy, configs[0], EGL14.EGL_NO_CONTEXT,
-                    new int[] {EGL14.EGL_CONTEXT_CLIENT_VERSION, 2, EGL14.EGL_NONE}, 0);
-            surf = EGL14.eglCreatePbufferSurface(dpy, configs[0],
-                    new int[] {EGL14.EGL_WIDTH, 1, EGL14.EGL_HEIGHT, 1, EGL14.EGL_NONE}, 0);
-            if (ctx == EGL14.EGL_NO_CONTEXT || surf == EGL14.EGL_NO_SURFACE
-                    || !EGL14.eglMakeCurrent(dpy, surf, surf, ctx)) {
-                return "?";
-            }
-            String renderer = GLES20.glGetString(GLES20.GL_RENDERER);
-            String version2 = GLES20.glGetString(GLES20.GL_VERSION);
-            return (renderer == null ? "?" : renderer)
-                    + (version2 == null ? "" : ", " + version2.replace("OpenGL ES ", "GLES "));
-        } finally {
-            EGL14.eglMakeCurrent(dpy, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE,
-                    EGL14.EGL_NO_CONTEXT);
-            if (surf != EGL14.EGL_NO_SURFACE) EGL14.eglDestroySurface(dpy, surf);
-            if (ctx != EGL14.EGL_NO_CONTEXT) EGL14.eglDestroyContext(dpy, ctx);
-            // No eglTerminate: the default display is shared with HWUI, which
-            // draws this very overlay.
+            return new File(devs[0], "device/driver").getCanonicalFile().getName();
+        } catch (IOException e) {
+            return "?";
         }
     }
 }

@@ -14,4 +14,14 @@ android_app {
     optimize: {
         enabled: false,
     },
+    required: ["edge1_tools_sysconfig"],
+}
+
+// Not stopped at first boot, so BootReceiver runs then. See the file.
+prebuilt_etc {
+    name: "edge1_tools_sysconfig",
+    src: "edge1-tools-sysconfig.xml",
+    filename: "edge1-tools.xml",
+    sub_dir: "sysconfig",
+    system_ext_specific: true,
 }

@@ -1,0 +1,12 @@
+// edge1-v4l2-probe: lists the V4L2 decoders and their formats into the bootwatch
+// snapshots (video.txt). Userdebug only, like bin/edge1-bootwatch.sh.
+cc_binary {
+    name: "edge1-v4l2-probe",
+    vendor: true,
+    srcs: ["v4l2-probe.c"],
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+    ],
+}

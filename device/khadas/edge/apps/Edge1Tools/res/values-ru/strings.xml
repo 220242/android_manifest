@@ -16,4 +16,6 @@
     <string name="pos_bottom_right">справа снизу</string>
     <string name="hud_channel">Оверлей производительности</string>
     <string name="hud_notification">Оверлей производительности включён</string>
+    <string name="hud_autostart_tripped">Автозапуск оверлея выключен: плата дважды подряд перезагрузилась в первые три минуты после его показа.</string>
+    <string name="launcher">Лаунчер по умолчанию: %1$s</string>
 </resources>

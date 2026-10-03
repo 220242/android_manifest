@@ -11,8 +11,8 @@
 #
 # Columns, tab-separated: name <TAB> F-Droid package name
 #
-# Projectivy Launcher (com.spocky.projengmenu) becomes the default launcher once it
-# is installed, wherever it came from.
+# Nothing here changes the default launcher: a launcher among the apps is chosen
+# with the "Default launcher" button in Edge1 Tools.
 VLC	org.videolan.vlc
 MaterialFiles	me.zhanghai.android.files
 AuroraStore	com.aurora.store

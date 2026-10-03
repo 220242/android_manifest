@@ -20,10 +20,12 @@
 /dev/dri/card0            0666   system     graphics
 /dev/dri/card1            0666   system     graphics
 
-# Video: rkvdec and RGA as V4L2 M2M devices, plus the media controller.
-/dev/video0               0660   media      media
-/dev/video1               0660   media      media
-/dev/media0               0660   media      media
+# Video: rkvdec (H.264, VP9), hantro (MPEG-2, VP8, JPEG encode) and RGA as V4L2
+# M2M devices, and the media controllers of the two decoders. Wildcards: which
+# number each one gets depends on probe order (and a USB camera adds more).
+# Group media: the Codec2 service of docs/HW_DECODE.md runs as user media.
+/dev/video*               0660   media      media
+/dev/media*               0660   media      media
 
 # HDMI-CEC, from the Synopsys HDMI bridge's CEC block.
 /dev/cec0                 0660   system     system

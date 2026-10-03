@@ -111,6 +111,7 @@ serial adapter.
 | [`docs/PORTING.md`](docs/PORTING.md) | the runbook, step by step, on Linux |
 | [`docs/WINDOWS.md`](docs/WINDOWS.md) | the same, driven from Windows through WSL2 |
 | [`docs/KERNEL.md`](docs/KERNEL.md), [`docs/HAL_MIGRATION.md`](docs/HAL_MIGRATION.md) | why mainline, and what replaced each Android 10 HAL |
+| [`docs/HW_DECODE.md`](docs/HW_DECODE.md) | hardware video decoding: what the mainline decoders do and the plan to reach them from Android |
 
 ## Running it
 

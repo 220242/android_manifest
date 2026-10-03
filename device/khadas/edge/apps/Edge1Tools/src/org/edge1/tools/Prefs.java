@@ -7,7 +7,10 @@ import android.content.SharedPreferences;
 final class Prefs {
     static final String HUD_AUTOSTART = "hud_autostart";
     static final String HUD_POSITION = "hud_position";
-    static final String HOME_SET = "home_set";
+    /** Boots in a row that started the overlay and did not last SETTLE_MS after. */
+    static final String HUD_BOOT_TRIES = "hud_boot_tries";
+    /** Set when those tries turned autostart off; MainActivity says so. */
+    static final String HUD_AUTOSTART_TRIPPED = "hud_autostart_tripped";
     static final String DONE_PREFIX = "done:";
     static final String STATUS_PREFIX = "status:";
 

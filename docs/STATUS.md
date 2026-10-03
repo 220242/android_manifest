@@ -4,8 +4,9 @@ Where the port is, what is still open, and the decisions worth not re-deriving.
 
 ## Where the build is
 
-**`m` completes, and the card is built to boot on this board as it is.** Nothing has
-booted Android yet.
+**Android 14 runs on the board from the SD card**: the leanback launcher on HDMI,
+Wi-Fi and Bluetooth (cards 16-18; the list under "What the hardware attempts
+established" goes card by card). What follows first is how the boot path got there.
 
 Five cards went onto the hardware before this, and all five booted the Armbian on the
 eMMC. For the first four the reason was the RK3399 BootROM's order — SPI NOR, then eMMC,
@@ -159,7 +160,18 @@ Measured on the board — [`HARDWARE.md`](HARDWARE.md) has the readings:
   16GiB now. Also new: USB Wi-Fi/Bluetooth adapter support, the Edge1 Tools app
   (performance overlay, first-boot installer) and bundled apps: every APK dropped into
   `D:\android_khadas\apks`, plus VLC, Material Files and Aurora Store from F-Droid
-  (nothing else is downloaded). Projectivy Launcher becomes the default launcher.
+  (nothing else is downloaded).
+* **Wi-Fi connected; then a reset loop.** Card 18: associated with the owner's AP at
+  5GHz, developer options open, nine apps installed from Edge1 Tools, the overlay
+  showing 40-45C. Once the overlay was set to start at boot, the board reset (no
+  shutdown, nothing logged) about ten seconds after every boot completed - the
+  overlay's start had also brought a GPU job fault. And every Java process,
+  system_server included, had run with a 16MB heap: nothing set `dalvik.vm.heap*`.
+  Now: AOSP's 4GB heap figures; the overlay without its EGL probe, starting 30s
+  after boot and turning its own autostart off after two boots that do not last;
+  no automatic default launcher (a button in Edge1 Tools instead); the fan driver
+  built in (it was a module, so the fan had never run); the decoders probed into the
+  logs, first step of [`HW_DECODE.md`](HW_DECODE.md).
 
 What they did not establish, because none of the card's code ever ran: whether our U-Boot,
 our TPL's DDR init, or our SPL work on this board. The DDR-blob A/B, the SPL boot-order
@@ -483,12 +495,12 @@ Rockchip's own gralloc did.
    are logged and can be collected with `adb shell dmesg | grep avc` and fixed. The
    boot medium's partitions are now labelled; nothing else in the policy has met a
    running system yet.
-5. **Hardware video decode is not wired up.** `CONFIG_VIDEO_ROCKCHIP_VDEC` is in the
-   kernel and `external/v4l2_codec2` is in the tree, with
-   `android.hardware.media.c2@1.2-service-v4l2` available — but it is not in
-   `PRODUCT_PACKAGES`, and it needs a codec2 store config and a `media_codecs_c2.xml`
-   beside it. Until then the software codecs carry playback: 1080p yes, 4K no.
-   6.12's rkvdec is H.264 only in any case, so HEVC and VP9 stay in software regardless.
+5. **Hardware video decode is not wired up.** The kernel has both decoders as V4L2
+   stateless devices (rkvdec: H.264, VP9; hantro: MPEG-2, VP8), which no Android
+   codec in the tree can drive: `external/v4l2_codec2` is stateful-only and
+   Rockchip's MPP needs the BSP kernel. The plan - FFmpeg's v4l2-request hwaccel in
+   an FFmpeg Codec2 service - is [`HW_DECODE.md`](HW_DECODE.md). Until then the
+   software codecs carry playback: 1080p yes, 4K no. HEVC needs a newer kernel.
 6. **Bluetooth is wired, not yet seen working.** uart0 is a serdev controller (no
    `/dev/ttyS0`), so the kernel's `hci_bcm` owns it, loads `BCM4359C0.hcd` from the
    ramdisk and registers hci0; AOSP's default AIDL HAL binds hci0 as an HCI user

@@ -12,11 +12,12 @@ import android.widget.TextView;
 
 import java.io.File;
 
-/** The settings screen: overlay on/off, its corner, autostart, and the bundled apps. */
+/** The settings screen: overlay on/off, its corner, autostart, the default launcher, and the bundled apps. */
 public class MainActivity extends Activity {
     private Button hud;
     private Button position;
     private Button autostart;
+    private Button launcher;
     private TextView status;
 
     @Override
@@ -47,9 +48,12 @@ public class MainActivity extends Activity {
         autostart = button(list, v -> {
             SharedPreferences p = Prefs.get(this);
             p.edit().putBoolean(Prefs.HUD_AUTOSTART, !p.getBoolean(Prefs.HUD_AUTOSTART, false))
+                    .remove(Prefs.HUD_BOOT_TRIES)
+                    .remove(Prefs.HUD_AUTOSTART_TRIPPED)
                     .apply();
             refresh();
         });
+        launcher = button(list, v -> Launchers.cycle(this, ok -> refresh()));
         Button install = button(list, v -> {
             PreinstallJob.schedule(this, true);
             status.setText(R.string.install_started);
@@ -92,8 +96,14 @@ public class MainActivity extends Activity {
         position.setText(getString(R.string.hud_position, getString(names[pos & 3])));
         autostart.setText(p.getBoolean(Prefs.HUD_AUTOSTART, false)
                 ? R.string.hud_autostart_on : R.string.hud_autostart_off);
+        launcher.setText(getString(R.string.launcher,
+                Launchers.label(this, Launchers.current(this))));
 
-        StringBuilder sb = new StringBuilder(getString(R.string.bundled_title)).append('\n');
+        StringBuilder sb = new StringBuilder();
+        if (p.getBoolean(Prefs.HUD_AUTOSTART_TRIPPED, false)) {
+            sb.append(getString(R.string.hud_autostart_tripped)).append("\n\n");
+        }
+        sb.append(getString(R.string.bundled_title)).append('\n');
         File[] apks = Preinstaller.bundled();
         if (apks.length == 0) sb.append(getString(R.string.bundled_none));
         for (File f : apks) {

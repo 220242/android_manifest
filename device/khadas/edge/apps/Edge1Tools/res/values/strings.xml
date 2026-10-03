@@ -16,4 +16,6 @@
     <string name="pos_bottom_right">bottom right</string>
     <string name="hud_channel">Performance overlay</string>
     <string name="hud_notification">The performance overlay is on</string>
+    <string name="hud_autostart_tripped">Overlay autostart was turned off: the board restarted twice in a row within three minutes of showing it.</string>
+    <string name="launcher">Default launcher: %1$s</string>
 </resources>
