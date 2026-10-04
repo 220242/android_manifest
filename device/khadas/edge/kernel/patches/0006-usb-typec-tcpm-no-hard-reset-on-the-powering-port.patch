@@ -1,0 +1,78 @@
+usb: typec: tcpm: no Hard Reset on the port that powers the machine
+
+Khadas Edge1, Android 14 on mainline 6.12. Applied to kernel/mainline by
+build/build-kernel.sh before every build (device/khadas/edge/kernel/patches/).
+
+The Edge has no battery; it runs on whichever USB-C port has a supply, and
+since patch 0005 tcpm negotiates PD on it. But the bootloader on the eMMC
+does not, so for the first ~10 seconds the supply's Source_Capabilities get
+no GoodCRC - and a source that hears nothing for nCapsCount messages stops
+advertising (PE_SRC_Disabled), after which only a Hard Reset brings PD back.
+tcpm, starting late with VBUS already present, sends Soft_Reset, then Hard
+Reset - and a Hard Reset makes the source take VBUS to 0V for most of a
+second. tcpm even says so ("Initiating hard-reset, which might result in
+machine power-loss."). Card 25's logs read exactly so: edge1-boot.log at
+booti, the ramoops region all 0xff (power lost, not a panic, which would
+have left the kernel's log there), and no Android log at all.
+
+A sink-only, bus-powered port that had VBUS when tcpm started powers this
+machine. On that port a Hard Reset is withheld: tcpm asks once with
+Get_Source_Cap (the request its SNK_WAIT_CAPABILITIES_TIMEOUT state already
+makes) and, failing an answer, settles in SNK_READY without a contract - 5V
+at the Type-C current, which is what the board had before PD. A supply that
+is still advertising, or answers Soft_Reset or Get_Source_Cap, still gets
+its contract. Hard Resets the source sends are unchanged; it may.
+
+diff --git a/drivers/usb/typec/tcpm/tcpm.c b/drivers/usb/typec/tcpm/tcpm.c
+index db0755350..f7d86da67 100644
+--- a/drivers/usb/typec/tcpm/tcpm.c
++++ b/drivers/usb/typec/tcpm/tcpm.c
+@@ -364,6 +364,12 @@ struct tcpm_port {
+ 	bool vbus_vsafe0v;
+ 
+ 	bool vbus_never_low;
++	/*
++	 * A sink-only, bus-powered port that had VBUS when tcpm started: the
++	 * machine runs on it, and a Hard Reset makes the source cut VBUS.
++	 */
++	bool vbus_powers_machine;
++	bool vbus_powers_machine_gsc_sent;
+ 	bool vbus_source;
+ 	bool vbus_charge;
+ 
+@@ -5318,6 +5324,25 @@ static void run_state_machine(struct tcpm_port *port)
+ 	case HARD_RESET_SEND:
+ 		if (port->ams != NONE_AMS)
+ 			tcpm_ams_finish(port);
++		/*
++		 * A source that saw no PD sink for its first Source_Capabilities
++		 * (no GoodCRC while the bootloader ran) stops advertising, and only
++		 * a Hard Reset - VBUS off, then on - brings PD back. On a machine
++		 * with no battery that is a power cut on every boot. Ask for the
++		 * capabilities once more; failing that, stay at the Type-C current
++		 * on 5V, as a sink without PD would.
++		 */
++		if (port->vbus_powers_machine) {
++			if (!port->vbus_powers_machine_gsc_sent) {
++				port->vbus_powers_machine_gsc_sent = true;
++				tcpm_log(port, "hard reset withheld (VBUS powers this machine), Get_Source_Cap");
++				tcpm_set_state(port, SNK_WAIT_CAPABILITIES_TIMEOUT, 0);
++			} else {
++				tcpm_log(port, "hard reset withheld (VBUS powers this machine), no PD contract");
++				tcpm_set_state(port, SNK_READY, 0);
++			}
++			break;
++		}
+ 		if (!port->self_powered && port->port_type == TYPEC_PORT_SNK)
+ 			dev_err(port->dev, "Initiating hard-reset, which might result in machine power-loss.\n");
+ 		/*
+@@ -6918,6 +6943,9 @@ static void tcpm_init(struct tcpm_port *port)
+ 	port->vbus_present = port->tcpc->get_vbus(port->tcpc);
+ 	if (port->vbus_present)
+ 		port->vbus_never_low = true;
++	port->vbus_powers_machine = port->vbus_present && !port->self_powered &&
++				    port->port_type == TYPEC_PORT_SNK;
++	port->vbus_powers_machine_gsc_sent = false;
+ 
+ 	/*
+ 	 * 1. When vbus_present is true, voltage on VBUS is already at VSAFE5V.

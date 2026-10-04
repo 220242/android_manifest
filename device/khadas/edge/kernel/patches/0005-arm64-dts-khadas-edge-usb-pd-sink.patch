@@ -16,9 +16,10 @@ Both FUSB302s are described here for the mainline fusb302/tcpm drivers, as
 sinks asking for 5, 9 or 12V at up to 3A (tcpm takes the highest power the
 supply offers among them). VBUS is never sourced on these ports, so the
 port-0 VBUS switch (GPIO4_D2 in Khadas' tree) is not touched and the vbus
-supply is a placeholder regulator. tcpm in 6.12 does not hard-reset a supply
-that was already providing VBUS when it probed: Soft_Reset first, then
-Get_Source_Cap - a hard reset would cut the board's own power.
+supply is a placeholder regulator. tcpm in 6.12, finding VBUS already
+present, tries Soft_Reset before a Hard Reset - but then does send one, and
+a Hard Reset makes the supply cut VBUS: card 25 lost power at every boot.
+Patch 0006 keeps tcpm from sending one on the port the board runs on.
 
 The boot script can rewrite sink-pdos or disable both nodes before booting
 (pd= in edge1-options.txt), so a supply that misbehaves needs no rebuild.

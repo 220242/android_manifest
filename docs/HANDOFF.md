@@ -117,6 +117,7 @@ not reachable from it.
 | 22 | Sound at 15 of 15 on the HDMI "speaker"; Settings' new **Sound & display** entry opened SoundActivity, and TvSettings' Display & Sound twice. 593s, no reset (the power-test clocks); the session ended in a restart chosen in Settings, after which no boot-00002 and an edge1-boot.log still from the cold start - either the card was pulled, or the warm reboot never reached boot.scr (ask). **com.android.bluetooth ran in the zygote domain**: `seapp_context_lookup: No match ... seinfo default`, as on card 21 - since the build signs with its own keys (card 18, test keys: `bluetooth` domain) | Bluetooth: no cause found in the sources (Soong signs Bluetooth.apk with `<keys>/bluetooth`, keys.conf's @BLUETOOTH is the same file); `packages.txt` now has each package's signature hash and local-config prints the keys' - AOSP's test bluetooth key is `d77294ce`. **logs=0** in edge1-options.txt stops every write to the card: boot.scr reads it with `env import -t -r ... logs` (tested on the 2022.07 sandbox), the bootwatch only applies the clocks and leaves the partition read-only. **edge1-ctl** (vendor, root, own domain): Edge1 Tools' modes and logs switch, through sys.edge1.ctl / persist.sys.edge1.perf and init.edge1.ctl.rc on /product; it writes the picked mode into the card's file. **Edge1 Tools in Material 3** (platform widgets, M3 dark scheme, focus ring), runs as the system user; the six modes, overlay, sound, launcher, logs switch, bundled apps |
 | 23 | Two builds stopped first: aapt2 on Edge1 Tools' styles (implicit parents), then check_vintf on `IComponentStore/ffmpeg` (a device framework matrix now names it). Then **hardware decoding works**: SmartTube's 4K VP9 on `c2.ffmpeg.vp9.decoder` with rkvdec (`VP9F`), H.264 as `S264`; 920s, no reset, a mode picked in Edge1 Tools applied and written to edge1-options.txt (full speed at the end). The owner: modes and the overlay work, 4K at ~9 fps with the CPUs idle - the frame read back from the decoder's uncached (write-combined) buffer, twice. The restart from Settings on card 22 came back by itself. Bluetooth is signed with AOSP's test key (d77294ce), not this machine's (8a2a604b), while platform and networkstack carry ours | Cached decoded frames: kernel patch 0004 (rkvdec/hantro `allow_cache_hints`), FFmpeg 0011 (`V4L2_MEMORY_FLAG_NON_COHERENT`), ffmpeg_codec2 0002 (`av_hwframe_map`, one read instead of copy + read). Edge1 Tools: Power card - restart and shut down |
 | 24 | Six boots: the first at the power-test clocks, then full speed; five ended in a reset within 1-3 minutes of Android starting - before any video - with nothing in ramoops (pmsg only, no panic, no oops). The board negotiates no USB PD on mainline (Khadas' 4.4 kernel drives two FUSB302s; mainline's DT has neither), so the supply stays at 5V: a brownout under load. Video got worse, 1080p too: every rkvdec CAPTURE allocation failed with ENOMEM - `dma_alloc_noncontiguous()` takes only DMA_ATTR_ALLOC_SINGLE_PAGES and rkvdec also sets DMA_ATTR_NO_KERNEL_MAPPING (a WARN, kernel/dma/mapping.c:770) - so FFmpeg dropped the hwaccel and VP9 went to the software decoder, single-threaded | Kernel 0004 masks the attributes in vb2-dma-contig's non-coherent allocation; FFmpeg 0011 retries coherent if the cached allocation fails. Kernel 0005 + TYPEC/TCPM/FUSB302=y: both USB-C ports ask for 5/9/12V; `pd=` in edge1-options.txt (0/5/9/12/15/20) rewrites the dtb in boot.scr (`fdt set`). Memory options: zram=, sd_readahead_kb=, sd_write_delay_s=; bootwatch's power.txt |
+| 25 | No Android: edge1-boot.log at `booti` with `edge1_pd=12V`, the ramoops region all 0xff (a power loss - a panic would have left the kernel log), no edge1-logs. The supply hears nothing from the board for ~10s (the eMMC's U-Boot does no PD), stops advertising, and tcpm - VBUS present, no caps - goes Soft_Reset, then Hard Reset, and a Hard Reset makes the source cut VBUS: a power cut on every boot (tcpm warns "might result in machine power-loss") | Kernel 0006: on a sink-only, bus-powered port that had VBUS at start, Hard Reset is withheld - one Get_Source_Cap, then SNK_READY at 5V without a contract. Owner asked to try pd=0 on card 25 to confirm |
 
 ## Lessons that cost a card each (check these first next time)
 
@@ -225,6 +226,11 @@ not reachable from it.
   Nothing in ramoops, resets clustered at load peaks: brownout. The Edge's USB-C
   inputs only leave 5V when the kernel's FUSB302 driver asks for more; mainline's
   DT did not describe the chips. Kernel 0005 does; `pd=0` turns it off again.
+* **PD from the kernel comes too late for a strict supply.** A source whose first
+  Source_Capabilities go unanswered (the bootloader does no PD) stops advertising,
+  and only a Hard Reset - VBUS off - restarts it. On a board without a battery
+  that is a power cut, so the powering port never sends one (kernel 0006); PD then
+  works with supplies that keep advertising or answer Soft_Reset/Get_Source_Cap.
 * **Read the callee's argument checks, not only the patch's.** Patch 0004 v1
   applied and compiled, and failed every allocation at run time:
   `dma_alloc_noncontiguous()` refuses any attribute but ALLOC_SINGLE_PAGES. A
@@ -240,16 +246,16 @@ not reachable from it.
 
 ## Open, in rough order
 
-* Card 25, power: edge1-boot.log's `edge1_pd=12V`; `power.txt` (snapshot folders):
+* Card 26 (card 25 lost power at every boot, see its row), power: edge1-boot.log's `edge1_pd=12V`; `power.txt` (snapshot folders):
   the typec ports as sink, a `tcpm-source-psy-*` with `voltage_now` around
   12000000 and tcpm's log ending in SNK_READY. Then resets at full speed should be
   gone. If the board resets in a loop right at boot, the supply took a PD hard
   reset badly: pd=0 on the PC brings back the old behaviour - and the tcpm log
   (power.txt of the boot that survived) says why.
-* Card 25, video: logcat's FFMPEG `capture buffers cached (non-coherent)` and no
+* Card 26, video: logcat's FFMPEG `capture buffers cached (non-coherent)` and no
   `create buffers failed`; dmesg without `dma alloc of size`. Then 4K VP9's frame
   rate against card 23's ~9 fps.
-* Card 25: Edge1 Tools' Power card - what turns the board on after "Shut down"; the
+* Card 26: Edge1 Tools' Power card - what turns the board on after "Shut down"; the
   logs switch, still untried. Memory options are off by default (commented out).
 * Bluetooth signing (task left from card 22): packages.txt on card 23 shows
   com.android.bluetooth (in the btservices APEX, `Bluetooth@AP2A.240805.005.S4`,
