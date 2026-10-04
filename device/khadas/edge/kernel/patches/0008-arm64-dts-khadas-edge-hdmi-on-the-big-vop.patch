@@ -1,0 +1,51 @@
+arm64: dts: rockchip: khadas-edge: HDMI on the big VOP
+
+Khadas Edge1, Android 14 on mainline 6.12. Applied to kernel/mainline by
+build/build-kernel.sh before every build (device/khadas/edge/kernel/patches/).
+
+The RK3399's HDMI encoder can take either display controller. Mainline's
+display-subsystem lists the little VOP first, so it is CRTC 0, and both the
+kernel's fbdev and drm_hwcomposer give HDMI the first CRTC it supports. The
+little VOP has one window besides the cursor: drm_hwcomposer had a single
+plane, and card 27's SurfaceFlinger dump shows every layer of every frame
+composed by the GPU ("Comp Type CLIENT" for all four layers while a video
+played; composition efficiency 0.07 since boot) - video, app, dialog and
+overlay redrawn into a 1080p buffer 60 times a second.
+
+The big VOP has three planes (win0 and win1 with NV12 and scaling, win2 RGB)
+and outputs up to 4096x2160. Rockchip's DT for the Edge disables HDMI's
+little-VOP endpoint (hdmi_in_vopl) for this; mainline's graph walk
+(of_graph_get_next_endpoint, drm_of_find_possible_crtcs) ignores an
+endpoint's status, so the little VOP itself is disabled - rockchip-drm skips
+an unavailable VOP in "ports". Nothing else on this board uses it: no DSI,
+eDP or DP output is enabled in its DT. boot.scr turns it back on with
+"vop=lit" in edge1-options.txt.
+
+diff --git a/arch/arm64/boot/dts/rockchip/rk3399-khadas-edge.dtsi b/arch/arm64/boot/dts/rockchip/rk3399-khadas-edge.dtsi
+index 97d8accd5..8ea31a0dd 100644
+--- a/arch/arm64/boot/dts/rockchip/rk3399-khadas-edge.dtsi
++++ b/arch/arm64/boot/dts/rockchip/rk3399-khadas-edge.dtsi
+@@ -924,3 +924,23 @@ &vdec {
+ 	assigned-clocks = <&cru SCLK_VDU_CA>, <&cru SCLK_VDU_CORE>;
+ 	assigned-clock-rates = <400000000>, <400000000>;
+ };
++
++/*
++ * HDMI from the big VOP. The RK3399 has two display controllers and the HDMI
++ * encoder can take either; display-subsystem lists the little one first, so it
++ * is CRTC 0 and drives HDMI. It has one window apart from the cursor: the
++ * Android compositor (drm_hwcomposer) gets a single plane and composes every
++ * layer of every frame on the GPU, video included. The big VOP has three - two
++ * with NV12 and scaling - and goes to 4096x2160. Rockchip's own DT for the Edge
++ * disables HDMI's little-VOP endpoint for the same reason; mainline's graph code
++ * does not honour an endpoint's status, so the little VOP goes. Nothing else on
++ * this board uses it (no DSI, eDP or DP is enabled). "vop=lit" in
++ * edge1-options.txt turns it back on (boot.scr).
++ */
++&vopl {
++	status = "disabled";
++};
++
++&vopl_mmu {
++	status = "disabled";
++};

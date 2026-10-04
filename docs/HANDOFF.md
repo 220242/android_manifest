@@ -82,6 +82,7 @@ has the full story.
 | `build/dev/check-edge1tools.sh <android-all-14.jar>` | Edge1 Tools' resources link (aapt2) and its Java compiles against the R that comes out - what the build does to the app; Robolectric's android-all 14 stands in for the framework (the script says where to get it) |
 | `build/dev/check-kernel-build.sh <linux-6.12> <outdir> <targets>` | compiles patched kernel objects and dtbs for arm64 with clang (LLVM=1, W=1) and the device config, patches applied and taken off again; `CHECK_DTBS=y` validates a dtb against the bindings (pip install dtschema) |
 | `build/dev/test-bootscr-uboot2022.sh <u-boot-v2022.07> <card.img>` | runs the card's boot.scr through distro boot on a v2022.07 sandbox with the board's command set and environment; `EDGE1_PRELOAD=edge1-pstore.bin@0x30100000` replays a capture |
+| `build/dev/check-minigbm.sh <external/minigbm> <external/libdrm>` | builds minigbm's core for the host with the device's minigbm patches and asks for a video layer's buffer (NV12, CPU, texture, scanout) on the "rockchip" dumb driver - the combination card 27's allocator refused |
 | `build/build-images.sh <fake-tree> sdcard` | builds a card from a synthetic `boot.img` (see the test script's notes) |
 
 Reference sources used in this work: the Linux v6.12.111 tree; U-Boot v2022.07 and
@@ -119,6 +120,7 @@ not reachable from it.
 | 24 | Six boots: the first at the power-test clocks, then full speed; five ended in a reset within 1-3 minutes of Android starting - before any video - with nothing in ramoops (pmsg only, no panic, no oops). The board negotiates no USB PD on mainline (Khadas' 4.4 kernel drives two FUSB302s; mainline's DT has neither), so the supply stays at 5V: a brownout under load. Video got worse, 1080p too: every rkvdec CAPTURE allocation failed with ENOMEM - `dma_alloc_noncontiguous()` takes only DMA_ATTR_ALLOC_SINGLE_PAGES and rkvdec also sets DMA_ATTR_NO_KERNEL_MAPPING (a WARN, kernel/dma/mapping.c:770) - so FFmpeg dropped the hwaccel and VP9 went to the software decoder, single-threaded | Kernel 0004 masks the attributes in vb2-dma-contig's non-coherent allocation; FFmpeg 0011 retries coherent if the cached allocation fails. Kernel 0005 + TYPEC/TCPM/FUSB302=y: both USB-C ports ask for 5/9/12V; `pd=` in edge1-options.txt (0/5/9/12/15/20) rewrites the dtb in boot.scr (`fdt set`). Memory options: zram=, sd_readahead_kb=, sd_write_delay_s=; bootwatch's power.txt |
 | 25 | No Android: edge1-boot.log at `booti` with `edge1_pd=12V`, the ramoops region all 0xff (a power loss - a panic would have left the kernel log), no edge1-logs. The supply hears nothing from the board for ~10s (the eMMC's U-Boot does no PD), stops advertising, and tcpm - VBUS present, no caps - goes Soft_Reset, then Hard Reset, and a Hard Reset makes the source cut VBUS: a power cut on every boot (tcpm warns "might result in machine power-loss") | Kernel 0006: on a sink-only, bus-powered port that had VBUS at start, Hard Reset is withheld - one Get_Source_Cap, then SNK_READY at 5V without a contract. Owner asked to try pd=0 on card 25 to confirm |
 | 26 | **12V over USB PD** on the second port (fusb302 at i2c4): the supply offered 5/9/12/15/20V and PPS while the kernel started, tcpm asked for 12V 3A at 1.4s, no Hard Reset needed; 928s at the power-test clocks, no reset. Video on the hardware decoder with cached buffers (`capture buffers cached`), but 60 fps streams (VP9 and H.264, 720p and 1080p) played at 30 and 1440p VP9 at ~9. Every frame went out as YV12, which minigbm allocates without scanout, so the GPU composed every video frame (the display is 1080p60; composition of the UI was DEVICE); rkvdec's core and CABAC clocks are set by nothing | ffmpeg_codec2 0003: NV12 output for hardware frames (flexible YUV = NV12 with scanout in minigbm; plane copies, not swscale) and a per-frame `perf:` log line; kernel 0007: rkvdec core/CABAC at 400 MHz; bootwatch `playing-N.txt` while a video plays; full speed is the default mode again |
+| 27 | 708s at **full speed** (A72 1800, GPU 800) on 12V PD, no reset. Video: 1080p60 at 60 fps, 1440p60 at 41-50, 4K60 at ~26 (`perf:` decode 17-24 + copy 14-17 ms per 4K frame, serial). NV12 never reached the screen: minigbm refused it (`Unsupported combination ... DRM_FOURCC_9999 ... HW_COMPOSER`; AOSP's generic gralloc has no DRV_ROCKCHIP, so rockchip-drm gets the dumb driver, NV12 without scanout) and the component fell back to YV12. And SurfaceFlinger had every layer CLIENT (composition efficiency 0.07): HDMI ran from the little VOP (CRTC 0, `ports = <&vopl_out>, <&vopb_out>`), one plane besides the cursor | Kernel 0008: little VOP off, HDMI on the big one (3 planes, NV12 + scaling on two); `vop=lit` undoes it in boot.scr. minigbm 0001: NV12 + SCANOUT for "rockchip" in the dumb driver (host-tested). ffmpeg_codec2 0004: 2 frame threads for the hwaccel - decode overlaps the copy. edge1-options: `vop`, `video_hw`, `video_nv12`, `video_threads`; `playing-N.txt` adds the DRM state |
 
 ## Lessons that cost a card each (check these first next time)
 
@@ -227,6 +229,13 @@ not reachable from it.
   BO_USE_SCANOUT off YVU420_ANDROID, so a YV12 video layer is always composed by the
   GPU; a flexible YUV buffer is NV12 with scanout. And swscale's NV12-to-NV12 copy
   drops the chroma of a semi-planar destination - copy planes by hand.
+* **Count the planes before blaming the GPU.** A dump with every layer CLIENT means
+  the composer had nowhere to put them. Mainline's rk3399 display-subsystem lists
+  the little VOP first, so it is CRTC 0 and takes HDMI - one plane. drm_hwcomposer
+  logs only "Ignoring cursor plane"; `/sys/kernel/debug/dri/0/state` says which CRTC
+  and what each plane shows. And a buffer the allocator refuses never gets that far:
+  minigbm's combinations are per backend, and AOSP's generic build has no rockchip
+  backend - check the backend that actually runs (drv.c's list, Android.bp cflags).
 * **A resets-without-a-trace pattern on this board is power, and PD is software.**
   Nothing in ramoops, resets clustered at load peaks: brownout. The Edge's USB-C
   inputs only leave 5V when the kernel's FUSB302 driver asks for more; mainline's
@@ -251,14 +260,18 @@ not reachable from it.
 
 ## Open, in rough order
 
-* Card 27, video: logcat's `perf:` lines (C2FFMPEGVideoDecodeComponent) give, per
-  frame, decode / fetch (waiting for an output buffer: the display behind) / map /
-  copy in ms - the answer to where 60 fps goes. `playing-N.txt`: the decoders'
-  interrupt rate (frames decoded per second), the clocks (rkvdec's core and CABAC
-  should read 400 MHz), the threads, and SurfaceFlinger's dump - the video layer
-  DEVICE means the VOP shows the NV12 buffer itself. A "no NV12 (flexible YUV)
-  output buffer" warning means the pool refused NV12 and it fell back to YV12.
-* Card 27: PD stays to be watched (power.txt); full speed is the default mode now.
+* Card 28, video: `playing-N.txt`'s DRM state should show crtc on the big VOP
+  (vop@ff900000) and, while a video plays, a plane with an NV12 framebuffer;
+  SurfaceFlinger's dump the video layer DEVICE. logcat: `ffmpeg_hwaccel_init: ...
+  2 frame thread(s)`, no "no NV12 (flexible YUV) output buffer" warning, and `perf:`
+  lines for 4K with decode near the copy rather than their sum (expect 40-55 fps).
+  If the screen is black or wrong after the switch to the big VOP: `vop=lit`. If
+  video stalls or stutters with threads: `video_threads=1`. If NV12 frames look
+  wrong: `video_nv12=0`. Each line in edge1-options.txt, one at a time.
+* Card 28: on a 4K TV the big VOP offers 3840x2160 modes, and Android picks the
+  TV's preferred mode - the UI rendered at 4K by a Mali T860. The owner's Samsung is
+  1080p, so not seen yet; ro.surface_flinger.max_graphics_* or a mode filter if so.
+* PD stays to be watched (power.txt); full speed is the default mode now.
   Edge1 Tools' Power card and the logs switch, still untried.
 * Bluetooth signing (task left from card 22): packages.txt on card 23 shows
   com.android.bluetooth (in the btservices APEX, `Bluetooth@AP2A.240805.005.S4`,

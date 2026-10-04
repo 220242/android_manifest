@@ -158,13 +158,42 @@ CABAC clocks were whatever the bootloader left - nothing in mainline assigns the
 * **Bootwatch:** `playing-N.txt` once a video plays - decoder interrupts per second,
   clocks, threads, SurfaceFlinger's composition of the video layer.
 
+### Phase 3d - the video on a display plane, decode beside the copy (card 28)
+
+**Card 27:** the clocks and full speed got 1080p60 to 60 fps, 1440p60 to 41-50 and
+4K60 to about 26 (decode 17-24 ms, copy 14-17 ms per frame, one after the other).
+NV12 never reached the screen: minigbm refused the buffer outright -
+`Unsupported combination: pixel format:YCBCR_420_888, drm format:DRM_FOURCC_9999,
+usage: ... HW_COMPOSER` - and the component fell back to YV12. And the display could
+not have shown it anyway: SurfaceFlinger's dump had every layer CLIENT (composition
+efficiency 0.07 since boot), because HDMI ran from the little VOP, which has a
+single plane.
+
+* **Kernel** (`kernel/patches/0008`): the little VOP disabled, so HDMI runs from the
+  big one - win0 and win1 with NV12 and scaling, win2 RGB: three planes for
+  drm_hwcomposer instead of one. `vop=lit` in edge1-options.txt (boot.scr) undoes it.
+* **minigbm** (`patches/external/minigbm/0001`): AOSP builds the generic gralloc
+  without DRV_ROCKCHIP, so "rockchip" gets the dumb driver, whose NV12 has no
+  scanout. It gets BO_USE_SCANOUT for rockchip only. Checked on the host with the
+  core files: the card-27 combination is unsupported before, supported after.
+* **ffmpeg_codec2** (`patches/external/ffmpeg_codec2/0004`): two frame threads for
+  the hardware decoders. FFmpeg runs a hwaccel that is not thread-safe one frame
+  at a time, but the next frame decodes in a worker while the component copies the
+  last one: max(decode, copy) per frame instead of the sum - 4K about 40-55 fps by
+  card 27's numbers. `persist.vendor.edge1.hwdec_threads` (1-4).
+* **Options:** `video_hw`, `video_nv12`, `video_threads` in edge1-options.txt set
+  the three `persist.vendor.edge1.hwdec*` properties at boot (the bootwatch), to
+  the default when the line is not there.
+* **Bootwatch:** `playing-N.txt` adds `/sys/kernel/debug/dri/0/state`: the CRTC on
+  HDMI and each plane's framebuffer format - NV12 on a plane is the video shown
+  without the GPU.
+
 ### Phase 4 - zero copy
 
-Phase 3b still copies every frame into a YV12 gralloc buffer, which the GPU then
-composes: fine for 4K30, a lot of memory bandwidth for 4K60. Next steps, in order
-of cost: NV12 output buffers (a plane copy, and a buffer the VOP can scan out on a
-YUV plane instead of the GPU sampling it); then zero copy - the decoder's DRM PRIME
-buffer handed to SurfaceFlinger as a gralloc buffer minigbm imports.
+Phase 3d still copies every frame, now plane by plane into an NV12 buffer the VOP
+scans out. What is left is the copy itself (14-17 ms per 4K frame, a CPU core and
+memory bandwidth): zero copy - the decoder's DRM PRIME buffer handed to
+SurfaceFlinger as a gralloc buffer minigbm imports.
 
 ## Checking it
 

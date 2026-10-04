@@ -1,0 +1,61 @@
+From b5082ad0b0b2b3ef6059b4b3654c4ed9c554985d Mon Sep 17 00:00:00 2001
+From: Khadas Edge1 Android TV <edge1@localhost>
+Date: Sun, 4 Oct 2026 16:00:00 +0000
+Subject: [PATCH] dumb_driver: NV12 scanout on rockchip
+
+Khadas Edge1 (RK3399), Android 14. AOSP builds the generic gralloc
+(libminigbm_gralloc) without DRV_ROCKCHIP, so rockchip-drm gets the dumb
+driver, whose NV12 is texture, video and camera only. SurfaceFlinger asks
+for HW_COMPOSER on every video layer, and a flexible YUV buffer resolves to
+NV12 - so the allocation fails outright. Card 27, from the FFmpeg Codec2
+decoder's first NV12 frame (external/ffmpeg_codec2 patch 0003):
+
+  Failed to allocate. Unsupported combination: pixel format:YCBCR_420_888,
+  drm format:DRM_FOURCC_9999, usage:... GPU_TEXTURE | HW_COMPOSER
+  GraphicBufferAllocator: Failed to allocate (3840 x 2160) ... usage 933
+
+and the decoder fell back to YV12, which the resolve helper takes scanout
+off: no video frame could ever reach a display plane.
+
+Rockchip's VOPs do scan out NV12 (formats_win_full: the RK3399 big VOP's
+win0 and win1, with scaling), as minigbm's own rockchip backend says. The
+combination gets BO_USE_SCANOUT for "rockchip" only; every other dumb
+driver is unchanged. Checked on the host with the core files and a small
+harness: FLEX_YCbCr_420_888 with SW_READ/WRITE_OFTEN | TEXTURE | SCANOUT is
+"Unsupported combination" before and supported after for rockchip, still
+unsupported for vkms; YV12 unchanged.
+---
+ dumb_driver.c | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/dumb_driver.c b/dumb_driver.c
+index f74d237..230e8d5 100644
+--- a/dumb_driver.c
++++ b/dumb_driver.c
+@@ -5,6 +5,7 @@
+  */
+ 
+ #include <errno.h>
++#include <string.h>
+ 
+ #include "drv_helpers.h"
+ #include "drv_priv.h"
+@@ -49,6 +50,15 @@ static int dumb_driver_init(struct driver *drv)
+ 				   BO_USE_CAMERA_READ | BO_USE_CAMERA_WRITE);
+ 	drv_modify_combination(drv, DRM_FORMAT_NV21, &LINEAR_METADATA, BO_USE_HW_VIDEO_ENCODER);
+ 
++	/*
++	 * Rockchip's VOPs scan out NV12 (formats_win_full: RK3399 big VOP win0/win1),
++	 * and without DRV_ROCKCHIP this driver is all "rockchip" gets. Video layers ask
++	 * for HW_COMPOSER, so a flexible YUV (NV12) buffer without scanout cannot be
++	 * allocated for one at all.
++	 */
++	if (!strcmp(drv->backend->name, "rockchip"))
++		drv_modify_combination(drv, DRM_FORMAT_NV12, &LINEAR_METADATA, BO_USE_SCANOUT);
++
+ 	return drv_modify_linear_combinations(drv);
+ }
+ 
+-- 
+2.43.0
+

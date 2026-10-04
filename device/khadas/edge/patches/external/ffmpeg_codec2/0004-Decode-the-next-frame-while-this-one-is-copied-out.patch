@@ -1,0 +1,64 @@
+From 07987402f19c3ec5d2e3f6d7db8be0d1a28b4aa1 Mon Sep 17 00:00:00 2001
+From: Khadas Edge1 Android TV <edge1@localhost>
+Date: Sun, 4 Oct 2026 16:10:00 +0000
+Subject: [PATCH] Decode the next frame while this one is copied out
+
+Khadas Edge1 (RK3399), Android 14. With the hardware decoder the component
+ran FFmpeg in one thread: the V4L2 request hwaccel queues a frame and waits
+for it, and only then does the component copy the frame into the output
+buffer. Card 27 measured 4K VP9 at 17-24 ms to decode plus 14-17 ms to copy,
+one after the other: 26 frames per second from a 60 fps stream, with the
+decoder idle during every copy.
+
+Two frame threads (persist.vendor.edge1.hwdec_threads, 1-4, default 2).
+The request hwaccels are not HWACCEL_CAP_THREAD_SAFE, so FFmpeg runs their
+part one frame at a time (pthread_frame.c: hwaccel_mutex, the hwaccel state
+handed from thread to thread) - but the next frame is decoded in a worker
+while the component maps and copies the last one: max(decode, copy) per
+frame instead of the sum. FFmpeg adds a capture buffer per thread (the
+request API creates them on demand) and output comes one frame later; the
+component's output delay is 8 for these codecs and grows when needed. A
+stream the hwaccel refuses is decoded in software with the same threads.
+1 restores the single thread. The ffmpeg_hwaccel_init log line gives the
+count.
+---
+ ffmpeg_utils/ffmpeg_hwaccel.c | 20 ++++++++++++++++----
+ 1 file changed, 16 insertions(+), 4 deletions(-)
+
+diff --git a/ffmpeg_utils/ffmpeg_hwaccel.c b/ffmpeg_utils/ffmpeg_hwaccel.c
+index e173744..d2b9c3c 100644
+--- a/ffmpeg_utils/ffmpeg_hwaccel.c
++++ b/ffmpeg_utils/ffmpeg_hwaccel.c
+@@ -60,13 +60,25 @@ int ffmpeg_hwaccel_init(AVCodecContext *avctx) {
+ 
+         // Use refcounted frames.
+         av_opt_set_int(avctx, "refcounted_frames", 1, 0);
+-        // Don't use multithreading.
+-        avctx->thread_count = 1;
++        // Frame threads. The V4L2 request hwaccels are not thread-safe, so FFmpeg
++        // runs their part one frame at a time (pthread_frame.c, hwaccel_mutex) -
++        // the decoder is one piece of hardware anyway - but the next frame's
++        // decode goes on in a worker while the component copies this one out.
++        // In one thread the two add up: card 27's 4K VP9 took 17-24 ms to
++        // decode plus 14-17 ms to copy, 26 frames per second. FFmpeg adds a
++        // capture buffer per thread, and output is delayed one frame per thread
++        // after the first. persist.vendor.edge1.hwdec_threads=1 is the old way.
++        avctx->thread_count = property_get_int32("persist.vendor.edge1.hwdec_threads", 2);
++        if (avctx->thread_count < 1)
++            avctx->thread_count = 1;
++        else if (avctx->thread_count > 4)
++            avctx->thread_count = 4;
++        avctx->thread_type = FF_THREAD_FRAME;
+ 
+         // HW device created, stop here. Info, not debug: whether a video went to
+         // the hardware is the first question about it.
+-        ALOGI("ffmpeg_hwaccel_init: %p [%s], hw device = %s", avctx, codec->name,
+-              av_hwdevice_get_type_name(config->device_type));
++        ALOGI("ffmpeg_hwaccel_init: %p [%s], hw device = %s, %d frame thread(s)", avctx,
++              codec->name, av_hwdevice_get_type_name(config->device_type), avctx->thread_count);
+         break;
+     }
+ 
+-- 
+2.43.0
+

@@ -285,7 +285,7 @@ cat > "$WORK/edge1-options.txt" <<'EOF'
 # Что применилось, видно в edge1-logs/boots.txt (options: ...).
 #
 # Разделы файла: логи, питание USB-C (pd=), память (zram= и запись на карту),
-# режимы частот. Значение пишите сразу после "=", без пробелов; пояснение -
+# видео (декодер и вывод на экран), режимы частот. Значение пишите сразу после "=", без пробелов; пояснение -
 # отдельной строкой с #, не в той же строке.
 
 # --- Логи загрузки ------------------------------------------------------
@@ -345,6 +345,36 @@ pd=12
 # явно (базы, настройки), пишут сразу и не теряют ничего; при внезапном
 # отключении питания пропадут только кэши за последние секунды. От 5 до 600.
 #sd_write_delay_s=60
+
+# --- Видео: декодер и вывод на экран ---------------------------------
+# H.264, VP9 (YouTube), VP8 и MPEG-2 декодирует аппаратный декодер платы,
+# AV1 и HEVC - процессор. Готовый кадр процессор копирует в буфер экрана,
+# а видеовыход показывает его отдельным слоем под меню. Строка с # в
+# начале - стандартное поведение; нужно только для проверки и на случай
+# сбоя. Действует со следующего запущенного видео после загрузки.
+#
+# vop - какой из двух видеовыходов RK3399 ведёт HDMI.
+#   vop=big  большой (стандартно, с карты 28): 3 аппаратных слоя - видео,
+#            меню и оверлей накладываются без графического процессора;
+#            до 4K. Тогда в оверлее GPU почти не занят во время видео.
+#   vop=lit  малый, как до карты 28: один слой, и каждый кадр экрана
+#            (видео, меню, оверлей) собирает GPU. Только если с big нет
+#            изображения или оно искажено.
+#vop=lit
+#
+# video_hw=0 - всё видео декодирует процессор (медленно; для сравнения).
+#video_hw=0
+#
+# video_nv12=0 - кадр в формате YV12, как до карты 27: такой видеовыход
+# не показывает, и его собирает GPU. Стандартно NV12 - формат декодера и
+# видеовыхода.
+#video_nv12=0
+#
+# video_threads - сколько кадров декодер готовит одновременно. Стандартно
+# 2 (с карты 28): следующий кадр декодируется, пока предыдущий копируется -
+# 4K на треть быстрее. 1 - по одному, как раньше; 3-4 - ещё кадр в
+# очереди, скорость та же.
+#video_threads=1
 
 # === Тест питания =====================================================
 # A72 1416, A53 1416, GPU 600. Верхние ступени выключены - самые
@@ -440,8 +470,9 @@ every boot - CPU and GPU clock limits, with ready-made modes (power test, full s
 video, games, quiet, minimal), and "logs": logs=0 stops every write to this card
 (no edge1-logs, edge1-boot.log or edge1-pstore.bin) once the build needs no more
 debugging. "pd" is the USB-C PD voltage the board asks its supply for (12V; pd=0
-for none), applied by boot.scr; zram, sd_readahead_kb and sd_write_delay_s tune
-memory and the card's writes. It says what each line does, in Russian. Edge1 Tools
+for none) and "vop" the display controller on HDMI (big; lit is the old one),
+both applied by boot.scr; zram, sd_readahead_kb and sd_write_delay_s tune memory and
+the card's writes; video_hw, video_nv12 and video_threads set the video decoder. It says what each line does, in Russian. Edge1 Tools
 on the box changes the clock and logs lines.
 
 Do not edit the other files on a PC; rebuild the image instead.

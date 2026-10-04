@@ -72,12 +72,14 @@ setenv edge1_laddr 0x09f00000
 # "logs" imports that one variable and nothing else. The file goes to the log
 # buffer's address, nowhere near the ramoops region saved next.
 #
-# "pd" the same way: the USB PD voltage the board asks its supply for (below).
+# "pd" and "vop" the same way: the USB PD voltage the board asks its supply for,
+# and which display controller drives HDMI (both below).
 setenv logs
 setenv pd
+setenv vop
 setenv edge1_nolog
 if load ${devtype} ${devnum}:${distro_bootpart} ${edge1_laddr} edge1-options.txt; then
-	env import -t -r ${edge1_laddr} ${filesize} logs pd
+	env import -t -r ${edge1_laddr} ${filesize} logs pd vop
 fi
 if test "${logs}" = "0"; then setenv edge1_nolog 1; fi
 
@@ -112,7 +114,7 @@ fi
 # CONFIG_VERSION_VARIABLE, which that config does not have.) Sizes are hex, as
 # "load" leaves them in filesize.
 setenv edge1_stage started
-setenv edge1_log 'if test -z "${edge1_nolog}"; then env export -t ${edge1_laddr} edge1_where edge1_dev edge1_prev edge1_stage edge1_ksize edge1_rsize edge1_dsize edge1_pd bootargs boot_targets fdtfile; fatwrite ${devtype} ${devnum}:${distro_bootpart} ${edge1_laddr} edge1-boot.log ${filesize}; fi'
+setenv edge1_log 'if test -z "${edge1_nolog}"; then env export -t ${edge1_laddr} edge1_where edge1_dev edge1_prev edge1_stage edge1_ksize edge1_rsize edge1_dsize edge1_pd edge1_vop bootargs boot_targets fdtfile; fatwrite ${devtype} ${devnum}:${distro_bootpart} ${edge1_laddr} edge1-boot.log ${filesize}; fi'
 
 if load ${devtype} ${devnum}:${distro_bootpart} ${edge1_kaddr} Image; then
 	setenv edge1_ksize ${filesize}
@@ -151,6 +153,17 @@ if load ${devtype} ${devnum}:${distro_bootpart} ${edge1_kaddr} Image; then
 				fdt set /i2c@ff3d0000/usb-typec@22/connector sink-pdos <0x0401912c 0x0002d12c 0x0003c12c 0x0004b12c 0x0006412c>
 				setenv edge1_pd 20V
 			fi
+		fi
+		# Display controller. HDMI runs from the big VOP, three planes for the
+		# compositor; kernel patch 0008 disables the little one, which had one and
+		# made the GPU compose every frame. vop=lit enables it again - HDMI goes
+		# back to it, as up to card 27.
+		setenv edge1_vop big
+		if test "${vop}" = "lit"; then
+			fdt addr ${edge1_faddr}
+			fdt set /vop@ff8f0000 status okay
+			fdt set /iommu@ff8f3f00 status okay
+			setenv edge1_vop lit
 		fi
 		if load ${devtype} ${devnum}:${distro_bootpart} ${edge1_raddr} ramdisk.img; then
 			setenv edge1_rsize ${filesize}

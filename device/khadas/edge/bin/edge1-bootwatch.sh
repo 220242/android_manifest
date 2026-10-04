@@ -175,6 +175,9 @@ playing_snapshot() {
       # The decoders' clocks (kernel patch 0007 sets rkvdec's core and CABAC).
       grep -q ' /sys/kernel/debug ' /proc/mounts || mount -t debugfs debugfs /sys/kernel/debug
       grep -E 'vdu|vcodec|cpll|gpll|npll' /sys/kernel/debug/clk/clk_summary; echo
+      # What the display controller shows: which CRTC (VOP) drives HDMI, and each
+      # plane's framebuffer - NV12 on a plane is the video without the GPU.
+      cat /sys/kernel/debug/dri/0/state 2> /dev/null; echo
       timeout 10 top -H -b -n 1 -m 30; echo
       logcat -d -v time -s C2FFMPEGVideoDecodeComponent:I FFMPEG:I | tail -n 30; echo
       timeout 20 dumpsys SurfaceFlinger | head -n 700; } > "$f" 2>&1
@@ -268,10 +271,14 @@ alive() {
 #   cpu_big_max_mhz    top clock of the A72s (408..1800)
 #   cpu_little_max_mhz top clock of the A53s (408..1416)
 #   gpu_max_mhz        top clock of the Mali (200..800)
-# The image ships one with ready-made modes, commented in Russian, the power test
+#   logs, zram, sd_readahead_kb, sd_write_delay_s   logs and memory (below)
+#   video_hw, video_nv12, video_threads   the FFmpeg Codec2 decoder's properties
+#   pd, vop            boot.scr's (USB PD, the VOP on HDMI): recorded here only
+# The image ships one with ready-made modes, commented in Russian, full speed
 # switched on (build/build-bootfs.sh has the file and the reasons).
 apply_options() {
     local f="$OPTS" key val applied="" bom big="" little="" gpu="" readahead="" wdelay="" q
+    local vhw="" vnv12="" vthreads=""
     [ -f "$f" ] || return
     # The file is edited in Notepad: it may come back with a UTF-8 BOM ahead of the
     # first line, CRLF endings, tabs, or a "# note" after a value.
@@ -279,6 +286,8 @@ apply_options() {
     while IFS='=' read -r key val; do
         key=$(echo "${key#"$bom"}" | tr -d ' \t\r'); val=$(echo "${val%%#*}" | tr -d ' \t\r')
         case "$key" in ''|\#*) continue ;; esac
+        # boot.scr's: which display controller drives HDMI (big or lit).
+        case "$key" in vop) applied="$applied vop=$val"; continue ;; esac
         case "$val" in ''|*[!0-9]*) log "options: $key: not a number"; continue ;; esac
         case "$key" in
             cpu_big_max_mhz) big=$val ;;
@@ -289,6 +298,9 @@ apply_options() {
             zram) ZRAM_PCT=$val ;;
             sd_readahead_kb) readahead=$val ;;
             sd_write_delay_s) wdelay=$val ;;
+            video_hw) vhw=$val ;;
+            video_nv12) vnv12=$val ;;
+            video_threads) vthreads=$val ;;
             *) log "options: unknown key $key" ;;
         esac
     done < "$f"
@@ -320,6 +332,18 @@ apply_options() {
     else
         log "options: sd_write_delay_s=$wdelay is outside 5..600, ignored"
     fi
+    # The video decoder (the FFmpeg Codec2 service reads these when a video
+    # starts). Set on every boot, to the default when the line is out of the file,
+    # so taking a line out undoes it - they are persist properties.
+    case "$vhw" in ''|0|1) ;; *) log "options: video_hw=$vhw is not 0 or 1, ignored"; vhw= ;; esac
+    case "$vnv12" in ''|0|1) ;; *) log "options: video_nv12=$vnv12 is not 0 or 1, ignored"; vnv12= ;; esac
+    case "$vthreads" in ''|1|2|3|4) ;; *) log "options: video_threads=$vthreads is outside 1..4, ignored"; vthreads= ;; esac
+    setprop_changed persist.vendor.edge1.hwdec "${vhw:-1}"
+    setprop_changed persist.vendor.edge1.hwdec_nv12 "${vnv12:-1}"
+    setprop_changed persist.vendor.edge1.hwdec_threads "${vthreads:-2}"
+    [ -n "$vhw" ] && applied="$applied video_hw=$vhw"
+    [ -n "$vnv12" ] && applied="$applied video_nv12=$vnv12"
+    [ -n "$vthreads" ] && applied="$applied video_threads=$vthreads"
     if [ -z "$ZRAM_PCT" ]; then :
     elif [ "$ZRAM_PCT" -le 75 ]; then
         applied="$applied zram=$ZRAM_PCT"
@@ -331,6 +355,10 @@ apply_options() {
     OPTIONS="$applied"
 }
 OPTIONS=
+# A persist property is written to /data each time it is set; only on a change.
+setprop_changed() {
+    [ "$(getprop "$1")" = "$2" ] || setprop "$1" "$2"
+}
 # "logs=0" in edge1-options.txt (the owner, on a PC or in Edge1 Tools): no logs.
 LOGS_ON=1
 # "zram=N": compressed swap in RAM, N% of it (fstab: 50); 0 turns it off.
