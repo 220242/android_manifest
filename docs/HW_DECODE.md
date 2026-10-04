@@ -125,8 +125,17 @@ RK3399. A 4K NV12 frame is 12.4 MB: ~50 ms just to read it.
   instead of `av_hwframe_transfer_data` - the conversion reads the decoder's
   buffer directly, one pass instead of two.
 
-Expected: the frame read at cached-memory speed (a few ms for 4K) and one copy
-into the YV12 output buffer; 4K30 should keep up. Still copied, and still
+**Card 24:** the first version failed every CAPTURE allocation (ENOMEM):
+`dma_alloc_noncontiguous()` accepts DMA_ATTR_ALLOC_SINGLE_PAGES only, and both
+decoders also set DMA_ATTR_NO_KERNEL_MAPPING - a WARN at kernel/dma/mapping.c:770
+and NULL. FFmpeg dropped the hwaccel, so VP9 went to the software decoder, with one
+thread: 1080p stuttered too. Patch 0004 now masks the attributes in
+vb2-dma-contig's non-coherent path, and FFmpeg 0011 retries with coherent buffers
+when a cached allocation fails, so a kernel without the fix costs speed, not the
+decoder.
+
+Expected (card 25): the frame read at cached-memory speed (a few ms for 4K) and one
+copy into the YV12 output buffer; 4K30 should keep up. Still copied, and still
 composed by the GPU (SurfaceFlinger's layers were all CLIENT on card 23).
 
 ### Phase 4 - zero copy

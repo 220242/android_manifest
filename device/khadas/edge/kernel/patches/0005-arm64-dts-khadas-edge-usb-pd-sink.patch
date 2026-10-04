@@ -1,0 +1,119 @@
+arm64: dts: rockchip: khadas-edge: USB PD sink on both USB-C ports (FUSB302)
+
+Khadas Edge1, Android 14 on mainline 6.12. Applied to kernel/mainline by
+build/build-kernel.sh before every build (device/khadas/edge/kernel/patches/).
+
+The Edge module takes its power through either USB-C port into a BQ25703
+charger (5-20V in), and each port has a FUSB302 that negotiates the voltage
+with the supply over USB PD - in software. Khadas' own 4.4 kernel does that
+(fusb0 on i2c8, fusb1 on i2c4, both at 0x22, interrupts GPIO1_A2 and GPIO4_D6,
+asking for up to 13V, i.e. 12V); mainline describes neither chip, so nothing
+asks and a PD supply stays at 5V. Card 24 reset five times in a row, with
+nothing in ramoops - no panic, no oops - each within a minute or two of
+Android starting, when every core and the GPU are busy: a brownout.
+
+Both FUSB302s are described here for the mainline fusb302/tcpm drivers, as
+sinks asking for 5, 9 or 12V at up to 3A (tcpm takes the highest power the
+supply offers among them). VBUS is never sourced on these ports, so the
+port-0 VBUS switch (GPIO4_D2 in Khadas' tree) is not touched and the vbus
+supply is a placeholder regulator. tcpm in 6.12 does not hard-reset a supply
+that was already providing VBUS when it probed: Soft_Reset first, then
+Get_Source_Cap - a hard reset would cut the board's own power.
+
+The boot script can rewrite sink-pdos or disable both nodes before booting
+(pd= in edge1-options.txt), so a supply that misbehaves needs no rebuild.
+
+diff --git a/arch/arm64/boot/dts/rockchip/rk3399-khadas-edge.dtsi b/arch/arm64/boot/dts/rockchip/rk3399-khadas-edge.dtsi
+index c772985ae..87da6d5f2 100644
+--- a/arch/arm64/boot/dts/rockchip/rk3399-khadas-edge.dtsi
++++ b/arch/arm64/boot/dts/rockchip/rk3399-khadas-edge.dtsi
+@@ -8,6 +8,7 @@
+ #include <dt-bindings/input/linux-event-codes.h>
+ #include <dt-bindings/interrupt-controller/irq.h>
+ #include <dt-bindings/pwm/pwm.h>
++#include <dt-bindings/usb/pd.h>
+ #include "rk3399.dtsi"
+ 
+ / {
+@@ -834,3 +835,81 @@ &vopl {
+ &vopl_mmu {
+ 	status = "okay";
+ };
++
++/*
++ * USB-C power: both ports feed the board's charger (a BQ25703, 5-20V in) through
++ * a FUSB302 each, and the voltage is whatever the board asks the supply for over
++ * USB PD - nothing asks without these nodes, so a PD supply stays at 5V and the
++ * board browns out under load. Khadas' own kernel asks for 12V. Sink only: the
++ * board never sources VBUS on these ports here, so their VBUS switch (GPIO4_D2
++ * on port 0) is left alone and the supply is a placeholder.
++ *
++ * The sink PDOs are 5, 9 and 12V; the boot script can replace them or disable
++ * the controllers (pd= in edge1-options.txt).
++ */
++/ {
++	vbus_typec_sink: vbus-typec-sink {
++		compatible = "regulator-fixed";
++		regulator-name = "vbus_typec_sink";
++		regulator-min-microvolt = <5000000>;
++		regulator-max-microvolt = <5000000>;
++	};
++};
++
++&i2c4 {
++	fusb1: usb-typec@22 {
++		compatible = "fcs,fusb302";
++		reg = <0x22>;
++		interrupt-parent = <&gpio4>;
++		interrupts = <RK_PD6 IRQ_TYPE_LEVEL_LOW>;
++		pinctrl-names = "default";
++		pinctrl-0 = <&fusb1_int>;
++		vbus-supply = <&vbus_typec_sink>;
++
++		connector {
++			compatible = "usb-c-connector";
++			label = "USB-C 1";
++			data-role = "dual";
++			power-role = "sink";
++			op-sink-microwatt = <10000000>;
++			sink-pdos = <PDO_FIXED(5000, 3000, PDO_FIXED_USB_COMM)
++				     PDO_FIXED(9000, 3000, 0)
++				     PDO_FIXED(12000, 3000, 0)>;
++		};
++	};
++};
++
++&i2c8 {
++	fusb0: usb-typec@22 {
++		compatible = "fcs,fusb302";
++		reg = <0x22>;
++		interrupt-parent = <&gpio1>;
++		interrupts = <RK_PA2 IRQ_TYPE_LEVEL_LOW>;
++		pinctrl-names = "default";
++		pinctrl-0 = <&fusb0_int>;
++		vbus-supply = <&vbus_typec_sink>;
++
++		connector {
++			compatible = "usb-c-connector";
++			label = "USB-C 0";
++			data-role = "dual";
++			power-role = "sink";
++			op-sink-microwatt = <10000000>;
++			sink-pdos = <PDO_FIXED(5000, 3000, PDO_FIXED_USB_COMM)
++				     PDO_FIXED(9000, 3000, 0)
++				     PDO_FIXED(12000, 3000, 0)>;
++		};
++	};
++};
++
++&pinctrl {
++	usb-typec {
++		fusb0_int: fusb0-int {
++			rockchip,pins = <1 RK_PA2 RK_FUNC_GPIO &pcfg_pull_up>;
++		};
++
++		fusb1_int: fusb1-int {
++			rockchip,pins = <4 RK_PD6 RK_FUNC_GPIO &pcfg_pull_up>;
++		};
++	};
++};

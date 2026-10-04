@@ -121,6 +121,18 @@ snapshot() {
       done; echo
       timeout 20 dumpsys audio | head -n 600; echo
       timeout 20 dumpsys media.audio_flinger | head -n 300; } > "$s/audio.txt" 2>&1
+    # Power: what the USB-C ports negotiated (kernel patch 0005, pd= in
+    # edge1-options.txt) - the Type-C ports, the PD supplies tcpm registers
+    # (voltage_now, current_max), and tcpm's and fusb302's own logs of the
+    # negotiation in debugfs. Card 24 reset five times on a supply left at 5V.
+    { grep -h . /sys/class/typec/*/power_role /sys/class/typec/*/data_role \
+          /sys/class/typec/*/power_operation_mode /sys/class/typec/*-partner/usb_power_delivery_revision 2>&1; echo
+      for u in /sys/class/power_supply/*/uevent; do echo "$u:"; cat "$u"; done; echo
+      grep -q ' /sys/kernel/debug ' /proc/mounts || mount -t debugfs debugfs /sys/kernel/debug
+      for l in /sys/kernel/debug/usb/tcpm-*/log /sys/kernel/debug/usb/fusb302-*/log; do
+          [ -e "$l" ] && { echo "== $l"; tail -n 200 "$l"; }
+      done
+      dmesg | grep -iE "fusb|tcpm|typec|power_supply"; } > "$s/power.txt" 2>&1
     # Who signed what: "signatures:[xxxxxxxx]" is the hash Android prints for a
     # certificate. Card 22's Bluetooth app ran in the zygote domain - seinfo
     # "default", its signature matched no mac_permissions signer - since the build
@@ -228,7 +240,7 @@ alive() {
 # The image ships one with ready-made modes, commented in Russian, the power test
 # switched on (build/build-bootfs.sh has the file and the reasons).
 apply_options() {
-    local f="$OPTS" key val applied="" bom big="" little="" gpu=""
+    local f="$OPTS" key val applied="" bom big="" little="" gpu="" readahead="" wdelay="" q
     [ -f "$f" ] || return
     # The file is edited in Notepad: it may come back with a UTF-8 BOM ahead of the
     # first line, CRLF endings, tabs, or a "# note" after a value.
@@ -242,6 +254,10 @@ apply_options() {
             cpu_little_max_mhz) little=$val ;;
             gpu_max_mhz) gpu=$val ;;
             logs) LOGS_ON=$val ;;
+            pd) applied="$applied pd=$val" ;;     # boot.scr's: the dtb it boots
+            zram) ZRAM_PCT=$val ;;
+            sd_readahead_kb) readahead=$val ;;
+            sd_write_delay_s) wdelay=$val ;;
             *) log "options: unknown key $key" ;;
         esac
     done < "$f"
@@ -253,12 +269,69 @@ apply_options() {
         && applied="$applied cpu_little_max_mhz=$little"
     [ -n "$gpu" ] && echo $((gpu * 1000000)) > /sys/class/devfreq/ff9a0000.gpu/max_freq \
         && applied="$applied gpu_max_mhz=$gpu"
+    # Memory and the card (the "Память" section of the file). Read-ahead: per
+    # disk - the card, the eMMC, and the dm devices of super (system, vendor...).
+    if [ -z "$readahead" ]; then :
+    elif [ "$readahead" -ge 16 ] && [ "$readahead" -le 8192 ]; then
+        for q in /sys/block/mmcblk*/queue/read_ahead_kb /sys/block/dm-*/queue/read_ahead_kb; do
+            [ -e "$q" ] && echo "$readahead" > "$q"
+        done
+        applied="$applied sd_readahead_kb=$readahead"
+    else
+        log "options: sd_readahead_kb=$readahead is outside 16..8192, ignored"
+    fi
+    # Write delay: how old unsaved data may get in RAM before the kernel writes it
+    # (Linux: 30s). fsync() - an app saving its database - still writes at once.
+    if [ -z "$wdelay" ]; then :
+    elif [ "$wdelay" -ge 5 ] && [ "$wdelay" -le 600 ]; then
+        echo $((wdelay * 100)) > /proc/sys/vm/dirty_expire_centisecs \
+            && applied="$applied sd_write_delay_s=$wdelay"
+    else
+        log "options: sd_write_delay_s=$wdelay is outside 5..600, ignored"
+    fi
+    if [ -z "$ZRAM_PCT" ]; then :
+    elif [ "$ZRAM_PCT" -le 75 ]; then
+        applied="$applied zram=$ZRAM_PCT"
+    else
+        log "options: zram=$ZRAM_PCT is above 75, ignored"
+        ZRAM_PCT=
+    fi
     [ -n "$applied" ] && log "options applied:$applied"
     OPTIONS="$applied"
 }
 OPTIONS=
 # "logs=0" in edge1-options.txt (the owner, on a PC or in Edge1 Tools): no logs.
 LOGS_ON=1
+# "zram=N": compressed swap in RAM, N% of it (fstab: 50); 0 turns it off.
+ZRAM_PCT=
+
+# zram is set up by init's swapon_all at sys.boot_completed from fstab's 50%; a
+# different size means taking it down and setting it up again, after that. Waits
+# for the swap to appear (up to a minute), so it can run from either path below.
+apply_zram() {
+    local total want cur i=0
+    [ -n "$ZRAM_PCT" ] && [ -e /sys/block/zram0/disksize ] || return 0
+    while ! grep -q '^/dev/block/zram0 ' /proc/swaps && [ $i -lt 60 ]; do
+        sleep 1; i=$((i + 1))
+    done
+    total=$(awk '/^MemTotal:/ { print $2 }' /proc/meminfo)
+    want=$((total * ZRAM_PCT / 100 * 1024))
+    cur=$(cat /sys/block/zram0/disksize)
+    # fs_mgr's 50% and ours differ by rounding at most.
+    if [ "$want" -gt 0 ] && [ $(( (cur - want) * 100 / want )) -eq 0 ]; then
+        log "zram: ${ZRAM_PCT}% is what fstab set up"
+        return 0
+    fi
+    swapoff /dev/block/zram0 2> /dev/null
+    echo 1 > /sys/block/zram0/reset
+    if [ "$ZRAM_PCT" -eq 0 ]; then
+        log "zram: off (zram=0)"
+        return 0
+    fi
+    echo "$want" > /sys/block/zram0/disksize && mkswap /dev/block/zram0 > /dev/null \
+        && swapon /dev/block/zram0 && log "zram: ${ZRAM_PCT}% of RAM, $((want / 1048576)) MiB" \
+        || log "zram: could not set ${ZRAM_PCT}%"
+}
 
 # Has "logs=0" turned up in the file since this boot started? Edge1 Tools writes
 # it through bin/edge1-ctl.sh while the bootwatch runs.
@@ -279,6 +352,12 @@ if [ -n "$mounted" ]; then
     if [ "$LOGS_ON" = 0 ]; then
         mount -o remount,ro "$MNT" || log "cannot remount $MNT read-only"
         log "logs=0 in edge1-options.txt: options:${OPTIONS:- none}, nothing written"
+        # zram=: after the boot completes, which nothing else here waits for.
+        if [ -n "$ZRAM_PCT" ]; then
+            i=0
+            while ! completed && [ $i -lt "$TIMEOUT" ]; do sleep 5; i=$((i + 5)); done
+            completed && apply_zram
+        fi
         exit 0
     fi
     mkdir -p "$LOGS"
@@ -343,6 +422,7 @@ while :; do
     if [ -z "$done_at" ] && completed; then
         done_at=$t
         done_up=$(uptime_s)
+        apply_zram
         # Wi-Fi verbose logging: wpa_supplicant's own debug lines in logcat. Card
         # 17's failed associations said no more than "status_code=16" without it.
         cmd wifi set-verbose-logging enabled > /dev/null 2>&1 \

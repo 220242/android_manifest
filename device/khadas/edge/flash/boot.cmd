@@ -71,10 +71,13 @@ setenv edge1_laddr 0x09f00000
 # name=value lines and skips "#" comments, -r takes CRLF (Notepad), and naming
 # "logs" imports that one variable and nothing else. The file goes to the log
 # buffer's address, nowhere near the ramoops region saved next.
+#
+# "pd" the same way: the USB PD voltage the board asks its supply for (below).
 setenv logs
+setenv pd
 setenv edge1_nolog
 if load ${devtype} ${devnum}:${distro_bootpart} ${edge1_laddr} edge1-options.txt; then
-	env import -t -r ${edge1_laddr} ${filesize} logs
+	env import -t -r ${edge1_laddr} ${filesize} logs pd
 fi
 if test "${logs}" = "0"; then setenv edge1_nolog 1; fi
 
@@ -109,12 +112,46 @@ fi
 # CONFIG_VERSION_VARIABLE, which that config does not have.) Sizes are hex, as
 # "load" leaves them in filesize.
 setenv edge1_stage started
-setenv edge1_log 'if test -z "${edge1_nolog}"; then env export -t ${edge1_laddr} edge1_where edge1_dev edge1_prev edge1_stage edge1_ksize edge1_rsize edge1_dsize bootargs boot_targets fdtfile; fatwrite ${devtype} ${devnum}:${distro_bootpart} ${edge1_laddr} edge1-boot.log ${filesize}; fi'
+setenv edge1_log 'if test -z "${edge1_nolog}"; then env export -t ${edge1_laddr} edge1_where edge1_dev edge1_prev edge1_stage edge1_ksize edge1_rsize edge1_dsize edge1_pd bootargs boot_targets fdtfile; fatwrite ${devtype} ${devnum}:${distro_bootpart} ${edge1_laddr} edge1-boot.log ${filesize}; fi'
 
 if load ${devtype} ${devnum}:${distro_bootpart} ${edge1_kaddr} Image; then
 	setenv edge1_ksize ${filesize}
 	if load ${devtype} ${devnum}:${distro_bootpart} ${edge1_faddr} edge1.dtb; then
 		setenv edge1_dsize ${filesize}
+		# USB PD. Both USB-C ports power the board through a FUSB302 that asks the
+		# supply for a voltage (kernel patch 0005): 5, 9 or 12V as built - the
+		# highest the supply has. pd=0 disables both controllers (the supply's
+		# 5V, as before card 25); pd=5, 9, 15 or 20 replaces the list with 5V up
+		# to that voltage. Cells are PDO_FIXED(mV, 3000mA): 5V 0x0401912c (with
+		# USB data), 9V 0x0002d12c, 12V 0x0003c12c, 15V 0x0004b12c, 20V 0x0006412c.
+		setenv edge1_pd default
+		if test -n "${pd}"; then
+			fdt addr ${edge1_faddr}
+			fdt resize
+			if test "${pd}" = "0"; then
+				fdt set /i2c@ff3e0000/usb-typec@22 status disabled
+				fdt set /i2c@ff3d0000/usb-typec@22 status disabled
+				setenv edge1_pd off
+			elif test "${pd}" = "5"; then
+				fdt set /i2c@ff3e0000/usb-typec@22/connector sink-pdos <0x0401912c>
+				fdt set /i2c@ff3d0000/usb-typec@22/connector sink-pdos <0x0401912c>
+				setenv edge1_pd 5V
+			elif test "${pd}" = "9"; then
+				fdt set /i2c@ff3e0000/usb-typec@22/connector sink-pdos <0x0401912c 0x0002d12c>
+				fdt set /i2c@ff3d0000/usb-typec@22/connector sink-pdos <0x0401912c 0x0002d12c>
+				setenv edge1_pd 9V
+			elif test "${pd}" = "12"; then
+				setenv edge1_pd 12V
+			elif test "${pd}" = "15"; then
+				fdt set /i2c@ff3e0000/usb-typec@22/connector sink-pdos <0x0401912c 0x0002d12c 0x0003c12c 0x0004b12c>
+				fdt set /i2c@ff3d0000/usb-typec@22/connector sink-pdos <0x0401912c 0x0002d12c 0x0003c12c 0x0004b12c>
+				setenv edge1_pd 15V
+			elif test "${pd}" = "20"; then
+				fdt set /i2c@ff3e0000/usb-typec@22/connector sink-pdos <0x0401912c 0x0002d12c 0x0003c12c 0x0004b12c 0x0006412c>
+				fdt set /i2c@ff3d0000/usb-typec@22/connector sink-pdos <0x0401912c 0x0002d12c 0x0003c12c 0x0004b12c 0x0006412c>
+				setenv edge1_pd 20V
+			fi
+		fi
 		if load ${devtype} ${devnum}:${distro_bootpart} ${edge1_raddr} ramdisk.img; then
 			setenv edge1_rsize ${filesize}
 			setenv bootargs "androidboot.boot_devices=${edge1_dev} @CMDLINE@"

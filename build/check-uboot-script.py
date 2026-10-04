@@ -13,8 +13,8 @@ it, because the sandbox was the current release, which has setexpr.
 So the list below is what may appear in the script, and every entry is in the 2022.07
 config (generated with `make khadas-edge-v-rk3399_defconfig` on the v2022.07 tag):
 
-    CMD_* enabled:  BOOTI BOOTM ECHO EXPORTENV FAT (FAT_WRITE=y) FS_GENERIC ITEST MMC
-                    PART SOURCE ... and test, which is built with HUSH_PARSER
+    CMD_* enabled:  BOOTI BOOTM ECHO EXPORTENV FAT (FAT_WRITE=y) FDT FS_GENERIC ITEST
+                    MMC PART SOURCE ... and test, which is built with HUSH_PARSER
     CMD_* absent:   SETEXPR READ GPIO NVME ABOOTIMG LED
 
 It is deliberately smaller than what that U-Boot has: only what the script needs, so a
@@ -36,6 +36,7 @@ ALLOWED = {
     "fatwrite": "CMD_FAT=y with FAT_WRITE=y",
     "booti":    "CMD_BOOTI=y; raw initrd addr:size needs SUPPORT_RAW_INITRD=y, selected by DISTRO_DEFAULTS",
     "itest":    "CMD_ITEST=y; itest.l *addr == value is the only way to read memory without setexpr",
+    "fdt":      "CMD_FDT=y (default with OF_LIBFDT; checked in the 2022.07 khadas-edge-v .config), for pd=",
 }
 # Measured absent from the 2022.07 khadas-edge-v config - using any of these is not a
 # style question, the script simply stops working on the board.

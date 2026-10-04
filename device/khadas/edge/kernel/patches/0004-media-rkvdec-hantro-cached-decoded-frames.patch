@@ -23,6 +23,41 @@ Neither driver touches a decoder CAPTURE buffer from the CPU (no kernel mapping,
 DMA_ATTR_NO_KERNEL_MAPPING stays), and the CPU only ever reads them, so the
 hardware never sees a dirty line: the reference frames it reads back are clean.
 
+And vb2-dma-contig: vb2_dc_alloc_non_coherent() passed the queue's dma_attrs to
+dma_alloc_noncontiguous(), which takes DMA_ATTR_ALLOC_SINGLE_PAGES and nothing
+else - DMA_ATTR_NO_KERNEL_MAPPING, which both decoders set, is a WARN at
+kernel/dma/mapping.c:770 and a NULL. Card 24 ran the first version of this
+patch without that half: every CAPTURE allocation failed with ENOMEM
+("rkvdec: dma alloc of size 16711680 failed"), FFmpeg dropped the hwaccel and
+VP9 went to the software decoder, single-threaded - 1080p stuttered. Only the
+supported attribute is passed now; a non-coherent buffer gets its kernel
+mapping on demand (vb2_dc_vaddr) whatever the attribute says.
+
+diff --git a/drivers/media/common/videobuf2/videobuf2-dma-contig.c b/drivers/media/common/videobuf2/videobuf2-dma-contig.c
+index faad72f79..9ec24fece 100644
+--- a/drivers/media/common/videobuf2/videobuf2-dma-contig.c
++++ b/drivers/media/common/videobuf2/videobuf2-dma-contig.c
+@@ -211,11 +211,19 @@ static int vb2_dc_alloc_non_coherent(struct vb2_dc_buf *buf)
+ {
+ 	struct vb2_queue *q = buf->vb->vb2_queue;
+ 
++	/*
++	 * dma_alloc_noncontiguous() takes DMA_ATTR_ALLOC_SINGLE_PAGES and
++	 * nothing else: any other attribute is a WARN and a failed allocation.
++	 * Decoders set DMA_ATTR_NO_KERNEL_MAPPING for their coherent buffers,
++	 * and a non-coherent buffer has no kernel mapping until vb2_dc_vaddr()
++	 * makes one anyway.
++	 */
+ 	buf->dma_sgt = dma_alloc_noncontiguous(buf->dev,
+ 					       buf->size,
+ 					       buf->dma_dir,
+ 					       GFP_KERNEL | q->gfp_flags,
+-					       buf->attrs);
++					       buf->attrs &
++					       DMA_ATTR_ALLOC_SINGLE_PAGES);
+ 	if (!buf->dma_sgt)
+ 		return -ENOMEM;
+ 
 diff --git a/drivers/media/platform/verisilicon/hantro_drv.c b/drivers/media/platform/verisilicon/hantro_drv.c
 index 137ca13ee..4e3113c31 100644
 --- a/drivers/media/platform/verisilicon/hantro_drv.c

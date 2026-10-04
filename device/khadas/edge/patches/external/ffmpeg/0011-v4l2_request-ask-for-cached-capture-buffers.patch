@@ -1,4 +1,4 @@
-From c7f0383e6e02ac2abd9d510adda7590a18ead918 Mon Sep 17 00:00:00 2001
+From 367791e2137dad3cdb15b5584555789af7c87d76 Mon Sep 17 00:00:00 2001
 From: Khadas Edge1 Android TV <edge1@localhost>
 Date: Sun, 4 Oct 2026 03:12:22 +0000
 Subject: [PATCH] v4l2_request: ask for cached capture buffers
@@ -14,15 +14,21 @@ queue allows cache hints (rkvdec and hantro with the device's kernel patch
 0004) allocates them cached and vb2 syncs the cache at QBUF and DQBUF; any
 other driver clears the flag and nothing changes. The first capture buffer
 logs which of the two it got.
+
+A kernel that takes the hint and then fails the allocation - 6.12 without
+the vb2-dma-contig half of patch 0004 returns ENOMEM, which on card 24 cost
+the hardware decoder and left VP9 to the software one - gets a second
+CREATE_BUFS without it, and the queue stays coherent from then on.
 ---
- libavcodec/v4l2_request.c | 15 +++++++++++++++
- 1 file changed, 15 insertions(+)
+ libavcodec/v4l2_request.c | 29 +++++++++++++++++++++++++++++
+ libavcodec/v4l2_request.h |  1 +
+ 2 files changed, 30 insertions(+)
 
 diff --git a/libavcodec/v4l2_request.c b/libavcodec/v4l2_request.c
-index 9a614f7..9345db0 100644
+index 9a614f7..c879bce 100644
 --- a/libavcodec/v4l2_request.c
 +++ b/libavcodec/v4l2_request.c
-@@ -872,6 +872,16 @@ static int v4l2_request_buffer_alloc(V4L2RequestContext *ctx, V4L2RequestBuffer
+@@ -872,6 +872,17 @@ static int v4l2_request_buffer_alloc(V4L2RequestContext *ctx, V4L2RequestBuffer
          .count = 1,
          .memory = V4L2_MEMORY_MMAP,
          .format.type = type,
@@ -35,22 +41,55 @@ index 9a614f7..9345db0 100644
 +         * the cache maintenance at QBUF and DQBUF. A driver without cache hints
 +         * clears the flag and allocates as before.
 +         */
-+        .flags = V4L2_TYPE_IS_OUTPUT(type) ? 0 : V4L2_MEMORY_FLAG_NON_COHERENT,
++        .flags = (V4L2_TYPE_IS_OUTPUT(type) || ctx->capture_coherent) ?
++                 0 : V4L2_MEMORY_FLAG_NON_COHERENT,
      };
  
      av_log(ctx, AV_LOG_DEBUG, "%s: buf=%p type=%u\n", __func__, buf, type);
-@@ -914,6 +924,11 @@ static int v4l2_request_buffer_alloc(V4L2RequestContext *ctx, V4L2RequestBuffer
+@@ -893,6 +904,19 @@ static int v4l2_request_buffer_alloc(V4L2RequestContext *ctx, V4L2RequestBuffer
+     }
+ 
+     ret = ioctl(ctx->video_fd, VIDIOC_CREATE_BUFS, &buffers);
++    if (ret < 0 && (buffers.flags & V4L2_MEMORY_FLAG_NON_COHERENT)) {
++        /*
++         * A kernel that accepts the hint but cannot allocate such a buffer
++         * (6.12's vb2-dma-contig with a decoder's DMA_ATTR_NO_KERNEL_MAPPING:
++         * ENOMEM) must not cost the hardware decoder: ask for coherent
++         * buffers, for this queue's lifetime.
++         */
++        av_log(ctx, AV_LOG_WARNING, "%s: cached capture buffers refused, %s (%d); using uncached ones\n",
++               __func__, strerror(errno), errno);
++        ctx->capture_coherent = 1;
++        buffers.flags = 0;
++        ret = ioctl(ctx->video_fd, VIDIOC_CREATE_BUFS, &buffers);
++    }
+     if (ret < 0) {
+         av_log(ctx, AV_LOG_ERROR, "%s: create buffers failed for type %u, %s (%d)\n", __func__, type, strerror(errno), errno);
+         return ret;
+@@ -914,6 +938,11 @@ static int v4l2_request_buffer_alloc(V4L2RequestContext *ctx, V4L2RequestBuffer
      buf->capabilities = buffers.capabilities;
      buf->used = 0;
  
 +    if (!V4L2_TYPE_IS_OUTPUT(type) && buf->index == 0)
 +        av_log(ctx, AV_LOG_INFO, "%s: capture buffers %s\n", __func__,
 +               (buffers.flags & V4L2_MEMORY_FLAG_NON_COHERENT) ?
-+               "cached (non-coherent)" : "uncached (coherent, no cache hints)");
++               "cached (non-coherent)" : "uncached (coherent)");
 +
      buf->buffer.type = type;
      buf->buffer.memory = V4L2_MEMORY_MMAP;
      buf->buffer.index = buf->index;
+diff --git a/libavcodec/v4l2_request.h b/libavcodec/v4l2_request.h
+index 5f105d8..52e71b6 100644
+--- a/libavcodec/v4l2_request.h
++++ b/libavcodec/v4l2_request.h
+@@ -30,6 +30,7 @@ typedef struct V4L2RequestContext {
+     enum v4l2_buf_type output_type;
+     struct v4l2_format format;
+     int timestamp;
++    int capture_coherent; // the driver refused cached capture buffers once
+ } V4L2RequestContext;
+ 
+ typedef struct V4L2RequestBuffer {
 -- 
 2.43.0
 

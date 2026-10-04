@@ -83,6 +83,12 @@ fi
 
 # 4. run
 cp --sparse=always "$CARD" "$W/card.img"
+# The card image stops where its data does; its GPT describes the card it is
+# written to (userdata runs on to ~22GB). U-Boot checks the header against the
+# disk's size and rejects the table on a shorter one, so the copy grows, sparse,
+# to what the header says.
+lastlba=$(python3 -c 'import struct,sys; f=open(sys.argv[1],"rb"); f.seek(512); h=f.read(92); print(struct.unpack_from("<Q", h, 48)[0] if h[:8]==b"EFI PART" else 0)' "$W/card.img")
+(( lastlba > 0 )) && truncate -s $(( (lastlba + 34) * 512 )) "$W/card.img"
 {
     if [[ -n "${EDGE1_PRELOAD:-}" ]]; then
         echo "load hostfs - ${EDGE1_PRELOAD##*@} $(realpath "${EDGE1_PRELOAD%@*}")"
