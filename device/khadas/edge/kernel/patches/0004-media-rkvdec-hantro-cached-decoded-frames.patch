@@ -1,0 +1,56 @@
+media: rkvdec, hantro: cached decoded frames on request (cache hints)
+
+Khadas Edge1, Android 14 on mainline 6.12. Applied to kernel/mainline by
+build/build-kernel.sh before every build (device/khadas/edge/kernel/patches/).
+
+Both decoders allocate their CAPTURE buffers with vb2-dma-contig, coherent, so a
+user-space mapping of a decoded frame is write-combined: uncached for reads. The
+FFmpeg Codec2 service reads every frame once (V4L2 request hwaccel, then a copy
+into the gralloc buffer that goes to the display), and on the RK3399 that read
+runs at a few hundred MB/s - a 3840x2160 NV12 frame is 12.4 MB, so card 23 played
+4K VP9 from rkvdec at 9 frames per second with the CPUs mostly idle.
+
+vb2 already has the way out: a queue with allow_cache_hints accepts
+V4L2_MEMORY_FLAG_NON_COHERENT in VIDIOC_REQBUFS / VIDIOC_CREATE_BUFS (and reports
+V4L2_BUF_CAP_SUPPORTS_MMAP_CACHE_HINTS), allocates with dma_alloc_noncontiguous -
+through the decoders' IOMMUs here - maps the buffer cached, and does the cache
+maintenance itself: clean at QBUF (vb2_dc_prepare), invalidate at DQBUF
+(vb2_dc_finish). Neither driver sets the flag, so a request for it was silently
+dropped. This sets it on the decoders' CAPTURE queues; nothing changes for a
+client that does not ask (FFmpeg asks: patches/external/ffmpeg 0011).
+
+Neither driver touches a decoder CAPTURE buffer from the CPU (no kernel mapping,
+DMA_ATTR_NO_KERNEL_MAPPING stays), and the CPU only ever reads them, so the
+hardware never sees a dirty line: the reference frames it reads back are clean.
+
+diff --git a/drivers/media/platform/verisilicon/hantro_drv.c b/drivers/media/platform/verisilicon/hantro_drv.c
+index 137ca13ee..4e3113c31 100644
+--- a/drivers/media/platform/verisilicon/hantro_drv.c
++++ b/drivers/media/platform/verisilicon/hantro_drv.c
+@@ -238,6 +238,8 @@ queue_init(void *priv, struct vb2_queue *src_vq, struct vb2_queue *dst_vq)
+ 	if (!ctx->is_encoder) {
+ 		dst_vq->dma_attrs |= DMA_ATTR_NO_KERNEL_MAPPING;
+ 		dst_vq->max_num_buffers = MAX_POSTPROC_BUFFERS;
++		/* Cached decoded frames on request, as in rkvdec. */
++		dst_vq->allow_cache_hints = 1;
+ 	}
+ 
+ 	dst_vq->type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
+diff --git a/drivers/staging/media/rkvdec/rkvdec.c b/drivers/staging/media/rkvdec/rkvdec.c
+index a1d941b0b..afe5c903e 100644
+--- a/drivers/staging/media/rkvdec/rkvdec.c
++++ b/drivers/staging/media/rkvdec/rkvdec.c
+@@ -756,6 +756,13 @@ static int rkvdec_queue_init(void *priv,
+ 	dst_vq->mem_ops = &vb2_dma_contig_memops;
+ 	dst_vq->dma_attrs = DMA_ATTR_ALLOC_SINGLE_PAGES |
+ 			    DMA_ATTR_NO_KERNEL_MAPPING;
++	/*
++	 * Let user space ask for cached decoded frames
++	 * (V4L2_MEMORY_FLAG_NON_COHERENT): a frame the CPU reads is otherwise
++	 * read from write-combined memory, a few hundred MB/s on this SoC.
++	 * vb2 syncs the cache at QBUF and DQBUF.
++	 */
++	dst_vq->allow_cache_hints = 1;
+ 	dst_vq->type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
+ 	dst_vq->io_modes = VB2_MMAP | VB2_DMABUF;
+ 	dst_vq->drv_priv = ctx;

@@ -1,0 +1,56 @@
+From c7f0383e6e02ac2abd9d510adda7590a18ead918 Mon Sep 17 00:00:00 2001
+From: Khadas Edge1 Android TV <edge1@localhost>
+Date: Sun, 4 Oct 2026 03:12:22 +0000
+Subject: [PATCH] v4l2_request: ask for cached capture buffers
+
+Khadas Edge1 (RK3399), Android 14: the FFmpeg Codec2 service reads every
+decoded frame back with the CPU, and a coherent V4L2 MMAP buffer is mapped
+write-combined - uncached for reads. A 3840x2160 NV12 frame is 12.4 MB, and
+reading it at a few hundred MB/s held 4K VP9 from rkvdec at 9 frames per
+second with the CPUs mostly idle.
+
+Request V4L2_MEMORY_FLAG_NON_COHERENT for CAPTURE buffers. A driver whose
+queue allows cache hints (rkvdec and hantro with the device's kernel patch
+0004) allocates them cached and vb2 syncs the cache at QBUF and DQBUF; any
+other driver clears the flag and nothing changes. The first capture buffer
+logs which of the two it got.
+---
+ libavcodec/v4l2_request.c | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
+
+diff --git a/libavcodec/v4l2_request.c b/libavcodec/v4l2_request.c
+index 9a614f7..9345db0 100644
+--- a/libavcodec/v4l2_request.c
++++ b/libavcodec/v4l2_request.c
+@@ -872,6 +872,16 @@ static int v4l2_request_buffer_alloc(V4L2RequestContext *ctx, V4L2RequestBuffer
+         .count = 1,
+         .memory = V4L2_MEMORY_MMAP,
+         .format.type = type,
++        /*
++         * Decoded frames cached for the CPU, where the driver allows it
++         * (V4L2_BUF_CAP_SUPPORTS_MMAP_CACHE_HINTS): every frame that is not
++         * displayed straight from its dmabuf is read back by the CPU, and a
++         * coherent buffer is mapped write-combined - uncached for reads, which
++         * on an RK3399 holds a 4K stream to single-digit frame rates. vb2 does
++         * the cache maintenance at QBUF and DQBUF. A driver without cache hints
++         * clears the flag and allocates as before.
++         */
++        .flags = V4L2_TYPE_IS_OUTPUT(type) ? 0 : V4L2_MEMORY_FLAG_NON_COHERENT,
+     };
+ 
+     av_log(ctx, AV_LOG_DEBUG, "%s: buf=%p type=%u\n", __func__, buf, type);
+@@ -914,6 +924,11 @@ static int v4l2_request_buffer_alloc(V4L2RequestContext *ctx, V4L2RequestBuffer
+     buf->capabilities = buffers.capabilities;
+     buf->used = 0;
+ 
++    if (!V4L2_TYPE_IS_OUTPUT(type) && buf->index == 0)
++        av_log(ctx, AV_LOG_INFO, "%s: capture buffers %s\n", __func__,
++               (buffers.flags & V4L2_MEMORY_FLAG_NON_COHERENT) ?
++               "cached (non-coherent)" : "uncached (coherent, no cache hints)");
++
+     buf->buffer.type = type;
+     buf->buffer.memory = V4L2_MEMORY_MMAP;
+     buf->buffer.index = buf->index;
+-- 
+2.43.0
+

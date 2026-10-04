@@ -103,17 +103,39 @@ Built, not yet run on the board.
   `vintf/framework_compatibility_matrix.xml` adds it - check_vintf stopped the
   first build at 94% without it.
 
-Known limit until phase 4: each frame is copied out of the decoder's buffer
-(`av_hwframe_transfer_data`) and converted to I420 by the component. The V4L2
-buffers are uncached for the CPU on the RK3399, so the copy is slow: 1080p should
-keep up, 4K probably not.
+**Card 23:** working. SmartTube's 4K VP9 went to `c2.ffmpeg.vp9.decoder`,
+`hw device = drm`, `Using V4L2 media device /dev/media1 (rkvdec) for VP9F`; H.264
+to rkvdec as `S264`. But 4K played at about 9 frames per second with the CPUs
+mostly idle: each frame was copied out of the decoder's buffer
+(`av_hwframe_transfer_data`) and then read again by the component's conversion to
+YV12 (`nv12 => yuv420p`), and the decoder's buffers are coherent, so the CPU's
+mapping of them is write-combined - uncached for reads, a few hundred MB/s on the
+RK3399. A 4K NV12 frame is 12.4 MB: ~50 ms just to read it.
+
+### Phase 3b - cached frames, read once (card 24)
+
+* **Kernel** (`kernel/patches/0004`): rkvdec and hantro set `allow_cache_hints` on
+  their CAPTURE queues. vb2 then honours `V4L2_MEMORY_FLAG_NON_COHERENT`:
+  `dma_alloc_noncontiguous` through the decoders' IOMMUs, a cached mapping, and
+  the cache maintenance itself - clean at QBUF, invalidate at DQBUF.
+* **FFmpeg** (`patches/external/ffmpeg/0011`): CAPTURE buffers are created with
+  that flag; the first one logs `capture buffers cached (non-coherent)` or
+  `uncached` - the check that the kernel patch is in.
+* **ffmpeg_codec2** (`patches/external/ffmpeg_codec2/0002`): `av_hwframe_map`
+  instead of `av_hwframe_transfer_data` - the conversion reads the decoder's
+  buffer directly, one pass instead of two.
+
+Expected: the frame read at cached-memory speed (a few ms for 4K) and one copy
+into the YV12 output buffer; 4K30 should keep up. Still copied, and still
+composed by the GPU (SurfaceFlinger's layers were all CLIENT on card 23).
 
 ### Phase 4 - zero copy
 
-Phase 3 copies every frame from the decoder's buffer into a gralloc buffer
-(`av_hwframe_transfer_data` to NV12): fine for 1080p, a lot of memory bandwidth
-for 4K60. Zero copy hands the DRM PRIME buffer to SurfaceFlinger directly, as a
-gralloc buffer minigbm imports.
+Phase 3b still copies every frame into a YV12 gralloc buffer, which the GPU then
+composes: fine for 4K30, a lot of memory bandwidth for 4K60. Next steps, in order
+of cost: NV12 output buffers (a plane copy, and a buffer the VOP can scan out on a
+YUV plane instead of the GPU sampling it); then zero copy - the decoder's DRM PRIME
+buffer handed to SurfaceFlinger as a gralloc buffer minigbm imports.
 
 ## Checking it
 
@@ -122,6 +144,8 @@ gralloc buffer minigbm imports.
   `persist.vendor.edge1.hwdec`.
 * logcat: `ffmpeg_hwaccel_init: ... hw device = drm` when a stream goes to the
   hardware; FFmpeg's `v4l2_request` lines name the device it picked.
+* logcat: `capture buffers cached (non-coherent)` (tag FFMPEG) once per stream;
+  `uncached` means the kernel lacks patch 0004.
 * The performance overlay's `HW decode:` line: the decoders MediaCodecList marks
   hardware-accelerated - the four c2.ffmpeg ones once the service runs.
 * `setprop persist.vendor.edge1.hwdec 0` (root) and replaying the same video tells

@@ -1,0 +1,111 @@
+From b5cb87039c527620554ff313dc3a1ac379a0fcbe Mon Sep 17 00:00:00 2001
+From: Khadas Edge1 Android TV <edge1@localhost>
+Date: Sun, 4 Oct 2026 03:13:46 +0000
+Subject: [PATCH] Map hardware frames instead of copying them
+
+Khadas Edge1 (RK3399), Android 14. ffmpeg_hwaccel_get_frame() copied each
+decoded frame out of the decoder's buffer (av_hwframe_transfer_data) into a
+new frame, which the component then read again to convert it into the output
+buffer: two passes over 12.4 MB per 4K frame, the first from uncached
+memory. Card 23 played 4K VP9 from rkvdec at 9 frames per second.
+
+av_hwframe_map() hands back the decoder's own buffer, mmapped, for the
+conversion to read directly - one pass, and from cached memory with the
+capture buffers of external/ffmpeg patch 0011. The mapping holds the
+hardware frame until the next avcodec_receive_frame(), and deInitDecoder()
+lets go of it before closing the decoder. A frame that cannot be mapped is
+copied as before, with one warning.
+---
+ C2FFMPEGVideoDecodeComponent.cpp |  5 +++++
+ ffmpeg_utils/ffmpeg_hwaccel.c    | 37 ++++++++++++++++++++++++++------
+ 2 files changed, 36 insertions(+), 6 deletions(-)
+
+diff --git a/C2FFMPEGVideoDecodeComponent.cpp b/C2FFMPEGVideoDecodeComponent.cpp
+index e212d3f..0c17054 100644
+--- a/C2FFMPEGVideoDecodeComponent.cpp
++++ b/C2FFMPEGVideoDecodeComponent.cpp
+@@ -149,6 +149,11 @@ c2_status_t C2FFMPEGVideoDecodeComponent::openDecoder() {
+ 
+ void C2FFMPEGVideoDecodeComponent::deInitDecoder() {
+     ALOGD("%p deInitDecoder: %p", this, mCtx);
++    if (mFrame) {
++        // A hardware frame is mapped, not copied (ffmpeg_hwaccel_get_frame):
++        // let go of it while its decoder is still open.
++        av_frame_unref(mFrame);
++    }
+     if (mCtx) {
+         if (avcodec_is_open(mCtx)) {
+             avcodec_flush_buffers(mCtx);
+diff --git a/ffmpeg_utils/ffmpeg_hwaccel.c b/ffmpeg_utils/ffmpeg_hwaccel.c
+index eff225e..e173744 100644
+--- a/ffmpeg_utils/ffmpeg_hwaccel.c
++++ b/ffmpeg_utils/ffmpeg_hwaccel.c
+@@ -4,7 +4,9 @@
+ #include <cutils/properties.h>
+ 
+ #include "ffmpeg_hwaccel.h"
++#include "libavutil/hwcontext.h"
+ #include "libavutil/opt.h"
++#include "libavutil/pixdesc.h"
+ 
+ /*
+  * Which codecs try FFmpeg's hardware decoding (the V4L2 request API hwaccels).
+@@ -78,12 +80,25 @@ int ffmpeg_hwaccel_init(AVCodecContext *avctx) {
+ void ffmpeg_hwaccel_deinit(AVCodecContext *avctx __unused) {
+ }
+ 
++/*
++ * The decoded frame, made readable by the CPU for the component's copy into the
++ * output buffer. Mapped rather than transferred: av_hwframe_map() hands back
++ * the decoder's own buffer (the DRM PRIME descriptor's dmabuf, mmapped) and
++ * av_hwframe_transfer_data() copies it into a new frame first - which the
++ * component then reads again to convert it. One pass over the frame instead of
++ * two, and the mapping holds the hardware frame until the next
++ * avcodec_receive_frame() unrefs it. With the cached capture buffers of
++ * external/ffmpeg patch 0011 the read runs at memory speed; without them it is
++ * still one read of uncached memory instead of a copy plus a read.
++ * A frame that cannot be mapped is transferred as before.
++ */
+ int ffmpeg_hwaccel_get_frame(AVCodecContext *avctx __unused, AVFrame *frame) {
+     if (!frame->hw_frames_ctx) {
+         // Frame is not hw-accel
+         return 0;
+     }
+ 
++    AVHWFramesContext *hwfc = (AVHWFramesContext *)frame->hw_frames_ctx->data;
+     AVFrame* output;
+     int err;
+ 
+@@ -92,13 +107,23 @@ int ffmpeg_hwaccel_get_frame(AVCodecContext *avctx __unused, AVFrame *frame) {
+         return AVERROR(ENOMEM);
+     }
+ 
+-    output->format = AV_PIX_FMT_NV12;
+-
+-    err = av_hwframe_transfer_data(output, frame, 0);
++    output->format = hwfc->sw_format;
++    err = av_hwframe_map(output, frame, AV_HWFRAME_MAP_READ);
+     if (err < 0) {
+-        ALOGE("ffmpeg_hwaccel_get_frame failed to transfer data: %s (%08x)",
+-              av_err2str(err), err);
+-        goto fail;
++        static int warned;
++        if (!warned) {
++            warned = 1;
++            ALOGW("ffmpeg_hwaccel_get_frame: cannot map %s frames (%s), copying them",
++                  av_get_pix_fmt_name(hwfc->sw_format), av_err2str(err));
++        }
++        av_frame_unref(output);
++        output->format = AV_PIX_FMT_NV12;
++        err = av_hwframe_transfer_data(output, frame, 0);
++        if (err < 0) {
++            ALOGE("ffmpeg_hwaccel_get_frame failed to transfer data: %s (%08x)",
++                  av_err2str(err), err);
++            goto fail;
++        }
+     }
+ 
+     err = av_frame_copy_props(output, frame);
+-- 
+2.43.0
+
