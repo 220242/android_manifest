@@ -9,6 +9,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.PowerManager;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -24,8 +25,9 @@ import java.util.Locale;
 
 /**
  * Edge1 Tools' screen, in Material 3 (res/values/themes.xml): the performance mode,
- * the overlay, sound and display, the default launcher, the logs on the card, and
- * the apps on this image - each with a row of its own, installed only when pressed.
+ * the overlay, sound and display, the default launcher, restart and shut down, the
+ * logs on the card, and the apps on this image - each with a row of its own,
+ * installed only when pressed.
  */
 public class MainActivity extends Activity {
     private static final String TAG = "Edge1Tools";
@@ -113,6 +115,11 @@ public class MainActivity extends Activity {
         rowLauncher = Ui.row(findViewById(R.id.row_launcher), null,
                 getString(R.string.launcher_text), R.drawable.ic_home,
                 v -> Launchers.cycle(this, ok -> refresh()));
+
+        Ui.row(findViewById(R.id.row_restart), getString(R.string.power_restart),
+                getString(R.string.power_restart_text), R.drawable.ic_restart, v -> confirmPower(false));
+        Ui.row(findViewById(R.id.row_power_off), getString(R.string.power_off),
+                getString(R.string.power_off_text), R.drawable.ic_power, v -> confirmPower(true));
 
         cardLogs = findViewById(R.id.card_logs);
         rowLogs = Ui.row(findViewById(R.id.row_logs), getString(R.string.logs_switch), null, 0,
@@ -279,6 +286,28 @@ public class MainActivity extends Activity {
                 .setPositiveButton(R.string.delete, (d, w) -> {
                     Perf.request("logs-clear");
                     Toast.makeText(this, R.string.logs_cleared, Toast.LENGTH_SHORT).show();
+                })
+                .show();
+    }
+
+    /**
+     * Restart or shut down, after a confirmation. The app runs as the system user,
+     * which holds REBOOT. Shutting down powers the board off for real (the RK808
+     * PMIC is the system power controller), and only the board's POWER button or
+     * the power supply brings it back - nothing the remote can reach.
+     */
+    private void confirmPower(boolean off) {
+        new AlertDialog.Builder(this)
+                .setTitle(off ? R.string.power_off_title : R.string.power_restart_title)
+                .setMessage(off ? R.string.power_off_confirm : R.string.power_restart_confirm)
+                .setNegativeButton(R.string.cancel, null)
+                .setPositiveButton(off ? R.string.power_off_do : R.string.power_restart_do, (d, w) -> {
+                    PowerManager pm = getSystemService(PowerManager.class);
+                    if (off) {
+                        pm.shutdown(false, "edge1-tools", false);
+                    } else {
+                        pm.reboot(null);
+                    }
                 })
                 .show();
     }

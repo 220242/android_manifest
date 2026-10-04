@@ -92,4 +92,17 @@
          entry on its main screen (SoundActivity says more). -->
     <string name="sound_pref_title">Sound &amp; display</string>
     <string name="sound_pref_summary">Volume, test sound, resolution</string>
+
+    <!-- Power -->
+    <string name="power_title">Power</string>
+    <string name="power_restart">Restart</string>
+    <string name="power_restart_text">Starts Android again, from the card.</string>
+    <string name="power_restart_title">Restart now?</string>
+    <string name="power_restart_confirm">Open apps are closed and the box starts again in about two minutes.</string>
+    <string name="power_restart_do">Restart</string>
+    <string name="power_off">Shut down</string>
+    <string name="power_off_text">Turns the board off. Press its POWER button, or unplug and replug the power, to turn it on again.</string>
+    <string name="power_off_title">Shut down now?</string>
+    <string name="power_off_confirm">The board turns off completely. The remote and the gamepad cannot wake it - press the POWER button on the board, or unplug and replug the power.</string>
+    <string name="power_off_do">Shut down</string>
 </resources>

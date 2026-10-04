@@ -36,7 +36,11 @@ their TV box, what is done, and the order the rest goes in.
   loudness - it started at 2-3 of 15 before, which was near silence over HDMI.
 * **Edge1 Tools** in Material 3: performance modes (the six of edge1-options.txt,
   applied at once by the root helper edge1-ctl), the overlay, sound, launcher, the
-  bundled apps, and the logs switch.
+  bundled apps, the logs switch, and restart / shut down (the board's POWER
+  button or the power supply turns it on again).
+* **Hardware video decoding:** H.264 and VP9 on rkvdec, MPEG-2 and VP8 on hantro,
+  through FFmpeg's V4L2 request hwaccels in a Codec2 service (docs/HW_DECODE.md);
+  decoded frames cached for the CPU since card 24.
 * **Logs off:** logs=0 in edge1-options.txt (or the switch in Edge1 Tools) and
   nothing is written to the card at all - the userdebug build stops being a
   bring-up recorder without a rebuild.

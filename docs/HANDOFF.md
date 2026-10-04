@@ -114,6 +114,7 @@ not reachable from it.
 | 20 | first build stopped at the module probe (a false sepolicy duplicate, fixed); the second came back with edge1-boot.log (`booti`, `edge1_prev=none`), a ramoops region cleared as by a power cut, the default edge1-options.txt, and **no edge1-logs** - Android apparently never got as far as its log recorder. The owner: **a black screen from the start, no "android" text** - so not even the kernel console came up, i.e. the kernel stopped before the display driver (~1.1s), where the PCIe probe runs. Power: a **Baseus 100W GaN power bank** (USB-C PD) | The PCIe controller out of the kernel: building its PHY in was the build's one change that runs early in the kernel and can hang it (mainline's RK3399 PCIe PHY is what Armbian patches; the slot is empty). The bootwatch itself was run under mksh, Android's shell, and works. Bundled apps: offered one by one in Edge1 Tools, installed only on request |
 | 21 | **Android up again**: boot completed at 111s, ran 833s with the power-test clocks (A72 1416MHz, GPU 600MHz) and no reset - one boot in `boots.txt`; SmartTube played. `video.txt` exactly as planned: rkvdec `S264` up to 4096x2560 and `VP9F` 4096x2304, hantro `MG2S` 1920x1088 and `VP8F` 3840x2160, `/dev/media0` hantro, `/dev/media1` rkvdec. The owner could not tell whether there was sound, and an Xbox pad has no volume keys: the HAL opened ALSA card 0 36 times, so it played - at **media volume 2 of 15** (`volume_changed` in the logcat), about -40 dB | `ro.config.media_vol_default=15`, and the TV volume curve for "Speaker" (the HDMI output). **Settings > Sound & display**: Edge1 Tools' `SoundActivity` handles `com.android.tv.settings.SOUND`, so TvSettings lists it on its main screen - volume -/+, a left/right test tone, where the sound goes, and a button to TvSettings' Display & Sound (which Device Preferences hides once a Sound handler exists). Bootwatch: `audio.txt` (ALSA state, `dumpsys audio`, `dumpsys media.audio_flinger`) |
 | 22 | Sound at 15 of 15 on the HDMI "speaker"; Settings' new **Sound & display** entry opened SoundActivity, and TvSettings' Display & Sound twice. 593s, no reset (the power-test clocks); the session ended in a restart chosen in Settings, after which no boot-00002 and an edge1-boot.log still from the cold start - either the card was pulled, or the warm reboot never reached boot.scr (ask). **com.android.bluetooth ran in the zygote domain**: `seapp_context_lookup: No match ... seinfo default`, as on card 21 - since the build signs with its own keys (card 18, test keys: `bluetooth` domain) | Bluetooth: no cause found in the sources (Soong signs Bluetooth.apk with `<keys>/bluetooth`, keys.conf's @BLUETOOTH is the same file); `packages.txt` now has each package's signature hash and local-config prints the keys' - AOSP's test bluetooth key is `d77294ce`. **logs=0** in edge1-options.txt stops every write to the card: boot.scr reads it with `env import -t -r ... logs` (tested on the 2022.07 sandbox), the bootwatch only applies the clocks and leaves the partition read-only. **edge1-ctl** (vendor, root, own domain): Edge1 Tools' modes and logs switch, through sys.edge1.ctl / persist.sys.edge1.perf and init.edge1.ctl.rc on /product; it writes the picked mode into the card's file. **Edge1 Tools in Material 3** (platform widgets, M3 dark scheme, focus ring), runs as the system user; the six modes, overlay, sound, launcher, logs switch, bundled apps |
+| 23 | Two builds stopped first: aapt2 on Edge1 Tools' styles (implicit parents), then check_vintf on `IComponentStore/ffmpeg` (a device framework matrix now names it). Then **hardware decoding works**: SmartTube's 4K VP9 on `c2.ffmpeg.vp9.decoder` with rkvdec (`VP9F`), H.264 as `S264`; 920s, no reset, a mode picked in Edge1 Tools applied and written to edge1-options.txt (full speed at the end). The owner: modes and the overlay work, 4K at ~9 fps with the CPUs idle - the frame read back from the decoder's uncached (write-combined) buffer, twice. The restart from Settings on card 22 came back by itself. Bluetooth is signed with AOSP's test key (d77294ce), not this machine's (8a2a604b), while platform and networkstack carry ours | Cached decoded frames: kernel patch 0004 (rkvdec/hantro `allow_cache_hints`), FFmpeg 0011 (`V4L2_MEMORY_FLAG_NON_COHERENT`), ffmpeg_codec2 0002 (`av_hwframe_map`, one read instead of copy + read). Edge1 Tools: Power card - restart and shut down |
 
 ## Lessons that cost a card each (check these first next time)
 
@@ -213,6 +214,11 @@ not reachable from it.
   Codec2 store only as default/software, and ffmpeg_codec2 registers "ffmpeg".
   `vintf/framework_compatibility_matrix.xml` names it; verify-tree [4c] keeps the
   list of such services. The build only finds out at 94%, while packaging.
+* **A coherent V4L2 buffer is uncached for the CPU.** vb2-dma-contig maps it
+  write-combined; reading a decoded frame back runs at a few hundred MB/s on the
+  RK3399 - 4K at 9 fps with idle CPUs. A queue with `allow_cache_hints` plus
+  `V4L2_MEMORY_FLAG_NON_COHERENT` from the client gives cached buffers and vb2 does
+  the cache maintenance. Idle CPUs and a slow pipeline mean memory, not compute.
 * **aapt2: a dotted style name is a child.** `<style name="Text.Body">` without
   `parent=` inherits `Text`, and a missing `Text` stops the link (the first build
   of the Material 3 screens, at 11%). A regex check of `@style/` references does
@@ -222,29 +228,26 @@ not reachable from it.
 
 ## Open, in rough order
 
-* Card 23, hardware decoding (docs/HW_DECODE.md, phases 2-3, built and never
-  run): the first build syncs external/ffmpeg, ffmpeg_codec2 and libudev-zero and
-  place-device.sh applies patches/ - a patch that does not apply stops it there.
-  On the board: the overlay's "HW decode:" names c2.ffmpeg.h264/vp9/mpeg2/vp8;
-  a video in SmartTube or VLC raises the decoders' interrupts (video.txt) and logs
-  `ffmpeg_hwaccel_init: ... hw device = drm`. If the codec service crash-loops,
-  logcat's SIGSYS line names a syscall for media/c2-ffmpeg-extended.policy; if it
-  plays black or garbled, persist.vendor.edge1.hwdec=0 is software for comparison.
-  4K is expected to drop frames until zero copy (the frame copy from uncached
-  V4L2 buffers).
-* Card 23: Edge1 Tools' new screen - a mode picked there changes the clocks at
-  once (the header shows them) and the active block in EDGE1BOOT:edge1-options.txt;
-  the logs switch writes logs=0 and the next boot leaves the card alone (no new
-  boot folder, edge1-boot.log unchanged). `packages.txt`: Bluetooth's signature hash
-  against the report's "keys: bluetooth signature hash" - equal means the signing
-  is right and mac_permissions is not; d77294ce means it was signed with AOSP's
-  test key. Ask whether the restart from Settings on card 22 came back.
-  Power: card 21 ran 833s and card 22 593s at the test clocks without a reset, from
-  the Baseus power bank. Next: full speed (the mode in Edge1 Tools), and a longer
-  session; resets coming back at full speed mean power at the top OPPs.
-* Hardware video decode: docs/HW_DECODE.md. Phase 1 confirmed on card 21 (both
-  decoders and their formats in `video.txt`); next the FFmpeg Codec2 service
-  (software), then v4l2-request for H.264 and VP9. HEVC needs a newer kernel.
+* Card 24, 4K playback (docs/HW_DECODE.md, phase 3b): logcat's FFMPEG line
+  `capture buffers cached (non-coherent)` says kernel patch 0004 is in (`uncached`:
+  it is not); then the frame rate of a 4K VP9 video in SmartTube against card 23's
+  ~9 fps, and the overlay's CPU load. Still GPU-composed YV12; if 4K30 keeps up,
+  the next step is NV12 output buffers (phase 4).
+* Card 24: Edge1 Tools' Power card - "Shut down" should power the board off for
+  real (RK808 system-power-controller); ask what turns it on again (the POWER
+  button, or replugging). The logs switch is still untried (logs=0, then a boot
+  that leaves edge1-logs alone).
+* Bluetooth signing (task left from card 22): packages.txt on card 23 shows
+  com.android.bluetooth (in the btservices APEX, `Bluetooth@AP2A.240805.005.S4`,
+  built from source) signed with d77294ce - AOSP's test key - while Soong resolves
+  `certificate: "bluetooth"` against PRODUCT_DEFAULT_DEV_CERTIFICATE's directory
+  (vendor/edge1-priv/keys), which platform and networkstack apps did get. Check the
+  APK in out/ with apksigner before guessing; matters for an enforcing build
+  (mac_permissions seinfo), not for the permissive one.
+* Power: card 23 ran 920s without a reset, ending at full speed (1800/1416/800).
+  Next: a long session at full speed.
+* Hardware video decode: docs/HW_DECODE.md. Phases 1-3 confirmed (cards 21, 23);
+  3b on card 24; HEVC needs a newer kernel (rkvdec HEVC is not in 6.12).
 * Bluetooth pairing of a remote/gamepad not yet tried by the owner.
 * Bluetooth audio (A2DP source): the provider factory registers since the card 19 round
   (`android.hardware.bluetooth.audio-impl`); not tried with headphones yet.

@@ -106,6 +106,16 @@
             <include android:id="@+id/row_launcher" layout="@layout/row_nav" />
         </LinearLayout>
 
+        <!-- Power -->
+        <LinearLayout style="@style/Edge1.Card">
+            <TextView
+                style="@style/Edge1.CardTitle"
+                android:drawableStart="@drawable/ic_power"
+                android:text="@string/power_title" />
+            <include android:id="@+id/row_restart" layout="@layout/row_nav" />
+            <include android:id="@+id/row_power_off" layout="@layout/row_nav" />
+        </LinearLayout>
+
         <!-- Logs on the card (debuggable builds that boot from it) -->
         <LinearLayout
             android:id="@+id/card_logs"

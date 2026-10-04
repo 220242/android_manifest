@@ -83,4 +83,17 @@
     <string name="sound_note">Это уровень, который приставка отдаёт по HDMI; на максимуме сигнал полный, а громкость задаёт пульт телевизора. Проверка звучит в левом динамике, потом в правом. У Bluetooth-наушников свой уровень - его меняют здесь, пока они играют.</string>
     <string name="sound_pref_title">Звук и экран</string>
     <string name="sound_pref_summary">Громкость, проверка звука, разрешение</string>
+
+    <!-- Power -->
+    <string name="power_title">Питание</string>
+    <string name="power_restart">Перезагрузить</string>
+    <string name="power_restart_text">Android запустится заново, с карты.</string>
+    <string name="power_restart_title">Перезагрузить сейчас?</string>
+    <string name="power_restart_confirm">Открытые приложения закроются, приставка запустится заново примерно за две минуты.</string>
+    <string name="power_restart_do">Перезагрузить</string>
+    <string name="power_off">Выключить</string>
+    <string name="power_off_text">Плата выключится полностью. Включить снова - кнопкой POWER на плате или переподключив питание.</string>
+    <string name="power_off_title">Выключить сейчас?</string>
+    <string name="power_off_confirm">Плата выключится полностью. Пульт и геймпад её не разбудят - нажмите кнопку POWER на плате или переподключите питание.</string>
+    <string name="power_off_do">Выключить</string>
 </resources>
