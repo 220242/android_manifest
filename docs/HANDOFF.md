@@ -118,6 +118,7 @@ not reachable from it.
 | 23 | Two builds stopped first: aapt2 on Edge1 Tools' styles (implicit parents), then check_vintf on `IComponentStore/ffmpeg` (a device framework matrix now names it). Then **hardware decoding works**: SmartTube's 4K VP9 on `c2.ffmpeg.vp9.decoder` with rkvdec (`VP9F`), H.264 as `S264`; 920s, no reset, a mode picked in Edge1 Tools applied and written to edge1-options.txt (full speed at the end). The owner: modes and the overlay work, 4K at ~9 fps with the CPUs idle - the frame read back from the decoder's uncached (write-combined) buffer, twice. The restart from Settings on card 22 came back by itself. Bluetooth is signed with AOSP's test key (d77294ce), not this machine's (8a2a604b), while platform and networkstack carry ours | Cached decoded frames: kernel patch 0004 (rkvdec/hantro `allow_cache_hints`), FFmpeg 0011 (`V4L2_MEMORY_FLAG_NON_COHERENT`), ffmpeg_codec2 0002 (`av_hwframe_map`, one read instead of copy + read). Edge1 Tools: Power card - restart and shut down |
 | 24 | Six boots: the first at the power-test clocks, then full speed; five ended in a reset within 1-3 minutes of Android starting - before any video - with nothing in ramoops (pmsg only, no panic, no oops). The board negotiates no USB PD on mainline (Khadas' 4.4 kernel drives two FUSB302s; mainline's DT has neither), so the supply stays at 5V: a brownout under load. Video got worse, 1080p too: every rkvdec CAPTURE allocation failed with ENOMEM - `dma_alloc_noncontiguous()` takes only DMA_ATTR_ALLOC_SINGLE_PAGES and rkvdec also sets DMA_ATTR_NO_KERNEL_MAPPING (a WARN, kernel/dma/mapping.c:770) - so FFmpeg dropped the hwaccel and VP9 went to the software decoder, single-threaded | Kernel 0004 masks the attributes in vb2-dma-contig's non-coherent allocation; FFmpeg 0011 retries coherent if the cached allocation fails. Kernel 0005 + TYPEC/TCPM/FUSB302=y: both USB-C ports ask for 5/9/12V; `pd=` in edge1-options.txt (0/5/9/12/15/20) rewrites the dtb in boot.scr (`fdt set`). Memory options: zram=, sd_readahead_kb=, sd_write_delay_s=; bootwatch's power.txt |
 | 25 | No Android: edge1-boot.log at `booti` with `edge1_pd=12V`, the ramoops region all 0xff (a power loss - a panic would have left the kernel log), no edge1-logs. The supply hears nothing from the board for ~10s (the eMMC's U-Boot does no PD), stops advertising, and tcpm - VBUS present, no caps - goes Soft_Reset, then Hard Reset, and a Hard Reset makes the source cut VBUS: a power cut on every boot (tcpm warns "might result in machine power-loss") | Kernel 0006: on a sink-only, bus-powered port that had VBUS at start, Hard Reset is withheld - one Get_Source_Cap, then SNK_READY at 5V without a contract. Owner asked to try pd=0 on card 25 to confirm |
+| 26 | **12V over USB PD** on the second port (fusb302 at i2c4): the supply offered 5/9/12/15/20V and PPS while the kernel started, tcpm asked for 12V 3A at 1.4s, no Hard Reset needed; 928s at the power-test clocks, no reset. Video on the hardware decoder with cached buffers (`capture buffers cached`), but 60 fps streams (VP9 and H.264, 720p and 1080p) played at 30 and 1440p VP9 at ~9. Every frame went out as YV12, which minigbm allocates without scanout, so the GPU composed every video frame (the display is 1080p60; composition of the UI was DEVICE); rkvdec's core and CABAC clocks are set by nothing | ffmpeg_codec2 0003: NV12 output for hardware frames (flexible YUV = NV12 with scanout in minigbm; plane copies, not swscale) and a per-frame `perf:` log line; kernel 0007: rkvdec core/CABAC at 400 MHz; bootwatch `playing-N.txt` while a video plays; full speed is the default mode again |
 
 ## Lessons that cost a card each (check these first next time)
 
@@ -222,6 +223,10 @@ not reachable from it.
   RK3399 - 4K at 9 fps with idle CPUs. A queue with `allow_cache_hints` plus
   `V4L2_MEMORY_FLAG_NON_COHERENT` from the client gives cached buffers and vb2 does
   the cache maintenance. Idle CPUs and a slow pipeline mean memory, not compute.
+* **YV12 never reaches a display plane here.** minigbm's resolve helper takes
+  BO_USE_SCANOUT off YVU420_ANDROID, so a YV12 video layer is always composed by the
+  GPU; a flexible YUV buffer is NV12 with scanout. And swscale's NV12-to-NV12 copy
+  drops the chroma of a semi-planar destination - copy planes by hand.
 * **A resets-without-a-trace pattern on this board is power, and PD is software.**
   Nothing in ramoops, resets clustered at load peaks: brownout. The Edge's USB-C
   inputs only leave 5V when the kernel's FUSB302 driver asks for more; mainline's
@@ -246,17 +251,15 @@ not reachable from it.
 
 ## Open, in rough order
 
-* Card 26 (card 25 lost power at every boot, see its row), power: edge1-boot.log's `edge1_pd=12V`; `power.txt` (snapshot folders):
-  the typec ports as sink, a `tcpm-source-psy-*` with `voltage_now` around
-  12000000 and tcpm's log ending in SNK_READY. Then resets at full speed should be
-  gone. If the board resets in a loop right at boot, the supply took a PD hard
-  reset badly: pd=0 on the PC brings back the old behaviour - and the tcpm log
-  (power.txt of the boot that survived) says why.
-* Card 26, video: logcat's FFMPEG `capture buffers cached (non-coherent)` and no
-  `create buffers failed`; dmesg without `dma alloc of size`. Then 4K VP9's frame
-  rate against card 23's ~9 fps.
-* Card 26: Edge1 Tools' Power card - what turns the board on after "Shut down"; the
-  logs switch, still untried. Memory options are off by default (commented out).
+* Card 27, video: logcat's `perf:` lines (C2FFMPEGVideoDecodeComponent) give, per
+  frame, decode / fetch (waiting for an output buffer: the display behind) / map /
+  copy in ms - the answer to where 60 fps goes. `playing-N.txt`: the decoders'
+  interrupt rate (frames decoded per second), the clocks (rkvdec's core and CABAC
+  should read 400 MHz), the threads, and SurfaceFlinger's dump - the video layer
+  DEVICE means the VOP shows the NV12 buffer itself. A "no NV12 (flexible YUV)
+  output buffer" warning means the pool refused NV12 and it fell back to YV12.
+* Card 27: PD stays to be watched (power.txt); full speed is the default mode now.
+  Edge1 Tools' Power card and the logs switch, still untried.
 * Bluetooth signing (task left from card 22): packages.txt on card 23 shows
   com.android.bluetooth (in the btservices APEX, `Bluetooth@AP2A.240805.005.S4`,
   built from source) signed with d77294ce - AOSP's test key - while Soong resolves

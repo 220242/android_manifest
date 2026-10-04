@@ -1,0 +1,35 @@
+arm64: dts: rockchip: khadas-edge: rkvdec core and CABAC clocks at 400 MHz
+
+Khadas Edge1, Android 14 on mainline 6.12. Applied to kernel/mainline by
+build/build-kernel.sh before every build (device/khadas/edge/kernel/patches/).
+
+rkvdec takes four clocks. The CRU node sets ACLK_VDU (400 MHz) among its
+assigned clocks; nothing sets SCLK_VDU_CORE and SCLK_VDU_CA, the decoder's
+core and CABAC engines, and rkvdec does not either - they run at whatever the
+bootloader or the reset left in CLKSEL_CON9. Rockchip's own kernel runs them
+at 297 MHz, and at 396 MHz for heavy streams (rockchip,advanced-rates, the
+rate 4K needs). Card 26 decoded 1440p VP9 at about 9 frames per second.
+
+Both at 400 MHz here: CPLL (800 MHz, assigned by the CRU node) divided by
+two. The bootwatch's playing-N.txt records the clock tree while a video
+plays, which says what the rates were before and are now.
+
+diff --git a/arch/arm64/boot/dts/rockchip/rk3399-khadas-edge.dtsi b/arch/arm64/boot/dts/rockchip/rk3399-khadas-edge.dtsi
+index 87da6d5f2..97d8accd5 100644
+--- a/arch/arm64/boot/dts/rockchip/rk3399-khadas-edge.dtsi
++++ b/arch/arm64/boot/dts/rockchip/rk3399-khadas-edge.dtsi
+@@ -913,3 +913,14 @@ fusb1_int: fusb1-int {
+ 		};
+ 	};
+ };
++
++/*
++ * rkvdec's core and CABAC clocks: nothing in mainline sets them (the CRU node
++ * assigns ACLK_VDU, 400 MHz, not these), so they run at whatever the bootloader
++ * or the reset left. Rockchip's kernel runs them at 297 MHz and at 396 MHz for
++ * heavy streams (rockchip,advanced-rates): 400 MHz here, CPLL / 2.
++ */
++&vdec {
++	assigned-clocks = <&cru SCLK_VDU_CA>, <&cru SCLK_VDU_CORE>;
++	assigned-clock-rates = <400000000>, <400000000>;
++};

@@ -22,19 +22,24 @@ F="$(realpath "${2:-$HERE/device/khadas/edge/kernel/edge1_mainline.config}")"
 DT="$L/scripts/dummy-tools/"
 
 # The kernel patches build-kernel.sh applies must apply to this tree (or already be
-# applied to it).
+# applied to it) - in name order, each on top of the ones before, as build-kernel.sh
+# applies them (0007 edits what 0005 added). They are applied for the check and
+# taken off again at the end.
 bad_patch=0
+applied=()
 for p in "$HERE"/device/khadas/edge/kernel/patches/*.patch; do
     [[ -f "$p" ]] || continue
     if git -C "$L" apply --reverse --check "$p" 2>/dev/null; then
         echo "patch $(basename "$p"): already applied here"
-    elif git -C "$L" apply --check "$p" 2>/dev/null; then
+    elif git -C "$L" apply "$p" 2>/dev/null; then
         echo "patch $(basename "$p"): applies"
+        applied+=("$p")
     else
         echo "patch $(basename "$p"): DOES NOT APPLY" >&2
         bad_patch=1
     fi
 done
+for (( i=${#applied[@]}-1; i>=0; i-- )); do git -C "$L" apply -R "${applied[$i]}"; done
 K="$(mktemp -d)"; trap 'rm -rf "$K"' EXIT
 cd "$L"
 make ARCH=arm64 CROSS_COMPILE="$DT" O="$K" defconfig >/dev/null 2>&1 || { echo "defconfig failed" >&2; exit 2; }

@@ -154,6 +154,37 @@ snapshot() {
 # The clocks and voltages at the last line are what says whether it is power.
 # Local variables only: the main loop's t is a global, and a "t" here once set it
 # to a temperature in millidegrees - past TIMEOUT, so the watchdog would reboot.
+# Decoder interrupts so far, rkvdec and hantro over all CPUs: one per decoded frame.
+dec_irqs() {
+    grep 'video-codec' /proc/interrupts | awk '{ for (i = 2; i <= NF; i++) {
+        if ($i ~ /^[0-9]+$/) s += $i; else break } } END { print s + 0 }'
+}
+
+# A video playing (the decoders' interrupts climbing): what the board does with it.
+# The decode rate from the interrupts, the clocks, the threads' CPU, how
+# SurfaceFlinger composed the video layer (DEVICE: on a display plane; CLIENT: by
+# the GPU), and the codec's own per-frame timings. Up to three per boot.
+playing_snapshot() {
+    local f="$OUT/playing-$1.txt" a b
+    a=$(dec_irqs); sleep 2; b=$(dec_irqs)
+    { echo "uptime $(uptime_s)s, decoder interrupts $(( (b - a) / 2 ))/s (one per frame)"
+      echo "cpu: little $(cat /sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq)" \
+           "big $(cat /sys/devices/system/cpu/cpufreq/policy4/scaling_cur_freq) kHz," \
+           "gpu $(cat /sys/class/devfreq/ff9a0000.gpu/cur_freq) Hz"
+      cat /sys/class/devfreq/ff9a0000.gpu/load 2>/dev/null; echo
+      # The decoders' clocks (kernel patch 0007 sets rkvdec's core and CABAC).
+      grep -q ' /sys/kernel/debug ' /proc/mounts || mount -t debugfs debugfs /sys/kernel/debug
+      grep -E 'vdu|vcodec|cpll|gpll|npll' /sys/kernel/debug/clk/clk_summary; echo
+      timeout 10 top -H -b -n 1 -m 30; echo
+      logcat -d -v time -s C2FFMPEGVideoDecodeComponent:I FFMPEG:I | tail -n 30; echo
+      timeout 20 dumpsys SurfaceFlinger | head -n 700; } > "$f" 2>&1
+    sync
+    log "video playing: state written to EDGE1BOOT:edge1-logs/${OUT##*/}/${f##*/}"
+}
+played=0
+playing=0
+irq_prev=
+
 thermal_line() {
     local line="" z mc c p
     for z in /sys/class/thermal/thermal_zone*; do
@@ -409,6 +440,21 @@ while :; do
         exit 0
     fi
     thermal_line
+    # Video: two checks in a row with at least 10 decoded frames a second.
+    if [ -n "$mounted" ] && [ -n "$streams" ] && [ "$played" -lt 3 ]; then
+        irq=$(dec_irqs)
+        if [ -n "$irq_prev" ] && [ $((irq - irq_prev)) -ge $((10 * SYNC)) ]; then
+            playing=$((playing + 1))
+            if [ "$playing" -eq 2 ]; then
+                played=$((played + 1))
+                playing_snapshot "$played"
+                irq=$(dec_irqs)
+            fi
+        else
+            playing=0
+        fi
+        irq_prev=$irq
+    fi
     if [ -n "$mounted" ]; then
         alive
         sync

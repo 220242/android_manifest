@@ -1,0 +1,261 @@
+From 0a02db705bdb7c8977560dc1ee5e0b088eba2e07 Mon Sep 17 00:00:00 2001
+From: Khadas Edge1 Android TV <edge1@localhost>
+Date: Sun, 4 Oct 2026 14:48:02 +0000
+Subject: [PATCH] NV12 output for hardware frames; per-frame timing in the log
+
+Khadas Edge1 (RK3399), Android 14. Card 26: 60 fps streams played at 30,
+1440p at 9, with the hardware decoder and cached capture buffers working.
+Every frame went out in YV12 - which minigbm allocates without scanout
+(drv_resolve_format_and_use_flags_helper drops BO_USE_SCANOUT for
+YVU420_ANDROID), so the display controller could never show it and the GPU
+composed every video frame - after swscale had deinterleaved its chroma
+byte by byte.
+
+NV12 frames from the hardware decoder now go out in a flexible YUV buffer,
+which minigbm allocates as NV12 with scanout, texture and CPU access: the
+VOP can put the video on a YUV plane of its own and scale it there. The
+copy is two plane copies (av_image_copy_plane) - not swscale, whose
+NV12-to-NV12 path (planarCopyWrapper) skips the chroma plane of a
+semi-planar destination. A pool that refuses the format is answered with
+YV12 for the rest of the session; persist.vendor.edge1.hwdec_nv12=0 turns
+it off. Software-decoded frames stay YV12.
+
+Every two seconds of decoding, one log line: frames per second and, per
+frame, the time spent decoding, waiting for an output buffer (long when
+the display falls behind), locking it, and copying into it.
+---
+ C2FFMPEGVideoDecodeComponent.cpp | 116 ++++++++++++++++++++++++++++---
+ C2FFMPEGVideoDecodeComponent.h   |  15 ++++
+ 2 files changed, 123 insertions(+), 8 deletions(-)
+
+diff --git a/C2FFMPEGVideoDecodeComponent.cpp b/C2FFMPEGVideoDecodeComponent.cpp
+index 0c17054..e1381b6 100644
+--- a/C2FFMPEGVideoDecodeComponent.cpp
++++ b/C2FFMPEGVideoDecodeComponent.cpp
+@@ -17,12 +17,17 @@
+ #define LOG_TAG "C2FFMPEGVideoDecodeComponent"
+ #include <android-base/properties.h>
+ #include <log/log.h>
++#include <utils/Timers.h>
+ #include <algorithm>
+ 
+ #include <SimpleC2Interface.h>
+ #include "C2FFMPEGVideoDecodeComponent.h"
+ #include "ffmpeg_hwaccel.h"
+ 
++extern "C" {
++#include "libavutil/imgutils.h"
++}
++
+ #define DEBUG_FRAMES 0
+ #define DEBUG_WORKQUEUE 0
+ #define DEBUG_EXTRADATA 0
+@@ -43,10 +48,44 @@ C2FFMPEGVideoDecodeComponent::C2FFMPEGVideoDecodeComponent(
+       mFFMPEGInitialized(false),
+       mCodecAlreadyOpened(false),
+       mExtradataReady(false),
+-      mEOSSignalled(false) {
++      mEOSSignalled(false),
++      mFlexOutput(base::GetBoolProperty("persist.vendor.edge1.hwdec_nv12", true)),
++      mFlexOutputRefused(false),
++      mFlexPixelFormat(std::make_shared<C2StreamPixelFormatInfo::output>(
++              0u, HAL_PIXEL_FORMAT_YCBCR_420_888)),
++      mDecodeNs(0) {
+     ALOGD("C2FFMPEGVideoDecodeComponent: mediaType = %s", componentInfo->mediaType);
+ }
+ 
++void C2FFMPEGVideoDecodeComponent::perfFrame(int64_t decodeNs, int64_t fetchNs,
++                                             int64_t mapNs, int64_t copyNs) {
++    int64_t now = systemTime(SYSTEM_TIME_MONOTONIC);
++    int64_t frameNs = decodeNs + fetchNs + mapNs + copyNs;
++
++    if (!mPerf.windowStartNs) {
++        mPerf.windowStartNs = now;
++    }
++    mPerf.frames++;
++    mPerf.decodeNs += decodeNs;
++    mPerf.fetchNs += fetchNs;
++    mPerf.mapNs += mapNs;
++    mPerf.copyNs += copyNs;
++    mPerf.maxFrameNs = std::max(mPerf.maxFrameNs, frameNs);
++    if (now - mPerf.windowStartNs >= 2000000000LL) {
++        double n = mPerf.frames;
++        // decode: the hardware (or software) decoder, waited for; fetch: an output
++        // buffer from the display's queue - long when the display is behind; map:
++        // the gralloc lock; copy: into the output buffer.
++        ALOGI("perf: %dx%d %s, %.1f fps: decode %.1f, fetch %.1f, map %.1f, copy %.1f ms/frame (max %.1f ms)",
++              mFrame->width, mFrame->height, av_get_pix_fmt_name((AVPixelFormat)mFrame->format),
++              n * 1e9 / (now - mPerf.windowStartNs),
++              mPerf.decodeNs / n / 1e6, mPerf.fetchNs / n / 1e6, mPerf.mapNs / n / 1e6,
++              mPerf.copyNs / n / 1e6, mPerf.maxFrameNs / 1e6);
++        mPerf = Perf();
++        mPerf.windowStartNs = now;
++    }
++}
++
+ C2FFMPEGVideoDecodeComponent::~C2FFMPEGVideoDecodeComponent() {
+     ALOGD("~C2FFMPEGVideoDecodeComponent: mCtx = %p", mCtx);
+     onRelease();
+@@ -269,20 +308,53 @@ c2_status_t C2FFMPEGVideoDecodeComponent::getOutputBuffer(C2GraphicView* outBuff
+     C2PlanarLayout layout = outBuffer->layout();
+     struct SwsContext* currentImgConvertCtx = mImgConvertCtx;
+ 
++    const AVPixelFormat dstFormat = AV_PIX_FMT_YUV420P;
++
+     data[0] = outBuffer->data()[C2PlanarLayout::PLANE_Y];
+     data[1] = outBuffer->data()[C2PlanarLayout::PLANE_U];
+     data[2] = outBuffer->data()[C2PlanarLayout::PLANE_V];
++    data[3] = NULL;
+     linesize[0] = layout.planes[C2PlanarLayout::PLANE_Y].rowInc;
+     linesize[1] = layout.planes[C2PlanarLayout::PLANE_U].rowInc;
+     linesize[2] = layout.planes[C2PlanarLayout::PLANE_V].rowInc;
++    linesize[3] = 0;
++
++    // A flexible YUV buffer is semi-planar on this device (minigbm: NV12): U and
++    // V interleaved, two bytes apart. An NV12 frame goes into it line by line -
++    // not through swscale, whose NV12-to-NV12 "copy" (planarCopyWrapper) skips
++    // the chroma plane when dst[2] is unset, as it is for a semi-planar format.
++    if (layout.planes[C2PlanarLayout::PLANE_U].colInc == 2 &&
++        layout.planes[C2PlanarLayout::PLANE_V].colInc == 2 &&
++        mFrame->format == AV_PIX_FMT_NV12) {
++        const int w = mFrame->width, h = mFrame->height;
++        av_image_copy_plane(data[0], linesize[0], mFrame->data[0], mFrame->linesize[0], w, h);
++        if (data[2] == data[1] + 1) {
++            av_image_copy_plane(data[1], linesize[1], mFrame->data[1], mFrame->linesize[1],
++                                (w + 1) & ~1, (h + 1) / 2);
++        } else {
++            // NV21: V first. Not what minigbm allocates, but cheap to get right.
++            uint8_t* dst = data[2];
++            for (int y = 0; y < (h + 1) / 2; y++) {
++                const uint8_t* s = mFrame->data[1] + y * mFrame->linesize[1];
++                uint8_t* d = dst + y * linesize[2];
++                for (int x = 0; x < w; x += 2) {
++                    d[x] = s[x + 1];
++                    d[x + 1] = s[x];
++                }
++            }
++        }
++        return C2_OK;
++    }
+ 
++    // Otherwise a planar buffer (YV12): swscale deinterleaves NV12's chroma,
++    // or copies a software decoder's YUV420P.
+     mImgConvertCtx = sws_getCachedContext(currentImgConvertCtx,
+            mFrame->width, mFrame->height, (AVPixelFormat)mFrame->format,
+-           mFrame->width, mFrame->height, AV_PIX_FMT_YUV420P,
++           mFrame->width, mFrame->height, dstFormat,
+            SWS_BICUBIC, NULL, NULL, NULL);
+     if (mImgConvertCtx && mImgConvertCtx != currentImgConvertCtx) {
+         ALOGD("getOutputBuffer: created video converter - %s => %s",
+-              av_get_pix_fmt_name((AVPixelFormat)mFrame->format), av_get_pix_fmt_name(AV_PIX_FMT_YUV420P));
++              av_get_pix_fmt_name((AVPixelFormat)mFrame->format), av_get_pix_fmt_name(dstFormat));
+ 
+     } else if (! mImgConvertCtx) {
+         ALOGE("getOutputBuffer: cannot initialize the conversion context");
+@@ -469,15 +541,31 @@ c2_status_t C2FFMPEGVideoDecodeComponent::outputFrame(
+     }
+ 
+     std::shared_ptr<C2GraphicBlock> block;
+-
+-    err = pool->fetchGraphicBlock(mFrame->width, mFrame->height, HAL_PIXEL_FORMAT_YV12,
+-                                  { C2MemoryUsage::CPU_READ, C2MemoryUsage::CPU_WRITE }, &block);
++    // NV12 frames (the hardware decoder's) go out as NV12: a flexible YUV
++    // buffer, which minigbm allocates as NV12 with scanout allowed - the display
++    // controller can show it on a plane of its own, while YV12 (minigbm takes
++    // scanout off it) always went through the GPU. A device that refuses the
++    // format gets YV12 from then on.
++    bool flex = mFlexOutput && !mFlexOutputRefused && mFrame->format == AV_PIX_FMT_NV12;
++    int halFormat = flex ? HAL_PIXEL_FORMAT_YCBCR_420_888 : HAL_PIXEL_FORMAT_YV12;
++    const C2MemoryUsage usage(C2MemoryUsage::CPU_READ, C2MemoryUsage::CPU_WRITE);
++    int64_t t0 = systemTime(SYSTEM_TIME_MONOTONIC);
++
++    err = pool->fetchGraphicBlock(mFrame->width, mFrame->height, halFormat, usage, &block);
++    if (err != C2_OK && flex && err != C2_BLOCKING && err != C2_TIMED_OUT) {
++        ALOGW("outputFrame: no NV12 (flexible YUV) output buffer, err = %d; YV12 from now on", err);
++        mFlexOutputRefused = true;
++        flex = false;
++        halFormat = HAL_PIXEL_FORMAT_YV12;
++        err = pool->fetchGraphicBlock(mFrame->width, mFrame->height, halFormat, usage, &block);
++    }
+ 
+     if (err != C2_OK) {
+         ALOGE("outputFrame: failed to fetch graphic block %d x %d (%x) err = %d",
+-              mFrame->width, mFrame->height, HAL_PIXEL_FORMAT_YV12, err);
++              mFrame->width, mFrame->height, halFormat, err);
+         return C2_CORRUPTED;
+     }
++    int64_t t1 = systemTime(SYSTEM_TIME_MONOTONIC);
+ 
+     C2GraphicView wView = block->map().get();
+ 
+@@ -486,12 +574,20 @@ c2_status_t C2FFMPEGVideoDecodeComponent::outputFrame(
+         ALOGE("outputFrame: graphic view map failed err = %d", err);
+         return C2_CORRUPTED;
+     }
++    int64_t t2 = systemTime(SYSTEM_TIME_MONOTONIC);
+ 
+     err = getOutputBuffer(&wView);
++    int64_t t3 = systemTime(SYSTEM_TIME_MONOTONIC);
++    perfFrame(mDecodeNs, t1 - t0, t2 - t1, t3 - t2);
++    mDecodeNs = 0;
+     if (err == C2_OK) {
+         std::shared_ptr<C2Buffer> buffer = createGraphicBuffer(std::move(block), C2Rect(mFrame->width, mFrame->height));
+ 
+-        buffer->setInfo(mIntf->getPixelFormatInfo());
++        if (flex) {
++            buffer->setInfo(mFlexPixelFormat);
++        } else {
++            buffer->setInfo(mIntf->getPixelFormatInfo());
++        }
+ 
+         if (work && c2_cntr64_t(mFrame->best_effort_timestamp) == work->input.ordinal.frameIndex) {
+             prunePendingWorksUntil(work);
+@@ -602,7 +698,9 @@ void C2FFMPEGVideoDecodeComponent::process(
+ 
+         while (!inputConsumed || outputAvailable) {
+             if (!inputConsumed) {
++                int64_t t = systemTime(SYSTEM_TIME_MONOTONIC);
+                 err = sendInputBuffer(&rView, work->input.ordinal.frameIndex.peekll());
++                mDecodeNs += systemTime(SYSTEM_TIME_MONOTONIC) - t;
+                 if (err == C2_OK) {
+                     inputConsumed = true;
+                     outputAvailable = true;
+@@ -616,7 +714,9 @@ void C2FFMPEGVideoDecodeComponent::process(
+ 
+             if (outputAvailable) {
+                 hasPicture = false;
++                int64_t t = systemTime(SYSTEM_TIME_MONOTONIC);
+                 err = receiveFrame(&hasPicture);
++                mDecodeNs += systemTime(SYSTEM_TIME_MONOTONIC) - t;
+                 if (err != C2_OK) {
+                     work->workletsProcessed = 1u;
+                     work->result = err;
+diff --git a/C2FFMPEGVideoDecodeComponent.h b/C2FFMPEGVideoDecodeComponent.h
+index 241ddcf..5767929 100644
+--- a/C2FFMPEGVideoDecodeComponent.h
++++ b/C2FFMPEGVideoDecodeComponent.h
+@@ -76,6 +76,21 @@ private:
+     bool mExtradataReady;
+     bool mEOSSignalled;
+     std::deque<PendingWork> mPendingWorkQueue;
++
++    // Output in NV12 (a flexible YUV buffer, which minigbm allocates as NV12 and
++    // the display can scan out) for NV12 frames from the hardware decoder.
++    bool mFlexOutput;
++    bool mFlexOutputRefused;
++    std::shared_ptr<C2StreamPixelFormatInfo::output> mFlexPixelFormat;
++
++    // Where a frame's time goes, logged every two seconds while decoding.
++    struct Perf {
++        int64_t windowStartNs = 0;
++        int frames = 0;
++        int64_t decodeNs = 0, fetchNs = 0, mapNs = 0, copyNs = 0, maxFrameNs = 0;
++    } mPerf;
++    void perfFrame(int64_t decodeNs, int64_t fetchNs, int64_t mapNs, int64_t copyNs);
++    int64_t mDecodeNs;
+ };
+ 
+ } // namespace android
+-- 
+2.43.0
+

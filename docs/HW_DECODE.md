@@ -138,6 +138,26 @@ Expected (card 25): the frame read at cached-memory speed (a few ms for 4K) and 
 copy into the YV12 output buffer; 4K30 should keep up. Still copied, and still
 composed by the GPU (SurfaceFlinger's layers were all CLIENT on card 23).
 
+### Phase 3c - NV12 to the display, the decoder's clocks (card 27)
+
+**Card 26:** cached buffers in place (`capture buffers cached (non-coherent)`),
+yet 60 fps streams played at 30 - 720p as much as 1080p, H.264 as much as VP9 - and
+1440p VP9 at about 9. The frames went out as YV12, and minigbm takes scanout off
+YV12 (`drv_resolve_format_and_use_flags_helper`), so the display controller could
+never show the video itself: the GPU composed every frame. And rkvdec's core and
+CABAC clocks were whatever the bootloader left - nothing in mainline assigns them.
+
+* **ffmpeg_codec2** (`patches/external/ffmpeg_codec2/0003`): hardware (NV12) frames
+  go out in a flexible YUV buffer - NV12 in minigbm, scanout allowed - copied plane
+  by plane (`av_image_copy_plane`; swscale's NV12-to-NV12 path drops the chroma of
+  a semi-planar destination). Software frames stay YV12; a pool that refuses NV12
+  gets YV12; `persist.vendor.edge1.hwdec_nv12=0` turns it off. Every two seconds a
+  `perf:` line: fps, and per frame decode / fetch / map / copy in ms.
+* **Kernel** (`kernel/patches/0007`): SCLK_VDU_CORE and SCLK_VDU_CA at 400 MHz
+  (Rockchip's kernel: 297, and 396 for heavy streams).
+* **Bootwatch:** `playing-N.txt` once a video plays - decoder interrupts per second,
+  clocks, threads, SurfaceFlinger's composition of the video layer.
+
 ### Phase 4 - zero copy
 
 Phase 3b still copies every frame into a YV12 gralloc buffer, which the GPU then
