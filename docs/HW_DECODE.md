@@ -188,6 +188,21 @@ single plane.
   HDMI and each plane's framebuffer format - NV12 on a plane is the video shown
   without the GPU.
 
+### Phase 3e - nothing but the video on the GPU's side (card 29)
+
+**Card 28:** 4K VP9 at a steady 30 fps (the clips' own rate), the NV12 buffer on
+the big VOP's plane 0, scaled there, the GPU idle at 200 MHz. Two things left:
+
+* Full screen, everything went back to the GPU whenever the performance overlay
+  was on: the window manager gives an untrusted overlay that lets touches through
+  alpha 0.8, the VOP's planes have no alpha property, and a layer no plane can
+  take fails drm_hwcomposer's whole plan. Edge1 Tools makes its overlay a trusted
+  one (it runs as the system uid), alpha 1.
+* The copy: 13-20 ms per 4K frame on one core - over the 16.7 ms of 4K60 by
+  itself. **ffmpeg_codec2 0005** copies frames above 1080p in 64-row bands that two
+  threads take in turn (`persist.vendor.edge1.hwdec_copy_threads`, 1-4;
+  `video_copy_threads` in edge1-options.txt).
+
 ### Phase 4 - zero copy
 
 Phase 3d still copies every frame, now plane by plane into an NV12 buffer the VOP

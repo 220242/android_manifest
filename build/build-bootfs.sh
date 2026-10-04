@@ -375,6 +375,12 @@ pd=12
 # 4K на треть быстрее. 1 - по одному, как раньше; 3-4 - ещё кадр в
 # очереди, скорость та же.
 #video_threads=1
+#
+# video_copy_threads - сколько ядер копируют кадр больше 1080p (1440p, 4K)
+# в буфер экрана. Стандартно 2 (с карты 29): для 4K60 одного ядра мало.
+# 1 - одно ядро, как на карте 28; 3-4 - ещё быстрее, если 4K60 не успевает,
+# но память у ядер общая, и выигрыш меньше.
+#video_copy_threads=1
 
 # === Тест питания =====================================================
 # A72 1416, A53 1416, GPU 600. Верхние ступени выключены - самые
@@ -472,7 +478,8 @@ video, games, quiet, minimal), and "logs": logs=0 stops every write to this card
 debugging. "pd" is the USB-C PD voltage the board asks its supply for (12V; pd=0
 for none) and "vop" the display controller on HDMI (big; lit is the old one),
 both applied by boot.scr; zram, sd_readahead_kb and sd_write_delay_s tune memory and
-the card's writes; video_hw, video_nv12 and video_threads set the video decoder. It says what each line does, in Russian. Edge1 Tools
+the card's writes; video_hw, video_nv12, video_threads and video_copy_threads set
+the video decoder. It says what each line does, in Russian. Edge1 Tools
 on the box changes the clock and logs lines.
 
 Do not edit the other files on a PC; rebuild the image instead.

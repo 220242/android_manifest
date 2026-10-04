@@ -1,8 +1,8 @@
 # Khadas Edge1 - vendor property types.
 
 # persist.vendor.edge1.hwdec: "0" makes the FFmpeg Codec2 service decode H.264, VP9,
-# MPEG-2 and VP8 in software instead of on rkvdec/hantro; hwdec_nv12 and
-# hwdec_threads choose its output format and frame threads. Set by the bootwatch
-# from edge1-options.txt (video_hw, video_nv12, video_threads) or a root shell;
-# read by mediacodec.
+# MPEG-2 and VP8 in software instead of on rkvdec/hantro; hwdec_nv12,
+# hwdec_threads and hwdec_copy_threads choose its output format, frame threads and
+# copying threads. Set by the bootwatch from edge1-options.txt (video_hw,
+# video_nv12, video_threads, video_copy_threads) or a root shell; read by mediacodec.
 vendor_internal_prop(vendor_edge1_hwdec_prop)

@@ -42,8 +42,9 @@ their TV box, what is done, and the order the rest goes in.
   through FFmpeg's V4L2 request hwaccels in a Codec2 service (docs/HW_DECODE.md);
   decoded frames cached for the CPU (card 25), the next frame decoded while the last
   is copied, and the video shown on a display plane in NV12 (card 28: HDMI on the
-  big VOP, minigbm NV12 scanout). `video_hw`, `video_nv12`, `video_threads` and
-  `vop` in edge1-options.txt switch each part back.
+  big VOP, minigbm NV12 scanout), copied by two cores above 1080p. `video_hw`,
+  `video_nv12`, `video_threads`, `video_copy_threads` and `vop` in
+  edge1-options.txt switch each part back.
 * **USB-C power delivery:** the board asks its supply for 12V (9V, 5V) over USB PD
   on either USB-C port, as Khadas' own firmware does; `pd=` in edge1-options.txt
   chooses 0 (none), 5, 9, 12, 15 or 20V.

@@ -130,6 +130,12 @@ public class HudService extends Service {
                         | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                 PixelFormat.TRANSLUCENT);
         lp.setTitle("Edge1 performance overlay");
+        // Trusted, so the window keeps alpha 1. An untrusted overlay that lets
+        // touches through gets 0.8 from the window manager (b/218777508), and the
+        // VOP's planes have no alpha property: drm_hwcomposer cannot put such a
+        // layer on a plane, and card 28 composed the whole screen on the GPU -
+        // full-screen video included - whenever this overlay was on.
+        lp.setTrustedOverlay();
         switch (Prefs.get(this).getInt(Prefs.HUD_POSITION, Prefs.POS_TOP_RIGHT)) {
             case Prefs.POS_TOP_LEFT: lp.gravity = Gravity.TOP | Gravity.START; break;
             case Prefs.POS_BOTTOM_LEFT: lp.gravity = Gravity.BOTTOM | Gravity.START; break;

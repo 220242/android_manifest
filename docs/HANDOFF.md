@@ -121,6 +121,7 @@ not reachable from it.
 | 25 | No Android: edge1-boot.log at `booti` with `edge1_pd=12V`, the ramoops region all 0xff (a power loss - a panic would have left the kernel log), no edge1-logs. The supply hears nothing from the board for ~10s (the eMMC's U-Boot does no PD), stops advertising, and tcpm - VBUS present, no caps - goes Soft_Reset, then Hard Reset, and a Hard Reset makes the source cut VBUS: a power cut on every boot (tcpm warns "might result in machine power-loss") | Kernel 0006: on a sink-only, bus-powered port that had VBUS at start, Hard Reset is withheld - one Get_Source_Cap, then SNK_READY at 5V without a contract. Owner asked to try pd=0 on card 25 to confirm |
 | 26 | **12V over USB PD** on the second port (fusb302 at i2c4): the supply offered 5/9/12/15/20V and PPS while the kernel started, tcpm asked for 12V 3A at 1.4s, no Hard Reset needed; 928s at the power-test clocks, no reset. Video on the hardware decoder with cached buffers (`capture buffers cached`), but 60 fps streams (VP9 and H.264, 720p and 1080p) played at 30 and 1440p VP9 at ~9. Every frame went out as YV12, which minigbm allocates without scanout, so the GPU composed every video frame (the display is 1080p60; composition of the UI was DEVICE); rkvdec's core and CABAC clocks are set by nothing | ffmpeg_codec2 0003: NV12 output for hardware frames (flexible YUV = NV12 with scanout in minigbm; plane copies, not swscale) and a per-frame `perf:` log line; kernel 0007: rkvdec core/CABAC at 400 MHz; bootwatch `playing-N.txt` while a video plays; full speed is the default mode again |
 | 27 | 708s at **full speed** (A72 1800, GPU 800) on 12V PD, no reset. Video: 1080p60 at 60 fps, 1440p60 at 41-50, 4K60 at ~26 (`perf:` decode 17-24 + copy 14-17 ms per 4K frame, serial). NV12 never reached the screen: minigbm refused it (`Unsupported combination ... DRM_FOURCC_9999 ... HW_COMPOSER`; AOSP's generic gralloc has no DRV_ROCKCHIP, so rockchip-drm gets the dumb driver, NV12 without scanout) and the component fell back to YV12. And SurfaceFlinger had every layer CLIENT (composition efficiency 0.07): HDMI ran from the little VOP (CRTC 0, `ports = <&vopl_out>, <&vopb_out>`), one plane besides the cursor | Kernel 0008: little VOP off, HDMI on the big one (3 planes, NV12 + scaling on two); `vop=lit` undoes it in boot.scr. minigbm 0001: NV12 + SCANOUT for "rockchip" in the dumb driver (host-tested). ffmpeg_codec2 0004: 2 frame threads for the hwaccel - decode overlaps the copy. edge1-options: `vop`, `video_hw`, `video_nv12`, `video_threads`; `playing-N.txt` adds the DRM state |
+| 28 | Owner: "4K plays fine at 30 fps". `edge1_vop=big`; 516s, no reset. 4K VP9 at a steady 30 (the clips' rate: `fetch` 10-13 ms is the player pacing), decode 4-5 ms (waiting on the worker, `2 frame thread(s)`), copy 13-20 ms; 1440p at 30, bursting to 54. The DRM state shows the 4K NV12 buffer on plane 0, scaled by the VOP to 1209x680, the GPU at 200 MHz. But with the video full screen everything went back to CLIENT (`Failed to test commit` 60% of frames, GPU at 800 MHz): the performance overlay has alpha 0.8 - the window manager's cap for an untrusted overlay that lets touches through - and the VOP's planes have no alpha property, so drm_hwcomposer had no plane for it and no plan at all | Edge1 Tools: the overlay is a trusted one (`setTrustedOverlay`, INTERNAL_SYSTEM_WINDOW; system uid, platform-signed), alpha 1. ffmpeg_codec2 0005: frames above 1080p copied in 64-row bands by 2 threads (`video_copy_threads`) - one core is over budget for 4K60 |
 
 ## Lessons that cost a card each (check these first next time)
 
@@ -229,6 +230,12 @@ not reachable from it.
   BO_USE_SCANOUT off YVU420_ANDROID, so a YV12 video layer is always composed by the
   GPU; a flexible YUV buffer is NV12 with scanout. And swscale's NV12-to-NV12 copy
   drops the chroma of a semi-planar destination - copy planes by hand.
+* **One layer drm_hwcomposer cannot place costs every plane.** No layer is
+  rejected alone: a layer no plane is valid for (plane alpha without an "alpha"
+  property, a coverage blend, a transform) makes the whole plan fail, and the frame
+  goes to the GPU - counted as "Failed to test commit frames". The window
+  manager sets alpha 0.8 on any untrusted overlay with FLAG_NOT_TOUCHABLE; the
+  layer list's `color{< 0, 0, 0, 0.799805 >}` shows it.
 * **Count the planes before blaming the GPU.** A dump with every layer CLIENT means
   the composer had nowhere to put them. Mainline's rk3399 display-subsystem lists
   the little VOP first, so it is CRTC 0 and takes HDMI - one plane. drm_hwcomposer
@@ -260,15 +267,12 @@ not reachable from it.
 
 ## Open, in rough order
 
-* Card 28, video: `playing-N.txt`'s DRM state should show crtc on the big VOP
-  (vop@ff900000) and, while a video plays, a plane with an NV12 framebuffer;
-  SurfaceFlinger's dump the video layer DEVICE. logcat: `ffmpeg_hwaccel_init: ...
-  2 frame thread(s)`, no "no NV12 (flexible YUV) output buffer" warning, and `perf:`
-  lines for 4K with decode near the copy rather than their sum (expect 40-55 fps).
-  If the screen is black or wrong after the switch to the big VOP: `vop=lit`. If
-  video stalls or stutters with threads: `video_threads=1`. If NV12 frames look
-  wrong: `video_nv12=0`. Each line in edge1-options.txt, one at a time.
-* Card 28: on a 4K TV the big VOP offers 3840x2160 modes, and Android picks the
+* Card 29, video: with the overlay on and a video full screen, SurfaceFlinger's
+  dump should have every layer DEVICE and the drm_hwcomposer statistics no new
+  "Failed to test commit frames"; the overlay's layer `color{... 1 >}`. A 4K60
+  clip (YouTube: "2160p60") for the copy threads: `perf:` copy near half of
+  card 28's 13-20 ms, fps near 60. `video_copy_threads=1` is card 28's copy.
+* On a 4K TV the big VOP offers 3840x2160 modes, and Android picks the
   TV's preferred mode - the UI rendered at 4K by a Mali T860. The owner's Samsung is
   1080p, so not seen yet; ro.surface_flinger.max_graphics_* or a mode filter if so.
 * PD stays to be watched (power.txt); full speed is the default mode now.
