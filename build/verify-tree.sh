@@ -653,7 +653,8 @@ for hal in ET.parse(sys.argv[1]).getroot().findall("hal"):
 PYX
 )
 done < <(find "$DEV" -name '*.xml' -path '*vintf*' ! -name 'manifest.xml' \
-              ! -name 'compatibility_matrix.xml' 2>/dev/null | sort)
+              ! -name 'compatibility_matrix.xml' ! -name 'framework_compatibility_matrix.xml' \
+              2>/dev/null | sort)
 (( frag_total == 0 )) && ok "no device-side VINTF fragments (every HAL service is AOSP's)"
 echo "  device manifest declares $(grep -c '<hal ' "$DEV/vintf/manifest.xml") HAL(s) directly"
 echo
@@ -703,6 +704,54 @@ for hal in ET.parse(sys.argv[1]).getroot().findall("hal"):
 PYX
 )
 (( unbacked )) || ok "every manifest entry has a package behind it"
+echo
+
+# --- 4c. VINTF: instance names AOSP's framework matrices do not allow --------
+#
+# check_vintf rejects a device manifest entry whose instance no framework matrix
+# names. AOSP 14's (levels 7 and 8) allow the Codec2 store only as "software",
+# "default[0-9]*" or "vendor[0-9]*_software"; external/ffmpeg_codec2's fragment
+# declares "ffmpeg", which stopped a build at 94%. Such a fragment lives in the
+# other project, not here, so its instance is recorded below; the device's
+# framework matrix (DEVICE_FRAMEWORK_COMPATIBILITY_MATRIX_FILE) has to name it
+# whenever device.mk installs the service.
+echo "[4c] VINTF: instances outside AOSP's framework matrices"
+# package|hal|interface|instance its fragment declares
+foreign_instances=(
+    "android.hardware.media.c2@1.2-service-ffmpeg|android.hardware.media.c2|IComponentStore|ffmpeg"
+)
+fcm_var=$(sed 's/#.*//' "$DEV/BoardConfig.mk" \
+          | sed -nE 's/^[[:space:]]*DEVICE_FRAMEWORK_COMPATIBILITY_MATRIX_FILE[[:space:]]*:?=[[:space:]]*([^[:space:]]+).*/\1/p' | tail -n1)
+fcm_file="${fcm_var:+$ROOT/$fcm_var}"
+for row in "${foreign_instances[@]}"; do
+    IFS='|' read -r pkg hal iface inst <<< "$row"
+    if ! sed 's/#.*//' "$DEV/device.mk" | grep -E "(^|[[:space:]])${pkg//./\\.}([[:space:]]|\\\\|$)" > /dev/null; then
+        ok "$pkg is not installed; nothing to declare"
+        continue
+    fi
+    if [[ -z "$fcm_var" || ! -f "$fcm_file" ]]; then
+        err "device.mk installs $pkg ($hal $iface/$inst), but BoardConfig.mk names no"
+        err "  DEVICE_FRAMEWORK_COMPATIBILITY_MATRIX_FILE that exists; check_vintf will refuse it"
+        continue
+    fi
+    if python3 - "$fcm_file" "$hal" "$iface" "$inst" <<'PYX'
+import sys, xml.etree.ElementTree as ET
+f, hal, iface, inst = sys.argv[1:]
+for h in ET.parse(f).getroot().findall("hal"):
+    if h.findtext("name") != hal:
+        continue
+    for i in h.findall("interface"):
+        if i.findtext("name") == iface and inst in [x.text for x in i.findall("instance")]:
+            sys.exit(0)
+sys.exit(1)
+PYX
+    then
+        ok "$hal $iface/$inst ($pkg) is in ${fcm_var#device/khadas/edge/}"
+    else
+        err "device.mk installs $pkg, whose fragment declares $hal $iface/$inst,"
+        err "  and ${fcm_var} does not name it; check_vintf will refuse the manifest"
+    fi
+done
 echo
 
 # --- 5. Android 10 constructs Android 14 removed ------------------------------

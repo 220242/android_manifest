@@ -208,6 +208,11 @@ not reachable from it.
 * **A seccomp policy is part of a codec's ABI.** Code new to a media service (here
   FFmpeg's request hwaccels: select() is pselect6) needs its syscalls in the
   service's policy, or the first use kills the process with SIGSYS.
+* **A HAL from outside AOSP needs its instance name in a framework matrix.**
+  check_vintf refuses a manifest entry no framework matrix names; AOSP's allow the
+  Codec2 store only as default/software, and ffmpeg_codec2 registers "ffmpeg".
+  `vintf/framework_compatibility_matrix.xml` names it; verify-tree [4c] keeps the
+  list of such services. The build only finds out at 94%, while packaging.
 * **aapt2: a dotted style name is a child.** `<style name="Text.Body">` without
   `parent=` inherits `Text`, and a missing `Text` stops the link (the first build
   of the Material 3 screens, at 11%). A regex check of `@style/` references does

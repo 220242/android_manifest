@@ -516,6 +516,9 @@ BOARD_VENDOR_SEPOLICY_DIRS += device/khadas/edge/sepolicy/vendor
 # ---------------------------------------------------------------------------
 DEVICE_MANIFEST_FILE := device/khadas/edge/vintf/manifest.xml
 DEVICE_MATRIX_FILE := device/khadas/edge/vintf/compatibility_matrix.xml
+# HAL instances the framework may use beyond AOSP's matrices: the FFmpeg Codec2
+# store, "ffmpeg" (see the file).
+DEVICE_FRAMEWORK_COMPATIBILITY_MATRIX_FILE := device/khadas/edge/vintf/framework_compatibility_matrix.xml
 
 # No BOARD_VNDK_VERSION. It was "current" here and the build threw it away:
 # core/config.mk:1266-1273 clears both BOARD_VNDK_VERSION and PLATFORM_VNDK_VERSION

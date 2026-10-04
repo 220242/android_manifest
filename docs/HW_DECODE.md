@@ -98,6 +98,10 @@ Built, not yet run on the board.
   and which would kill it on the first hardware frame; SELinux: the service is
   `mediacodec` (AOSP already gives it `video_device`), plus sysfs reads for
   libudev-zero's device scan.
+  VINTF: the store registers as `IComponentStore/ffmpeg`, a name AOSP's framework
+  matrices do not allow (`software`, `default[0-9]*`, `vendor[0-9]*_software`), so
+  `vintf/framework_compatibility_matrix.xml` adds it - check_vintf stopped the
+  first build at 94% without it.
 
 Known limit until phase 4: each frame is copied out of the decoder's buffer
 (`av_hwframe_transfer_data`) and converted to I420 by the component. The V4L2

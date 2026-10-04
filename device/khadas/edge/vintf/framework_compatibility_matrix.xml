@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Khadas Edge1 - the device's addition to the framework compatibility matrix
+  (BoardConfig.mk: DEVICE_FRAMEWORK_COMPATIBILITY_MATRIX_FILE; installed as
+  /system/etc/vintf/compatibility_matrix.device.xml).
+
+  The framework matrices say which HAL instances the framework may talk to, and
+  check_vintf rejects a device manifest that declares one outside them. For the
+  Codec2 store, AOSP 14's matrices (hardware/interfaces/compatibility_matrices,
+  levels 7 and 8) allow only "software", "default[0-9]*" and
+  "vendor[0-9]*_software". The FFmpeg Codec2 service (external/ffmpeg_codec2)
+  registers as "ffmpeg", which stopped the first build with it at 94%:
+
+    The following HALs in device manifest are not declared in FCM <= level 7:
+      android.hardware.media.c2@1.2::IComponentStore/ffmpeg
+
+  Declared here, as raspberry-vanilla's rpi4 tree (android-14.0) does for the same
+  service. The framework lists every IComponentStore the device declares, whatever
+  its name. Optional, so the image stays valid on a tree without ffmpeg_codec2
+  (device.mk only installs the service when it is synced).
+-->
+<compatibility-matrix version="1.0" type="framework">
+    <hal format="hidl" optional="true">
+        <name>android.hardware.media.c2</name>
+        <transport>hwbinder</transport>
+        <version>1.2</version>
+        <interface>
+            <name>IComponentStore</name>
+            <instance>ffmpeg</instance>
+        </interface>
+    </hal>
+</compatibility-matrix>
