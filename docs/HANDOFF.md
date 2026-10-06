@@ -273,8 +273,15 @@ not reachable from it.
   clip (YouTube: "2160p60") for the copy threads: `perf:` copy near half of
   card 28's 13-20 ms, fps near 60. `video_copy_threads=1` is card 28's copy.
 * On a 4K TV the big VOP offers 3840x2160 modes, and Android picks the
-  TV's preferred mode - the UI rendered at 4K by a Mali T860. The owner's Samsung is
-  1080p, so not seen yet; ro.surface_flinger.max_graphics_* or a mode filter if so.
+  TV's preferred mode - the UI rendered at 4K by a Mali T860. Now capped: `ui=` in
+  edge1-options.txt (default 1080) goes through boot.scr as androidboot.edge1.ui, and
+  init.edge1.rc sets ro.surface_flinger.max_graphics_* to 1920x1080; `ui=native` drops
+  the cap. **Built, not yet run on a board.** On a 1080p TV (the owner's Samsung) it
+  must change nothing: boots.txt's `ui:` line shows 1920x1080, the DRM state the
+  same 1920x1080 mode as card 28. On a 4K TV the client target is 1080p and the VOP
+  scales it (the `plane` in the DRM state has src 1920x1080, crtc 3840x2160); if
+  drm_hwcomposer cannot find a scaling plane for it, the screen stays black and
+  `ui=native` is the way back.
 * PD stays to be watched (power.txt); full speed is the default mode now.
   Edge1 Tools' Power card and the logs switch, still untried.
 * Bluetooth signing (task left from card 22): packages.txt on card 23 shows

@@ -417,6 +417,17 @@ if [[ -f "$bootcmd_tpl" && -f "$bootfs_sh" ]]; then
         while IFS= read -r l; do err "$l"; done <<< "$chk_out"
         bootfs_bad=$((bootfs_bad+1))
     fi
+    # "ui=" in edge1-options.txt: boot.scr passes androidboot.edge1.ui, and only
+    # init.edge1.rc turns it into SurfaceFlinger's cap. Rename one side alone and
+    # the menus are drawn at 4K again on a 4K TV, with nothing failing.
+    if grep -qF 'androidboot.edge1.ui=${edge1_ui}' "$bootcmd_tpl" \
+        && grep -qx 'setenv edge1_ui 1080' <(sed 's/^[[:space:]]*//' "$bootcmd_tpl") \
+        && grep -qx 'on property:ro.boot.edge1.ui=1080' "$DEV/init/init.edge1.rc"; then
+        ok "boot.cmd's androidboot.edge1.ui=1080 has init.edge1.rc's trigger"
+    else
+        err "boot.cmd's androidboot.edge1.ui and init.edge1.rc's ro.boot.edge1.ui=1080 trigger disagree"
+        bootfs_bad=$((bootfs_bad+1))
+    fi
 else
     err "missing $bootcmd_tpl or $bootfs_sh"
     bootfs_bad=$((bootfs_bad+1))
