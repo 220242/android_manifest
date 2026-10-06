@@ -276,7 +276,8 @@ alive() {
 #                      decoder's properties
 #   hdmi_audio         0: sound stays on the audio HAL's "Speaker" (Edge1 Tools
 #                      does not connect "HDMI Out"; audio_policy_configuration.xml)
-#   pd, vop            boot.scr's (USB PD, the VOP on HDMI): recorded here only
+#   pd, vop, ui        boot.scr's (USB PD, the VOP on HDMI, the menus' size):
+#                      recorded here only
 # The image ships one with ready-made modes, commented in Russian, full speed
 # switched on (build/build-bootfs.sh has the file and the reasons).
 apply_options() {
@@ -289,8 +290,9 @@ apply_options() {
     while IFS='=' read -r key val; do
         key=$(echo "${key#"$bom"}" | tr -d ' \t\r'); val=$(echo "${val%%#*}" | tr -d ' \t\r')
         case "$key" in ''|\#*) continue ;; esac
-        # boot.scr's: which display controller drives HDMI (big or lit).
-        case "$key" in vop) applied="$applied vop=$val"; continue ;; esac
+        # boot.scr's: which display controller drives HDMI (big or lit), and the
+        # size the menus are drawn at (1080 or native).
+        case "$key" in vop|ui) applied="$applied $key=$val"; continue ;; esac
         case "$val" in ''|*[!0-9]*) log "options: $key: not a number"; continue ;; esac
         case "$key" in
             cpu_big_max_mhz) big=$val ;;
@@ -363,6 +365,8 @@ apply_options() {
         ZRAM_PCT=
     fi
     [ -n "$applied" ] && log "options applied:$applied"
+    # What boot.scr's "ui" became: the cap SurfaceFlinger draws the menus within.
+    log "ui: androidboot.edge1.ui=$(getprop ro.boot.edge1.ui), menus drawn within $(getprop ro.surface_flinger.max_graphics_width)x$(getprop ro.surface_flinger.max_graphics_height) (empty: the TV's mode)"
     OPTIONS="$applied"
 }
 OPTIONS=
