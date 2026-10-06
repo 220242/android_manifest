@@ -1,0 +1,14 @@
+# The HDMI-CEC and HDMI connection HALs in one process (hdmi/service.cpp):
+# server of both, over the CEC adapter. AOSP gives each of its mock services a
+# domain of its own (hal_tv_hdmi_cec_default, hal_tv_hdmi_connection_default);
+# one process serving both needs one domain that is both.
+type hal_tv_hdmi_edge1, domain;
+type hal_tv_hdmi_edge1_exec, exec_type, vendor_file_type, file_type;
+
+init_daemon_domain(hal_tv_hdmi_edge1)
+hal_server_domain(hal_tv_hdmi_edge1, hal_tv_hdmi_cec)
+hal_server_domain(hal_tv_hdmi_edge1, hal_tv_hdmi_connection)
+
+# /dev/cec0 (file_contexts, ueventd.edge1.rc): CEC_TRANSMIT, CEC_RECEIVE,
+# CEC_DQEVENT and the address ioctls, polled for messages and events.
+allow hal_tv_hdmi_edge1 hdmi_cec_device:chr_file rw_file_perms;

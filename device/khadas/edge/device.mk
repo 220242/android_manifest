@@ -376,14 +376,15 @@ PRODUCT_PROPERTY_OVERRIDES += \
 #      that declares android.hardware.hdmi.cec; earc is not (no eARC on the
 #      RK3399 HDMI 2.0 TX).
 # ---------------------------------------------------------------------------
-# AOSP's examples are functional stand-ins: tv.input publishes no streams (which
-# is correct for the Edge1 - it has no tuner or HDMI-in), and the CEC example
-# drives the standard Linux /dev/cec0 adapter, which is what the RK3399's
-# dw-hdmi-cec exposes. HDMI-CEC may well work with these unchanged.
+# tv.input: AOSP's example publishes no streams, which is correct for the Edge1 -
+# it has no tuner or HDMI-in.
+# tv.hdmi.cec and tv.hdmi.connection: AOSP 14's services for them are mocks that
+# read FIFOs (hardware/interfaces/tv/hdmi/*/aidl/default), so they were swapped
+# for hdmi/, one service implementing both over /dev/cec0 (dw-hdmi-cec, built into
+# the kernel from card 30 on). cec=0 in edge1-options.txt turns it off.
 PRODUCT_PACKAGES += \
     android.hardware.tv.input-service.example \
-    android.hardware.tv.hdmi.cec-service \
-    android.hardware.tv.hdmi.connection-service
+    android.hardware.tv.hdmi-service.edge1
 
 PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/tv_input.xml:$(TARGET_COPY_OUT_VENDOR)/etc/tv_input.xml

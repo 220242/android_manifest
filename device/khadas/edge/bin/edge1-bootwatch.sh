@@ -94,7 +94,12 @@ snapshot() {
     { cat /proc/uptime; echo; cat /proc/mounts; echo; ls -l /dev/block/by-name; echo
       ls -lZ /dev/dri /dev/snd /dev/cec* /dev/video* /dev/media* /dev/rfkill; echo
       getenforce; cat /proc/swaps; echo
-      ls -l /sys/class/wakeup /sys/class/extcon; } > "$s/misc.txt" 2>&1
+      ls -l /sys/class/wakeup /sys/class/extcon; echo
+      # The hardware RNG (kernel 0009/0010): which driver /dev/hw_random is, and 64
+      # bytes of it - all zeros or one repeated word is a TRNG that never ran, and
+      # a read that times out one that never finished. build/edge1-logcheck.py.
+      echo "rng_current: $(cat /sys/class/misc/hw_random/rng_current 2>&1)"
+      echo "hw_random bytes:"; timeout 5 head -c 64 /dev/hw_random | od -x; } > "$s/misc.txt" 2>&1
     timeout 20 dumpsys -l > "$s/services.txt" 2>&1
     timeout 20 dumpsys SurfaceFlinger > "$s/surfaceflinger.txt" 2>&1
     # Wi-Fi and Bluetooth: interfaces, rfkill switches, and what the framework
@@ -276,8 +281,8 @@ alive() {
 #                      decoder's properties
 #   hdmi_audio         0: sound stays on the audio HAL's "Speaker" (Edge1 Tools
 #                      does not connect "HDMI Out"; audio_policy_configuration.xml)
-#   pd, vop, ui        boot.scr's (USB PD, the VOP on HDMI, the menus' size):
-#                      recorded here only
+#   pd, vop, ui, cec   boot.scr's (USB PD, the VOP on HDMI, the menus' size,
+#                      HDMI-CEC): recorded here only
 #   pcie, system, install   boot.scr's too: the M.2 slot, Android on the NVMe,
 #                      the installer card
 # The image ships one with ready-made modes, commented in Russian, full speed
@@ -296,7 +301,7 @@ apply_options() {
         # size the menus are drawn at (1080 or native).
         # And the disks: the M.2 slot (pcie), where Android lives (system=nvme) and
         # the installer card's target (install, bin/edge1-install-boot.sh).
-        case "$key" in vop|ui|pcie|system|install) applied="$applied $key=$val"; continue ;; esac
+        case "$key" in vop|ui|cec|pcie|system|install) applied="$applied $key=$val"; continue ;; esac
         case "$val" in ''|*[!0-9]*) log "options: $key: not a number"; continue ;; esac
         case "$key" in
             cpu_big_max_mhz) big=$val ;;

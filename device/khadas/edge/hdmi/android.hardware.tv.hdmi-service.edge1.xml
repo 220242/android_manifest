@@ -1,0 +1,20 @@
+<!-- The same two instances AOSP's mock services declare; the framework matrix
+     lists both at level 8 (hardware/interfaces/compatibility_matrices). -->
+<manifest version="1.0" type="device">
+    <hal format="aidl">
+        <name>android.hardware.tv.hdmi.cec</name>
+        <version>1</version>
+        <interface>
+            <name>IHdmiCec</name>
+            <instance>default</instance>
+        </interface>
+    </hal>
+    <hal format="aidl">
+        <name>android.hardware.tv.hdmi.connection</name>
+        <version>1</version>
+        <interface>
+            <name>IHdmiConnection</name>
+            <instance>default</instance>
+        </interface>
+    </hal>
+</manifest>

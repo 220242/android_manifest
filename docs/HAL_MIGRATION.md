@@ -29,7 +29,7 @@ the userspace that spoke to them.
 | `audio@5.0` | `audio.core-V2` (AIDL) | AOSP AIDL audio HAL, ALSA backend | AOSP, needs config |
 | `audio.effect@5.0` | `audio.effect-V2` (AIDL) | `audio.effect.service-aidl.example` | AOSP |
 | `tv.input@1.0` | `tv.input-V1` (AIDL) | AOSP example — no tuner inputs on this board | AOSP |
-| `tv.cec@1.0` | `tv.hdmi.cec-V1` + `tv.hdmi.connection-V1` | AOSP service over `/dev/cec0` | AOSP |
+| `tv.cec@1.0` | `tv.hdmi.cec-V1` + `tv.hdmi.connection-V1` | `hdmi/`: one service for both over `/dev/cec0` (AOSP 14's are FIFO mocks) | this tree |
 | `wifi@1.3` | none | the framework runs HAL-less over brcmfmac | see below |
 | `wifi.supplicant@1.2` | `wifi.supplicant-V3` (AIDL) | AOSP `wpa_supplicant` | AOSP |
 | `wifi.hostapd@1.1` | `wifi.hostapd-V2` (AIDL) | AOSP `hostapd` | AOSP |
