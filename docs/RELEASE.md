@@ -45,6 +45,10 @@ their TV box, what is done, and the order the rest goes in.
   big VOP, minigbm NV12 scanout), copied by two cores above 1080p. `video_hw`,
   `video_nv12`, `video_threads`, `video_copy_threads` and `vop` in
   edge1-options.txt switch each part back.
+* **Menus at 1080p on a 4K TV:** SurfaceFlinger draws the interface within
+  1920x1080 and the VOP scales it to the TV's mode, video keeping its own plane at
+  full size; `ui=native` in edge1-options.txt draws at the TV's mode. Not yet run
+  on a 4K TV.
 * **USB-C power delivery:** the board asks its supply for 12V (9V, 5V) over USB PD
   on either USB-C port, as Khadas' own firmware does; `pd=` in edge1-options.txt
   chooses 0 (none), 5, 9, 12, 15 or 20V.

@@ -33,6 +33,16 @@ on late-fs
     # minigbm's later opens need no master (dumb buffers and PRIME are not DRM_AUTH).
     start vendor.hwcomposer-2-4
 
+# The menus at 1080p on a 4K TV: "ui=" in edge1-options.txt, which boot.scr passes as
+# androidboot.edge1.ui (flash/boot.cmd has the why). SurfaceFlinger reads these two
+# once, when it starts at "boot"; property triggers on ro.boot.* run right after
+# late-init, well before that. Smaller TVs are untouched: the cap only shrinks a
+# mode larger than itself, keeping its aspect ratio. Not set in a build.prop, where
+# ui=native could not take it back.
+on property:ro.boot.edge1.ui=1080
+    setprop ro.surface_flinger.max_graphics_width 1920
+    setprop ro.surface_flinger.max_graphics_height 1080
+
 # Bring-up only: write logcat/dmesg snapshots to the card's EDGE1BOOT partition, and
 # reboot warm if boot never completes, so the ramoops log survives for the card's
 # boot script to save. bin/edge1-bootwatch.sh has the why.

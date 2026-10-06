@@ -362,6 +362,16 @@ pd=12
 #            изображения или оно искажено.
 #vop=lit
 #
+# ui - в каком размере Android рисует меню. На 4K-телевизоре видеовыход
+# включает 3840x2160, и меню 4K вчетверо тяжелее для графического процессора,
+# чем 1080p. Стандартно (строки нет или ui=1080) меню рисуется в 1920x1080,
+# а видеовыход растягивает его на весь экран; видео идёт своим слоем в
+# полном размере - 4K остаётся 4K. На 1080p-телевизоре разницы нет.
+#   ui=native  меню в размере режима телевизора (на 4K - в 4K). Если с 1080
+#              на 4K-телевизоре нет изображения или оно искажено.
+# Применяется при загрузке, Edge1 Tools не меняет.
+#ui=native
+#
 # video_hw=0 - всё видео декодирует процессор (медленно; для сравнения).
 #video_hw=0
 #
@@ -476,8 +486,9 @@ every boot - CPU and GPU clock limits, with ready-made modes (power test, full s
 video, games, quiet, minimal), and "logs": logs=0 stops every write to this card
 (no edge1-logs, edge1-boot.log or edge1-pstore.bin) once the build needs no more
 debugging. "pd" is the USB-C PD voltage the board asks its supply for (12V; pd=0
-for none) and "vop" the display controller on HDMI (big; lit is the old one),
-both applied by boot.scr; zram, sd_readahead_kb and sd_write_delay_s tune memory and
+for none), "vop" the display controller on HDMI (big; lit is the old one) and
+"ui" the size the menus are drawn at (1080, scaled up on a 4K TV; native for the
+TV's own mode), all applied by boot.scr; zram, sd_readahead_kb and sd_write_delay_s tune memory and
 the card's writes; video_hw, video_nv12, video_threads and video_copy_threads set
 the video decoder. It says what each line does, in Russian. Edge1 Tools
 on the box changes the clock and logs lines.

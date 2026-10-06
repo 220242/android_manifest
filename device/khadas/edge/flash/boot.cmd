@@ -72,14 +72,16 @@ setenv edge1_laddr 0x09f00000
 # "logs" imports that one variable and nothing else. The file goes to the log
 # buffer's address, nowhere near the ramoops region saved next.
 #
-# "pd" and "vop" the same way: the USB PD voltage the board asks its supply for,
-# and which display controller drives HDMI (both below).
+# "pd", "vop" and "ui" the same way: the USB PD voltage the board asks its supply
+# for, which display controller drives HDMI, and the size Android draws its menus
+# at (all below).
 setenv logs
 setenv pd
 setenv vop
+setenv ui
 setenv edge1_nolog
 if load ${devtype} ${devnum}:${distro_bootpart} ${edge1_laddr} edge1-options.txt; then
-	env import -t -r ${edge1_laddr} ${filesize} logs pd vop
+	env import -t -r ${edge1_laddr} ${filesize} logs pd vop ui
 fi
 if test "${logs}" = "0"; then setenv edge1_nolog 1; fi
 
@@ -114,7 +116,7 @@ fi
 # CONFIG_VERSION_VARIABLE, which that config does not have.) Sizes are hex, as
 # "load" leaves them in filesize.
 setenv edge1_stage started
-setenv edge1_log 'if test -z "${edge1_nolog}"; then env export -t ${edge1_laddr} edge1_where edge1_dev edge1_prev edge1_stage edge1_ksize edge1_rsize edge1_dsize edge1_pd edge1_vop bootargs boot_targets fdtfile; fatwrite ${devtype} ${devnum}:${distro_bootpart} ${edge1_laddr} edge1-boot.log ${filesize}; fi'
+setenv edge1_log 'if test -z "${edge1_nolog}"; then env export -t ${edge1_laddr} edge1_where edge1_dev edge1_prev edge1_stage edge1_ksize edge1_rsize edge1_dsize edge1_pd edge1_vop edge1_ui bootargs boot_targets fdtfile; fatwrite ${devtype} ${devnum}:${distro_bootpart} ${edge1_laddr} edge1-boot.log ${filesize}; fi'
 
 if load ${devtype} ${devnum}:${distro_bootpart} ${edge1_kaddr} Image; then
 	setenv edge1_ksize ${filesize}
@@ -165,9 +167,18 @@ if load ${devtype} ${devnum}:${distro_bootpart} ${edge1_kaddr} Image; then
 			fdt set /iommu@ff8f3f00 status okay
 			setenv edge1_vop lit
 		fi
+		# The size SurfaceFlinger draws the menus at. On a 4K TV the big VOP offers
+		# 3840x2160 and Android takes the TV's preferred mode; drawn at that size
+		# every frame of the interface is four times a 1080p one for the Mali T860.
+		# androidboot.edge1.ui=1080 (the default) makes init.edge1.rc cap the
+		# framebuffer at 1920x1080 and the VOP scales it up; video keeps its own
+		# plane at the stream's size. ui=native draws at the TV's mode. A 1080p
+		# TV looks the same either way.
+		setenv edge1_ui 1080
+		if test "${ui}" = "native"; then setenv edge1_ui native; fi
 		if load ${devtype} ${devnum}:${distro_bootpart} ${edge1_raddr} ramdisk.img; then
 			setenv edge1_rsize ${filesize}
-			setenv bootargs "androidboot.boot_devices=${edge1_dev} @CMDLINE@"
+			setenv bootargs "androidboot.boot_devices=${edge1_dev} androidboot.edge1.ui=${edge1_ui} @CMDLINE@"
 			setenv edge1_stage booti
 			run edge1_log
 			echo "Edge1: booting Android from ${edge1_dev}"
