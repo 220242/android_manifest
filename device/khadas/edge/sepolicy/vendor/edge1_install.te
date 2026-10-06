@@ -1,0 +1,22 @@
+# edge1-install-boot (bin/edge1-install-boot.sh): the installer card. Started by
+# init after the boot when the card's edge1-options.txt says install=emmc or
+# install=nvme; it runs edge1-install-internal.sh, which partitions the eMMC or the
+# SSD with sgdisk and dd's the card's partitions onto it, edits the card's FAT and
+# posts a notification. Raw block devices, a vfat mount, the shell's tools and the
+# notification service: like the bootwatch, permissive and unaudited on userdebug,
+# where the installer card is built. A user build has no such domain to run in.
+type edge1_install, domain;
+type edge1_install_exec, exec_type, vendor_file_type, file_type;
+
+init_daemon_domain(edge1_install)
+
+userdebug_or_eng(`
+  permissive edge1_install;
+  dontaudit edge1_install { file_type fs_type dev_type }:{ dir file lnk_file chr_file blk_file sock_file fifo_file } *;
+  dontaudit edge1_install property_type:file *;
+  dontaudit edge1_install domain:{ dir file lnk_file process } *;
+  dontaudit edge1_install self:{ capability capability2 } *;
+  dontaudit edge1_install { service_manager_type }:service_manager *;
+  dontaudit edge1_install domain:binder *;
+  dontaudit domain edge1_install:{ fd fifo_file } *;
+')

@@ -171,8 +171,10 @@ stage_images() {
     place_device
     # SD card only while the port is brought up from the card: the eMMC and NVMe
     # images cost minutes and ~15GiB each, and nothing installs them yet. To build
-    # them again, put them back in this list:
-    local targets=(sdcard)   # emmc nvme
+    # them again, put them back in this list. install-emmc and install-nvme are the
+    # installer cards: the SD card with install= set in edge1-options.txt, which copy
+    # the system onto the eMMC or the SSD once booted (bin/edge1-install-boot.sh).
+    local targets=(sdcard install-emmc install-nvme)   # emmc nvme
     log "assembling the whole-disk images (${targets[*]})"
     "$MANIFEST/build/build-images.sh" "$TREE" "${targets[@]}" 2>&1 | tee "$LOGS/images.log"
     # Copied out to $WORK so they are reachable from Explorer without going through
@@ -184,7 +186,7 @@ stage_images() {
     local img t
     # Only the images this run built: an eMMC or NVMe image left from an earlier run
     # would otherwise be copied out again as if it were current.
-    for t in emmc nvme; do
+    for t in emmc nvme install-emmc install-nvme; do
         [[ " ${targets[*]} " == *" $t "* ]] || rm -f "$WORK/output/edge1-$t.img" "$WORK/output/edge1-$t.img.gz"
     done
     for img in "${targets[@]/#/edge1-}"; do
@@ -216,8 +218,10 @@ stage_images() {
     fi
     log "$moved image(s) in $WORK/output"
     echo
-    echo "edge1-sdcard.img.gz is the one to write with Etcher. (The eMMC and NVMe images"
-    echo "are off during bring-up - see stage_images in provision-wsl.sh.)"
+    echo "edge1-sdcard.img.gz is the one to write with Etcher. edge1-install-emmc.img.gz and"
+    echo "edge1-install-nvme.img.gz are the same card, set to copy itself onto the eMMC or"
+    echo "the NVMe SSD once booted. (The eMMC and NVMe images are off during bring-up -"
+    echo "see stage_images in provision-wsl.sh.)"
 }
 
 stage_build() {

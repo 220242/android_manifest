@@ -79,11 +79,39 @@ setenv logs
 setenv pd
 setenv vop
 setenv ui
+setenv pcie
+setenv system
+setenv install
 setenv edge1_nolog
 if load ${devtype} ${devnum}:${distro_bootpart} ${edge1_laddr} edge1-options.txt; then
-	env import -t -r ${edge1_laddr} ${filesize} logs pd vop ui
+	env import -t -r ${edge1_laddr} ${filesize} logs pd vop ui pcie system install
 fi
 if test "${logs}" = "0"; then setenv edge1_nolog 1; fi
+
+# Where Android lives, if not beside this script, and whether to install it.
+#
+# system=nvme: the kernel comes from here (no U-Boot this board runs can read an
+# NVMe: Armbian's 2022.07 has no nvme command, and the BootROM cannot boot PCIe),
+# Android's partitions from the M.2 SSD. by-name/* then names the SSD's.
+#
+# install=emmc or install=nvme: Android, once booted from the card, copies itself
+# onto that disk (bin/edge1-install-boot.sh, started by init.edge1.rc). Only from
+# the card: the copy on an eMMC or SSD carries the same file, and a system must
+# never be asked to overwrite the disk it runs from.
+setenv edge1_install none
+setenv edge1_system here
+if test "${devtype}" = "mmc"; then
+	if test "${devnum}" = "1"; then
+		if test "${install}" = "emmc"; then setenv edge1_install emmc; fi
+		if test "${install}" = "nvme"; then setenv edge1_install nvme; fi
+	fi
+	if test "${system}" = "nvme"; then
+		if test "${edge1_install}" = "none"; then
+			setenv edge1_dev f8000000.pcie
+			setenv edge1_system nvme
+		fi
+	fi
+fi
 
 # The previous kernel's log. The kernel keeps a ramoops region (its address is in
 # the dtb; build-bootfs.sh fills it in here) whose contents survive a warm reset - a
@@ -116,7 +144,7 @@ fi
 # CONFIG_VERSION_VARIABLE, which that config does not have.) Sizes are hex, as
 # "load" leaves them in filesize.
 setenv edge1_stage started
-setenv edge1_log 'if test -z "${edge1_nolog}"; then env export -t ${edge1_laddr} edge1_where edge1_dev edge1_prev edge1_stage edge1_ksize edge1_rsize edge1_dsize edge1_pd edge1_vop edge1_ui bootargs boot_targets fdtfile; fatwrite ${devtype} ${devnum}:${distro_bootpart} ${edge1_laddr} edge1-boot.log ${filesize}; fi'
+setenv edge1_log 'if test -z "${edge1_nolog}"; then env export -t ${edge1_laddr} edge1_where edge1_dev edge1_prev edge1_stage edge1_ksize edge1_rsize edge1_dsize edge1_pd edge1_vop edge1_ui edge1_pcie edge1_system edge1_install bootargs boot_targets fdtfile; fatwrite ${devtype} ${devnum}:${distro_bootpart} ${edge1_laddr} edge1-boot.log ${filesize}; fi'
 
 if load ${devtype} ${devnum}:${distro_bootpart} ${edge1_kaddr} Image; then
 	setenv edge1_ksize ${filesize}
@@ -176,9 +204,22 @@ if load ${devtype} ${devnum}:${distro_bootpart} ${edge1_kaddr} Image; then
 		# TV looks the same either way.
 		setenv edge1_ui 1080
 		if test "${ui}" = "native"; then setenv edge1_ui native; fi
+		# The M.2 slot. Its controller is built into the kernel and disabled in
+		# the dtb (kernel patch 0011): card 20, the last build that probed it,
+		# never reached Android with the slot empty. On for pcie=1, and whenever
+		# the NVMe is to be booted or installed to.
+		setenv edge1_pcie off
+		if test "${pcie}" = "1"; then setenv edge1_pcie on; fi
+		if test "${edge1_system}" = "nvme"; then setenv edge1_pcie on; fi
+		if test "${edge1_install}" = "nvme"; then setenv edge1_pcie on; fi
+		if test "${edge1_pcie}" = "on"; then
+			fdt addr ${edge1_faddr}
+			fdt set /pcie@f8000000 status okay
+			fdt set /syscon@ff770000/pcie-phy status okay
+		fi
 		if load ${devtype} ${devnum}:${distro_bootpart} ${edge1_raddr} ramdisk.img; then
 			setenv edge1_rsize ${filesize}
-			setenv bootargs "androidboot.boot_devices=${edge1_dev} androidboot.edge1.ui=${edge1_ui} @CMDLINE@"
+			setenv bootargs "androidboot.boot_devices=${edge1_dev} androidboot.edge1.ui=${edge1_ui} androidboot.edge1.install=${edge1_install} @CMDLINE@"
 			setenv edge1_stage booti
 			run edge1_log
 			echo "Edge1: booting Android from ${edge1_dev}"

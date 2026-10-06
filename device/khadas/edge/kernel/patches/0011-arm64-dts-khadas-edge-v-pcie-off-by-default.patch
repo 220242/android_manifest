@@ -1,0 +1,36 @@
+arm64: dts: rockchip: khadas-edge-v: PCIe off unless boot.scr turns it on
+
+Khadas Edge1, Android 14 on mainline 6.12. Applied to kernel/mainline by
+build/build-kernel.sh before every build (device/khadas/edge/kernel/patches/).
+
+The M.2 slot needs the PCIe host and its PHY built in: modules are not
+loaded on this board, and an Android installed on an NVMe has to find its
+partitions in first-stage init. But card 20, the one build that had both
+built in, never reached Android's log recorder, and the PHY's "pll relock
+timeout!" with an empty slot is the part of it that runs early and that
+Armbian has to patch. So the driver is in the kernel and the controller is
+off in the dtb the board boots: a board with an empty slot boots exactly as
+before. boot.scr sets both nodes back to "okay" for "pcie=1", "system=nvme"
+or "install=nvme" in edge1-options.txt.
+
+diff --git a/arch/arm64/boot/dts/rockchip/rk3399-khadas-edge-v.dts b/arch/arm64/boot/dts/rockchip/rk3399-khadas-edge-v.dts
+--- a/arch/arm64/boot/dts/rockchip/rk3399-khadas-edge-v.dts
++++ b/arch/arm64/boot/dts/rockchip/rk3399-khadas-edge-v.dts
+@@ -29,3 +29,17 @@ &pcie0 {
+ 	num-lanes = <4>;
+ 	status = "okay";
+ };
++
++/*
++ * The M.2 slot, off until asked for. The host and PHY drivers are built in
++ * for an NVMe install; card 20, which last had them built in, stopped before
++ * Android with the slot empty. boot.scr turns both back on for pcie=1,
++ * system=nvme or install=nvme in edge1-options.txt.
++ */
++&pcie_phy {
++	status = "disabled";
++};
++
++&pcie0 {
++	status = "disabled";
++};
