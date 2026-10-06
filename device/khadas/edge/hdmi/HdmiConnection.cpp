@@ -12,6 +12,7 @@
 
 #include "HdmiConnection.h"
 
+#include <aidl/android/hardware/tv/hdmi/connection/Result.h>
 #include <log/log.h>
 
 namespace edge1 {
