@@ -391,6 +391,12 @@ pd=12
 # 1 - одно ядро, как на карте 28; 3-4 - ещё быстрее, если 4K60 не успевает,
 # но память у ядер общая, и выигрыш меньше.
 #video_copy_threads=1
+#
+# hdmi_audio=0 - звук идёт на устройство «Динамик», как до карты 29.
+# Стандартно (с карты 29) Android видит выход HDMI как HDMI: так плееры
+# узнают, что звук идёт на телевизор, и появляются настройки объёмного
+# звука. Только если с HDMI звука нет, а раньше был.
+#hdmi_audio=0
 
 # === Тест питания =====================================================
 # A72 1416, A53 1416, GPU 600. Верхние ступени выключены - самые
@@ -490,7 +496,7 @@ for none), "vop" the display controller on HDMI (big; lit is the old one) and
 "ui" the size the menus are drawn at (1080, scaled up on a 4K TV; native for the
 TV's own mode), all applied by boot.scr; zram, sd_readahead_kb and sd_write_delay_s tune memory and
 the card's writes; video_hw, video_nv12, video_threads and video_copy_threads set
-the video decoder. It says what each line does, in Russian. Edge1 Tools
+the video decoder; hdmi_audio=0 keeps the sound on the audio HAL's "Speaker". It says what each line does, in Russian. Edge1 Tools
 on the box changes the clock and logs lines.
 
 Do not edit the other files on a PC; rebuild the image instead.

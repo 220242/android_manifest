@@ -327,10 +327,10 @@ ifneq ($(wildcard hardware/interfaces/audio/aidl/default/apex/com.android.hardwa
 PRODUCT_PACKAGES += com.android.hardware.audio
 endif
 
-# Media volume at the top on a fresh install. The HDMI output is the HAL's "Speaker"
-# (audio_policy_configuration.xml says why), so it is not one of the devices
-# AudioService keeps at full volume for a TV box, and Android's volume scales the
-# HDMI signal. AudioService starts a television at a quarter of it (15/4 = 3), and
+# Media volume at the top on a fresh install. The HDMI output was the HAL's "Speaker"
+# up to card 28, and is "HDMI Out" once Edge1 Tools connects it
+# (audio_policy_configuration.xml says why); either way Android's volume scales the
+# HDMI signal, unless AudioService hands HDMI's volume to the TV over CEC. AudioService starts a television at a quarter of it (15/4 = 3), and
 # card 21 played at 2 of 15 - about -40 dB, sound that worked and could not be
 # heard, from an Xbox pad that has no volume keys. At 15 the TV's remote sets the
 # loudness, like any TV box; Settings > Sound & display (Edge1 Tools' SoundActivity)

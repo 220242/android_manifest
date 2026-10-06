@@ -1,0 +1,113 @@
+From 7549dc641895418156afe89a07090f4517950892 Mon Sep 17 00:00:00 2001
+From: Khadas Edge1 Android TV <edge1@localhost>
+Date: Tue, 6 Oct 2026 05:00:00 +0000
+Subject: [PATCH] audio: primary module connects an HDMI sink
+
+Khadas Edge1 (RK3399), Android 14. The board's only ALSA card is the HDMI
+codec (hdmi-sound, card 0), and the primary module's streams play to card 0,
+device 0 whatever the device. But ModulePrimary connects no external device
+(Module::populateConnectedDevicePort returns EX_ILLEGAL_STATE for one), and
+the configuration may not attach one (card 12: the HAL aborted on an
+attached "HDMI Out"), so the HDMI output has had to be a built-in "Speaker":
+no AUDIO_DEVICE_OUT_HDMI, no ACTION_HDMI_AUDIO_PLUG, no surround settings.
+
+- ModulePrimary::populateConnectedDevicePort accepts a device port whose
+  connection is hdmi and keeps its configured (static) profiles. Any other
+  external device is refused as before.
+- StreamOutPrimary takes a patch to several devices when none of them is a
+  stub one: they are all that one PCM. The policy routes sonification to the
+  speaker and the HDMI sink together, which was UNSUPPORTED_DEVICES.
+
+The device tree's audio_policy_configuration.xml declares "HDMI Out" next
+to the attached "Speaker", and Edge1 Tools connects it at boot
+(AudioManager.setWiredDeviceConnectionState). Written against
+android-14.0.0_r55's files; not yet built or run on the board.
+---
+ audio/aidl/default/ModulePrimary.cpp          | 20 +++++++++++++++++++
+ .../default/include/core-impl/ModulePrimary.h |  3 +++
+ audio/aidl/default/primary/StreamPrimary.cpp  |  9 +++++++++
+ 3 files changed, 32 insertions(+)
+
+diff --git a/audio/aidl/default/ModulePrimary.cpp b/audio/aidl/default/ModulePrimary.cpp
+index 3da6d483..04196289 100644
+--- a/audio/aidl/default/ModulePrimary.cpp
++++ b/audio/aidl/default/ModulePrimary.cpp
+@@ -26,9 +26,11 @@
+ 
+ using aidl::android::hardware::audio::common::SinkMetadata;
+ using aidl::android::hardware::audio::common::SourceMetadata;
++using aidl::android::media::audio::common::AudioDeviceDescription;
+ using aidl::android::media::audio::common::AudioOffloadInfo;
+ using aidl::android::media::audio::common::AudioPort;
+ using aidl::android::media::audio::common::AudioPortConfig;
++using aidl::android::media::audio::common::AudioPortExt;
+ using aidl::android::media::audio::common::MicrophoneInfo;
+ 
+ namespace aidl::android::hardware::audio::core {
+@@ -66,4 +68,22 @@ int32_t ModulePrimary::getNominalLatencyMs(const AudioPortConfig&) {
+     return kLatencyMs;
+ }
+ 
++// An HDMI sink plays to the same ALSA PCM as the built-in ports (StreamPrimary:
++// PrimaryMixer::kAlsaCard / kAlsaDevice), which on a TV box whose only card is the
++// HDMI codec is the HDMI output itself. Connecting it keeps the profiles the
++// configuration gives the port: what the PCM accepts, not what the sink's EDID
++// offers, since the mix port feeding it is static too. Other external devices are
++// refused as before.
++ndk::ScopedAStatus ModulePrimary::populateConnectedDevicePort(AudioPort* audioPort,
++                                                              int32_t nextPortId) {
++    if (audioPort->ext.getTag() == AudioPortExt::Tag::device &&
++        audioPort->ext.get<AudioPortExt::Tag::device>().device.type.connection ==
++                AudioDeviceDescription::CONNECTION_HDMI) {
++        LOG(DEBUG) << __func__ << ": HDMI device port " << audioPort->id
++                   << " connected, profiles as configured";
++        return ndk::ScopedAStatus::ok();
++    }
++    return Module::populateConnectedDevicePort(audioPort, nextPortId);
++}
++
+ }  // namespace aidl::android::hardware::audio::core
+diff --git a/audio/aidl/default/include/core-impl/ModulePrimary.h b/audio/aidl/default/include/core-impl/ModulePrimary.h
+index 82c8a036..1f1d44dc 100644
+--- a/audio/aidl/default/include/core-impl/ModulePrimary.h
++++ b/audio/aidl/default/include/core-impl/ModulePrimary.h
+@@ -41,6 +41,9 @@ class ModulePrimary final : public Module {
+             std::shared_ptr<StreamOut>* result) override;
+     int32_t getNominalLatencyMs(
+             const ::aidl::android::media::audio::common::AudioPortConfig& portConfig) override;
++    ndk::ScopedAStatus populateConnectedDevicePort(
++            ::aidl::android::media::audio::common::AudioPort* audioPort,
++            int32_t nextPortId) override;
+ 
+   private:
+     ChildInterface<ITelephony> mTelephony;
+diff --git a/audio/aidl/default/primary/StreamPrimary.cpp b/audio/aidl/default/primary/StreamPrimary.cpp
+index 7325a91b..04da3283 100644
+--- a/audio/aidl/default/primary/StreamPrimary.cpp
++++ b/audio/aidl/default/primary/StreamPrimary.cpp
+@@ -14,6 +14,8 @@
+  * limitations under the License.
+  */
+ 
++#include <algorithm>
++
+ #define LOG_TAG "AHAL_StreamPrimary"
+ #include <android-base/logging.h>
+ #include <android-base/properties.h>
+@@ -195,6 +197,13 @@ bool StreamOutPrimary::useStubStream(const AudioDevice& device) {
+ StreamSwitcher::DeviceSwitchBehavior StreamOutPrimary::switchCurrentStream(
+         const std::vector<::aidl::android::media::audio::common::AudioDevice>& devices) {
+     LOG(DEBUG) << __func__;
++    // Every non-stub output device of this module is the same ALSA PCM (see
++    // getDeviceProfiles), so a patch to several of them - the policy adds the speaker
++    // to an HDMI sink for sonification - is one stream to that PCM.
++    if (devices.size() > 1 && std::none_of(devices.begin(), devices.end(), useStubStream)) {
++        return isStubStream() ? DeviceSwitchBehavior::CREATE_NEW_STREAM
++                              : DeviceSwitchBehavior::USE_CURRENT_STREAM;
++    }
+     if (devices.size() > 1) {
+         LOG(ERROR) << __func__ << ": primary stream can only be connected to one device, got: "
+                    << devices.size();
+-- 
+2.43.0
+
