@@ -121,6 +121,8 @@ directory changes (`kernelPatchesHash`).
 | `0006-usb-typec-tcpm-no-hard-reset-on-the-powering-port` | A Hard Reset makes the supply cut VBUS - on a board without a battery, a power cut (card 25). The port that powers the board sends Get_Source_Cap once instead and otherwise stays at 5V. |
 | `0007-arm64-dts-khadas-edge-rkvdec-clocks` | rkvdec's core and CABAC clocks at 400 MHz; nothing in mainline sets them (card 26). |
 | `0008-arm64-dts-khadas-edge-hdmi-on-the-big-vop` | The little VOP disabled, so HDMI runs from the big one: three planes for drm_hwcomposer instead of one, NV12 and scaling on two, 4096x2160. On the little VOP every layer was composed by the GPU (card 27). `vop=lit` in edge1-options.txt turns it back on. |
+| `0009-hwrng-rockchip-rk3399-crypto-trng` | rockchip-rng learns the RK3399's TRNG, which sits in each crypto engine (the RK3288 "crypto v1" one) rather than in a block of its own as on the RK3568; Rockchip's register sequence (`rockchip,cryptov1-rng` in their kernel). Without it there is no `/dev/hw_random` and prng_seeder fails at every boot. Quality 500, not measured. Not yet run on the board. |
+| `0010-arm64-dts-khadas-edge-hardware-rng` | The node for 0009: `rng@ff8b8000`, crypto1's registers and clocks as in Rockchip's DT; crypto1 itself disabled (its driver is not built). |
 
 **USB Wi-Fi and Bluetooth adapters** are built in too: rtw88 USB (RTL8811CU/8821CU,
 8812BU/8822BU, 8822CU, 8723DU), rtl8xxxu (the 802.11n nano dongles), mt7601u, mt76x0u,

@@ -314,7 +314,13 @@ not reachable from it.
   on `foreground`; idmap2 fails one auto-generated RRO. None fatal so far.
 * vold: the boot card is no longer voldmanaged (fstab). When the system moves to the
   eMMC, the installer has to put the `sdcard1` line back for that install.
-* `prng_seeder` (no `/dev/hw_random`: the 6.12 rockchip-rng driver knows only rk3568);
+* Hardware RNG (kernel patches 0009/0010, **built, not yet run on a board**): the
+  TRNG in crypto1 as `/dev/hw_random`. Next card: dmesg has no rockchip-rng probe
+  error, `/sys/class/misc/hw_random/rng_current` says rockchip-rng, `head -c 64
+  /dev/hw_random | od -x` is not all zeros or one repeated word, and logcat has no
+  prng_seeder failure. A poll timeout in the read means the TRNG never finished:
+  the clocks or the reset. Until then:
+* `prng_seeder` (no `/dev/hw_random` before patches 0009/0010);
   `flags_health_check` floods the console with permissive denials whenever an
   "updatable" process crash-loops; SELinux enforcing; the
   eMMC installer; our own U-Boot in TST mode.
