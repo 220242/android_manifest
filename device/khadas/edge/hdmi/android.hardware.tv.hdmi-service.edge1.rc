@@ -1,0 +1,8 @@
+# Both HALs from one process (service.cpp), which needs /dev/cec0 (system:system
+# 0660, ueventd.edge1.rc).
+service vendor.hdmi-edge1 /vendor/bin/hw/android.hardware.tv.hdmi-service.edge1
+    interface aidl android.hardware.tv.hdmi.cec.IHdmiCec/default
+    interface aidl android.hardware.tv.hdmi.connection.IHdmiConnection/default
+    class hal
+    user system
+    group system

@@ -87,6 +87,9 @@
 # domain, as for any vendor codec service. mediacodec.te has what it adds.
 /vendor/bin/hw/android\.hardware\.media\.c2@1\.2-service-ffmpeg  u:object_r:mediacodec_exec:s0
 
+# The HDMI-CEC and HDMI connection HALs (hdmi/), one process for both.
+/vendor/bin/hw/android\.hardware\.tv\.hdmi-service\.edge1  u:object_r:hal_tv_hdmi_edge1_exec:s0
+
 # minigbm and Mesa. The allocator service needs an exec type to get a domain: the
 # ninth card's init refused to start it - "File /vendor/bin/hw/android.hardware.
 # graphics.allocator-service.minigbm (labeled u:object_r:vendor_file:s0) has incorrect

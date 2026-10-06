@@ -21,7 +21,7 @@ the board; there is **no serial adapter**. One iteration:
    **`edge1-pstore.bin`** and the whole **`edge1-logs`** folder (zipped), plus photos
    of the HDMI screen.
 4. Run `build/edge1-logcheck.py <EDGE1BOOT folder or the zip>` first: it prints OK/FAIL/WARN
-   for each open check (boots and resets, ui=, the RNG, HDMI audio, video on a plane, the
+   for each open check (boots and resets, ui=, the RNG, HDMI audio, HDMI-CEC, video on a plane, the
    overlay's alpha, temperatures, crashes, signatures, the installer) and the `perf:`
    summary; `--all` for every boot, `--boot N` for one. A "--" is a check the logs
    could not answer, not a pass. Then read `edge1-logs/boots.txt`: one line per boot - when it started, its options,
@@ -303,13 +303,25 @@ not reachable from it.
 * Bluetooth pairing of a remote/gamepad not yet tried by the owner.
 * Bluetooth audio (A2DP source): the provider factory registers since the card 19 round
   (`android.hardware.bluetooth.audio-impl`); not tried with headphones yet.
-* HDMI-CEC (owner: not needed now). Findings for later: every AOSP 14 CEC HAL
-  (`tv.hdmi.cec`, `tv.hdmi.connection`, `tv.cec@1.1`) is a mock that reads/writes FIFOs,
-  and `CONFIG_DRM_DW_HDMI_CEC` is `=m` (modules are not loaded), so there is no
-  `/dev/cec0`. It needs `=y` plus a HAL implementing IHdmiCec and IHdmiConnection over
-  the Linux CEC API (CEC_ADAP_S_LOG_ADDRS, CEC_TRANSMIT/RECEIVE, CEC_DQEVENT state
-  changes as hotplug + physical address); the mocks in
-  hardware/interfaces/tv/hdmi/{cec,connection}/aidl/default are the template.
+* HDMI-CEC (card 30, **built, not yet run on a board**; the owner asked for it on
+  2026-10-06). `CONFIG_DRM_DW_HDMI_CEC=y` (defconfig's `=m` left no `/dev/cec0`), and
+  `device/khadas/edge/hdmi/`: one service, `android.hardware.tv.hdmi-service.edge1`,
+  implementing IHdmiCec and IHdmiConnection over the Linux CEC API in place of AOSP's
+  FIFO mocks - ported from r75's HIDL `tv/cec/1.0/default/HdmiCecDefault.cpp`
+  (initiator + exclusive passthrough follower, the kernel claims the logical address;
+  events on POLLPRI; no RC passthrough, the framework injects the keys). "Connected" =
+  the physical address the bridge sets from the TV's EDID. Domain `hal_tv_hdmi_edge1`
+  (server of both). `cec=0` in edge1-options.txt -> `androidboot.edge1.cec=0` -> the
+  HAL opens no adapter. Written against the real r75 AIDL (copied off the owner's
+  tree); the AIDL half has not been compiled - `m android.hardware.tv.hdmi-service.edge1`
+  on the build machine first. Card 30 checks (edge1-logcheck "HDMI-CEC"): logcat
+  `edge1-hdmi: /dev/cec0: ...` with a physical address (1.0.0.0 on a TV's first input)
+  and `logical address 4`; the TV lists "Edge1"/the device name as a source; the TV's
+  remote moves through the menus; turning the Edge1 on switches the TV's input; and the
+  volume: with CEC the framework may send the volume keys to the TV and play HDMI at
+  full volume (`dumpsys audio` full-volume devices) - that is CEC working, `cec=0` is
+  the way back. The Edge dtsi muxes the CEC pin (`&hdmi pinctrl-0 = <&hdmi_cec>`);
+  whether the line reaches the HDMI connector on this board is untested.
 * init.rc's blkio.weight / cpuctl uclamp.latency_sensitive writes fail (ACK-only
   files); harmless.
 * HDMI audio as HDMI (card 29, not yet run): patches/hardware/interfaces/0001 lets

@@ -1464,6 +1464,22 @@ else
 fi
 echo
 
+# --- 14. the HDMI-CEC HAL's adapter code ----------------------------------------
+# hdmi/CecAdapter.cpp is the HAL's Linux half (the CEC ioctls, no Android in it):
+# compiled here against the host's own linux/cec.h, warnings as errors, as Soong
+# builds it. The AIDL half compiles only in the AOSP tree.
+echo "[14] HDMI-CEC HAL: the Linux CEC side compiles"
+if cxx=$(command -v c++ || command -v g++ || command -v clang++); then
+    if out=$("$cxx" -std=c++17 -Wall -Wextra -Werror -fsyntax-only "$DEV/hdmi/CecAdapter.cpp" 2>&1); then
+        ok "hdmi/CecAdapter.cpp ($(basename "$cxx"))"
+    else
+        while IFS= read -r l; do err "CecAdapter.cpp: $l"; done <<< "$out"
+    fi
+else
+    wrn "no C++ compiler on this machine; hdmi/CecAdapter.cpp not compiled"
+fi
+echo
+
 echo "=========================================="
 echo "errors: $errors   warnings: $warns"
 (( errors )) && exit 1

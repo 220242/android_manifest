@@ -22,7 +22,7 @@ edge1-install-boot.sh, for an installer card):
   edge1-install.log                 the installer card's log
 
 and the checks are the ones docs/HANDOFF.md lists for the card under test: boots
-and resets, the 1080p menus (ui=), the hardware RNG, HDMI audio, video on a display
+and resets, the 1080p menus (ui=), the hardware RNG, HDMI audio, HDMI-CEC, video on a display
 plane, the overlay's alpha, temperatures, crashes, Bluetooth's signature, the
 installer. Each prints OK, FAIL, WARN (worth a look) or "--" (not in the logs: the
 boot ended first, nothing played, an older card). The exit status is 1 if anything
@@ -347,6 +347,37 @@ def check_video(lc, boot):
                   f"copy median {copy[len(copy) // 2]:.1f} ms")
 
 
+# The HDMI-CEC HAL (device/khadas/edge/hdmi), tag edge1-hdmi, from card 30 on.
+def check_cec(lc):
+    msgs = [(lvl, msg) for lvl, tag, msg in lc if tag == "edge1-hdmi"]
+    if not msgs:
+        report("--", "HDMI-CEC", "no edge1-hdmi lines (a card before 30, or the HAL never started)")
+        return
+    text = [m for _, m in msgs]
+    if any(m.startswith("cec=0") for m in text):
+        report("OK", "HDMI-CEC", "off by cec=0 in edge1-options.txt")
+        return
+    opened = [m for m in text if re.match(r"/dev/cec0: \S+ \(", m)]
+    if not opened:
+        errors = [m for lvl, m in msgs if lvl in "EF"]
+        report("FAIL", "HDMI-CEC", "no adapter: " + ("; ".join(errors[:2]) or "no open line"))
+        return
+    pas = re.findall(r"physical address ([0-9a-f.]+)", " ".join(text))
+    pa = pas[-1] if pas else "?"
+    claimed = [m for m in text if m.startswith("logical address ")]
+    details = [opened[0].split(": ", 1)[1].split(",")[0], f"physical address {pa}"]
+    if claimed:
+        details.append(claimed[-1])
+    status = "OK"
+    if pa in ("f.f.f.f", "?"):
+        status = "WARN"
+        details.append("no physical address: no TV, or its EDID has no CEC block")
+    elif not claimed:
+        status = "WARN"
+        details.append("the framework claimed no logical address (HDMI control off in Settings?)")
+    report(status, "HDMI-CEC", "; ".join(details))
+
+
 def check_overlay(boot):
     texts = [read(os.path.join(boot, p)) or "" for p in sorted(os.listdir(boot))
              if re.match(r"playing-\d+\.txt$", p)]
@@ -467,6 +498,7 @@ def check_boot(boot):
     check_ui(dmesg, boot)
     check_rng(dmesg, lc, boot)
     check_audio(lc, boot)
+    check_cec(lc)
     check_video(lc, boot)
     check_overlay(boot)
     check_thermal(dmesg)

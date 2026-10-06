@@ -1,0 +1,30 @@
+// The HDMI-CEC and HDMI connection HALs over the RK3399's CEC controller
+// (dw-hdmi-cec, /dev/cec0), in one service. AOSP 14's own services for these two
+// interfaces (hardware/interfaces/tv/hdmi/{cec,connection}/aidl/default) are mocks
+// that read FIFOs; this one is their Linux counterpart, after the tv.cec@1.0
+// HdmiCecDefault that Android 14 still carries for the HIDL HAL.
+cc_binary {
+    name: "android.hardware.tv.hdmi-service.edge1",
+    relative_install_path: "hw",
+    vendor: true,
+    init_rc: ["android.hardware.tv.hdmi-service.edge1.rc"],
+    vintf_fragments: ["android.hardware.tv.hdmi-service.edge1.xml"],
+    srcs: [
+        "CecAdapter.cpp",
+        "HdmiCec.cpp",
+        "HdmiConnection.cpp",
+        "service.cpp",
+    ],
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+    ],
+    shared_libs: [
+        "libbase",
+        "libbinder_ndk",
+        "liblog",
+        "android.hardware.tv.hdmi.cec-V1-ndk",
+        "android.hardware.tv.hdmi.connection-V1-ndk",
+    ],
+}

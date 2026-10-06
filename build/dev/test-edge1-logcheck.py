@@ -70,6 +70,13 @@ expect(bool(perf_patch) and
        '"perf: %dx%d %s, %.1f fps: decode %.1f, fetch %.1f, map %.1f, copy %.1f ms/frame'
        in src("patches", "external", "ffmpeg_codec2", perf_patch[0]),
        "ffmpeg_codec2's perf: line changed")
+cec = "".join(src("hdmi", f) for f in ("CecAdapter.cpp", "service.cpp"))
+expect('#define LOG_TAG "edge1-hdmi"' in cec, "the CEC HAL's log tag changed")
+for line in ('ALOGI("%s: %s (%s), %u logical addresses, physical address %x.%x.%x.%x"',
+             'ALOGI("physical address %x.%x.%x.%x, logical addresses 0x%04x"',
+             'ALOGI("logical address %u%s"', '"cec=0 in edge1-options.txt: ',
+             '"no CEC adapter: '):
+    expect(line in cec, f"the CEC HAL no longer logs {line}")
 install = src("bin", "edge1-install-boot.sh")
 expect('exited $rc"' in install and '"done; powering off"' in install and "; rebooting\"" in install,
        "edge1-install-boot.sh's ending lines changed")
@@ -168,6 +175,10 @@ def card(base, good):
                    "perf: 3840x2160 vp9, 30.0 fps: decode 4.5, fetch 12.0, map 0.3, copy 9.1 ms/frame (max 13.0 ms)")
               + lc("I", "C2FFMPEGVideoDecodeComponent",
                    "perf: 3840x2160 vp9, 59.0 fps: decode 5.0, fetch 2.0, map 0.3, copy 8.0 ms/frame (max 12.0 ms)"))
+    logcat += (lc("I", "edge1-hdmi", "/dev/cec0: dw_hdmi (dw_hdmi), 4 logical addresses, physical address 1.0.0.0")
+               + lc("I", "edge1-hdmi", "logical address 4") if good else
+               lc("E", "edge1-hdmi", "/dev/cec0: No such file or directory")
+               + lc("E", "edge1-hdmi", "no CEC adapter: CEC is off, HDMI reads as unplugged"))
     if not good:
         logcat += (lc("E", "AHAL_StreamPrimary", "transfer: error -5")
                    + lc("E", "prng_seeder", "Could not open /dev/hw_random")
@@ -210,7 +221,7 @@ try:
     rc, out = run(card(os.path.join(tmp, "good"), True))
     st = statuses(out)
     expect(rc == 0, f"a good card exits {rc}:\n{out}")
-    for name in ("boots", "ui (menus)", "hardware RNG", "HDMI audio", "video playing-1.txt",
+    for name in ("boots", "ui (menus)", "hardware RNG", "HDMI audio", "HDMI-CEC", "video playing-1.txt",
                  "overlay alpha", "thermal", "crashes", "signatures", "install"):
         expect(st.get(name) == "OK", f"good card: {name} is {st.get(name)}, want OK\n{out}")
     expect("perf 3840x2160 vp9: 2 lines, fps 30-59" in out, f"good card: perf summary missing\n{out}")
@@ -219,7 +230,7 @@ try:
     rc, out = run(bad)
     st = statuses(out)
     expect(rc == 1, f"a bad card exits {rc}")
-    for name in ("boots", "ui (menus)", "hardware RNG", "HDMI audio", "video playing-1.txt",
+    for name in ("boots", "ui (menus)", "hardware RNG", "HDMI audio", "HDMI-CEC", "video playing-1.txt",
                  "overlay alpha", "crashes", "install"):
         expect(st.get(name) == "FAIL", f"bad card: {name} is {st.get(name)}, want FAIL\n{out}")
     for name in ("thermal", "signatures"):
