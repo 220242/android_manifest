@@ -274,12 +274,14 @@ alive() {
 #   logs, zram, sd_readahead_kb, sd_write_delay_s   logs and memory (below)
 #   video_hw, video_nv12, video_threads, video_copy_threads   the FFmpeg Codec2
 #                      decoder's properties
+#   hdmi_audio         0: sound stays on the audio HAL's "Speaker" (Edge1 Tools
+#                      does not connect "HDMI Out"; audio_policy_configuration.xml)
 #   pd, vop            boot.scr's (USB PD, the VOP on HDMI): recorded here only
 # The image ships one with ready-made modes, commented in Russian, full speed
 # switched on (build/build-bootfs.sh has the file and the reasons).
 apply_options() {
     local f="$OPTS" key val applied="" bom big="" little="" gpu="" readahead="" wdelay="" q
-    local vhw="" vnv12="" vthreads="" vcopy=""
+    local vhw="" vnv12="" vthreads="" vcopy="" hdmia=""
     [ -f "$f" ] || return
     # The file is edited in Notepad: it may come back with a UTF-8 BOM ahead of the
     # first line, CRLF endings, tabs, or a "# note" after a value.
@@ -303,6 +305,7 @@ apply_options() {
             video_nv12) vnv12=$val ;;
             video_threads) vthreads=$val ;;
             video_copy_threads) vcopy=$val ;;
+            hdmi_audio) hdmia=$val ;;
             *) log "options: unknown key $key" ;;
         esac
     done < "$f"
@@ -341,14 +344,17 @@ apply_options() {
     case "$vnv12" in ''|0|1) ;; *) log "options: video_nv12=$vnv12 is not 0 or 1, ignored"; vnv12= ;; esac
     case "$vthreads" in ''|1|2|3|4) ;; *) log "options: video_threads=$vthreads is outside 1..4, ignored"; vthreads= ;; esac
     case "$vcopy" in ''|1|2|3|4) ;; *) log "options: video_copy_threads=$vcopy is outside 1..4, ignored"; vcopy= ;; esac
+    case "$hdmia" in ''|0|1) ;; *) log "options: hdmi_audio=$hdmia is not 0 or 1, ignored"; hdmia= ;; esac
     setprop_changed persist.vendor.edge1.hwdec "${vhw:-1}"
     setprop_changed persist.vendor.edge1.hwdec_nv12 "${vnv12:-1}"
     setprop_changed persist.vendor.edge1.hwdec_threads "${vthreads:-2}"
     setprop_changed persist.vendor.edge1.hwdec_copy_threads "${vcopy:-2}"
+    setprop_changed persist.sys.edge1.hdmi_audio "${hdmia:-1}"
     [ -n "$vhw" ] && applied="$applied video_hw=$vhw"
     [ -n "$vnv12" ] && applied="$applied video_nv12=$vnv12"
     [ -n "$vthreads" ] && applied="$applied video_threads=$vthreads"
     [ -n "$vcopy" ] && applied="$applied video_copy_threads=$vcopy"
+    [ -n "$hdmia" ] && applied="$applied hdmi_audio=$hdmia"
     if [ -z "$ZRAM_PCT" ]; then :
     elif [ "$ZRAM_PCT" -le 75 ]; then
         applied="$applied zram=$ZRAM_PCT"

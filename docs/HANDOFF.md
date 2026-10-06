@@ -300,8 +300,21 @@ not reachable from it.
   hardware/interfaces/tv/hdmi/{cec,connection}/aidl/default are the template.
 * init.rc's blkio.weight / cpuctl uclamp.latency_sensitive writes fail (ACK-only
   files); harmless.
-* Real HDMI audio (hotplug, AUDIO_DEVICE_OUT_HDMI, passthrough) needs a HAL module that
-  connects external devices; ModulePrimary does not. "Speaker" on card 0 until then.
+* HDMI audio as HDMI (card 29, not yet run): patches/hardware/interfaces/0001 lets
+  ModulePrimary connect an hdmi device port and play one stream to Speaker + HDMI Out;
+  audio_policy_configuration.xml declares "HDMI Out" beside the attached "Speaker";
+  Edge1 Tools' HdmiAudio connects it at LOCKED_BOOT_COMPLETED
+  (setWiredDeviceConnectionState). `hdmi_audio=0` in edge1-options.txt is the way back.
+  The patch was written against android-14.0.0_r55's files (no r75 source reachable
+  from the session); apply-patches.sh stops the build with its name if r75 differs.
+  Card 29 checks, in `completed/audio.txt`: `dumpsys audio` lists an HDMI output device
+  connected and media routed to it (`Edge1HdmiAudio: connecting HDMI Out` in logcat,
+  no `AHAL_` errors); SoundActivity's test tone plays; the volume still changes - if
+  `dumpsys audio` shows HDMI with full volume behavior, AudioService took the mock CEC
+  HAL for a TV that sets the loudness (playback device, `ro.hdmi.device_type=4`), and
+  then the TV's remote is the volume. Next: profiles from the PCM/ELD (multichannel),
+  IEC61937 passthrough (AC3/E-AC3 to an AVR), and following the plug (dw-hdmi has no
+  extcon, so a DRM hotplug watcher).
 * system_server's `LowMemDetector` PSI trigger fails with EINVAL (unprivileged
   triggers need a 2s-multiple window on 6.x); `libprocessgroup` AddTidToCgroup EACCES
   on `foreground`; idmap2 fails one auto-generated RRO. None fatal so far.

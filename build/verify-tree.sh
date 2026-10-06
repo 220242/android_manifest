@@ -1076,11 +1076,15 @@ if [[ -f "$APC" ]]; then
     fi
     # What the schema cannot say but the HAL's converter enforces with an abort
     # (XsdcConversion.cpp, convertDevicePortsInModuleToAidl / getSourcePortIds), and
-    # what its primary module cannot do (ModulePrimary connects no external device).
+    # what its primary module cannot do: stock ModulePrimary connects no external
+    # device, and with patches/hardware/interfaces/0001 an HDMI one only.
     # Card 12 aborted on the first of these 129 times.
-    if apc_rules=$(python3 - "$APC" <<'EOF'
-import re, sys
+    if apc_rules=$(python3 - "$APC" "$DEV/patches/hardware/interfaces" <<'EOF'
+import glob, re, sys
 import xml.etree.ElementTree as ET
+# The primary module connects an HDMI device only with this board's HAL patch.
+PRIMARY_HDMI = any("populateConnectedDevicePort" in open(p).read()
+                   for p in glob.glob(sys.argv[2] + "/*.patch"))
 # AIDL device types with an empty connection: the only ones <attachedDevices> may
 # hold. Everything external has a connection (hdmi, usb, analog, bt-*, ...).
 BUILTIN = {"AUDIO_DEVICE_OUT_EARPIECE", "AUDIO_DEVICE_OUT_SPEAKER",
@@ -1122,9 +1126,10 @@ for m in ET.parse(sys.argv[1]).getroot().iter("module"):
             bad.append(f"{name}: \"{d.get('tagName')}\" ({t}) is "
                        + ("external but listed in <attachedDevices>" if ext
                           else "built-in but not in <attachedDevices>"))
-        if ext and name == "primary":
+        if ext and name == "primary" and not (PRIMARY_HDMI and t == "AUDIO_DEVICE_OUT_HDMI"):
             bad.append(f"{name}: external device \"{d.get('tagName')}\" ({t}); the primary"
-                       " module cannot connect external devices")
+                       " module cannot connect it" + ("" if PRIMARY_HDMI else
+                       " (no external device at all without patches/hardware/interfaces)"))
     names = set(ports) | {x.get("name") for x in m.iter("mixPort")}
     for r in m.iter("route"):
         for end in [r.get("sink")] + [x.strip() for x in r.get("sources").split(",")]:

@@ -32,18 +32,28 @@
   missing. usb is out: the APEX does not declare IModule/usb, so servicemanager
   would refuse to register it anyway.
 
-  The primary module's one output is called "Speaker", and it is the HDMI output.
-  The HAL allows only built-in devices - an AIDL device type with no connection - in
-  <attachedDevices>, and its primary module (ModulePrimary) cannot connect external
-  ones at all: it does not implement populateConnectedDevicePort. An attached "HDMI
-  Out" made the HAL abort at start ("<attachedDevices> list is incorrect or devicePort
-  "HDMI Out" type= ...connection: hdmi... is incorrect", card 12, 129 times). Whatever
-  the device is called, the primary module's streams play to ALSA card 0, device 0
-  (primary/StreamPrimary.cpp), and on this board card 0 is hdmi-sound, its only card -
-  so a built-in "Speaker" is the HDMI output, the way AOSP's TV example
-  (primary_audio_policy_configuration_tv.xml) declares it. A real AUDIO_DEVICE_OUT_HDMI,
-  with hotplug, S/PDIF and IEC61937 passthrough, needs a HAL module that can connect
-  external devices - HAL work, see docs/HAL_MIGRATION.md.
+  The primary module's output has two devices, and both are the HDMI output.
+  Whatever the device, the primary module's streams play to ALSA card 0, device 0
+  (primary/StreamPrimary.cpp), and on this board card 0 is hdmi-sound, its only card.
+  - "Speaker", built in and attached: there from the start, so the policy always has
+    an output and the primary output opens at boot. The HAL allows only built-in
+    devices - an AIDL device type with no connection - in <attachedDevices>: an
+    attached "HDMI Out" made it abort at start ("<attachedDevices> list is incorrect
+    or devicePort "HDMI Out" type= ...connection: hdmi... is incorrect", card 12, 129
+    times). AOSP's TV example (primary_audio_policy_configuration_tv.xml) declares a
+    TV box's HDMI this way too.
+  - "HDMI Out", AUDIO_DEVICE_OUT_HDMI, external: Edge1 Tools connects it at boot
+    (HdmiAudio.java, AudioManager.setWiredDeviceConnectionState) and the policy then
+    prefers it to the speaker. Stock ModulePrimary cannot connect an
+    external device (no populateConnectedDevicePort); this board's patch
+    patches/hardware/interfaces/0001 lets it connect an hdmi one, with the profiles
+    given here, and lets one stream play to Speaker and HDMI Out together, which the
+    policy asks for sonification. As HDMI, the output gets what Android gives a TV
+    box's HDMI: ACTION_HDMI_AUDIO_PLUG for players, the surround settings, its own
+    volume. Profiles are static, PCM stereo, as the mix port: EDID-driven
+    multichannel and IEC61937 passthrough are the next steps (docs/HANDOFF.md).
+  If HDMI Out is never connected (persist.sys.edge1.hdmi_audio=0, or the patch not
+  applied), everything plays to "Speaker" as up to card 28.
 -->
 <audioPolicyConfiguration version="7.0">
     <globalConfiguration speaker_drc_enabled="false" call_screen_mode_supported="false"/>
@@ -66,9 +76,15 @@
                              samplingRates="44100 48000"
                              channelMasks="AUDIO_CHANNEL_OUT_STEREO"/>
                 </devicePort>
+                <devicePort tagName="HDMI Out" type="AUDIO_DEVICE_OUT_HDMI" role="sink">
+                    <profile format="AUDIO_FORMAT_PCM_16_BIT"
+                             samplingRates="44100 48000"
+                             channelMasks="AUDIO_CHANNEL_OUT_STEREO"/>
+                </devicePort>
             </devicePorts>
             <routes>
                 <route type="mix" sink="Speaker" sources="primary output"/>
+                <route type="mix" sink="HDMI Out" sources="primary output"/>
             </routes>
         </module>
         <module name="r_submix" halVersion="2.0">

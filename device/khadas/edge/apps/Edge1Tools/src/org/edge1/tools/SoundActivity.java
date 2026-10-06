@@ -29,9 +29,9 @@ import java.util.List;
  * its own "Display & Sound" entry (DevicePrefFragment.updateSounds) - resolution, HDR,
  * system sounds, surround - so the last row here opens that screen.
  *
- * Why the box needs it: the HDMI output is the audio HAL's "Speaker"
- * (audio/audio_policy_configuration.xml says why), so Android's media volume scales
- * what goes out over HDMI, and an Xbox pad has no volume keys. Card 21 played at 2 of
+ * Why the box needs it: the HDMI output is the audio HAL's "Speaker", or its "HDMI
+ * Out" once HdmiAudio connects it (audio/audio_policy_configuration.xml says why),
+ * and Android's media volume scales what goes out over HDMI, and an Xbox pad has no volume keys. Card 21 played at 2 of
  * 15, about -40 dB: the sound worked and could not be heard.
  */
 public class SoundActivity extends Activity {
@@ -138,7 +138,7 @@ public class SoundActivity extends Activity {
         for (AudioDeviceInfo d : devices) {
             if (sb.length() > 0) sb.append(", ");
             switch (d.getType()) {
-                // This board's HDMI output, as the audio HAL declares it.
+                // This board's HDMI output, under either of its HAL names.
                 case AudioDeviceInfo.TYPE_BUILTIN_SPEAKER:
                 case AudioDeviceInfo.TYPE_HDMI:
                     sb.append(getString(R.string.sound_output_hdmi));
