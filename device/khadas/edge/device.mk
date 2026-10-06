@@ -753,8 +753,12 @@ PRODUCT_PROPERTY_OVERRIDES += \
 # The layout is installed beside it rather than written into it, so that
 # flash/partitions.tsv stays the single source of truth for the GPT. The image
 # builder, the generated eMMC flash script and this installer all read that one file.
+#
+# edge1-install-boot.sh runs it with no PC at all: the installer card
+# (install=emmc or install=nvme in edge1-options.txt, init.edge1.rc).
 PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/bin/edge1-install-internal.sh:$(TARGET_COPY_OUT_VENDOR)/bin/edge1-install-internal.sh \
+    $(LOCAL_PATH)/bin/edge1-install-boot.sh:$(TARGET_COPY_OUT_VENDOR)/bin/edge1-install-boot.sh \
     $(LOCAL_PATH)/bin/edge1-bootwatch.sh:$(TARGET_COPY_OUT_VENDOR)/bin/edge1-bootwatch.sh \
     $(LOCAL_PATH)/bin/edge1-ctl.sh:$(TARGET_COPY_OUT_VENDOR)/bin/edge1-ctl.sh \
     $(LOCAL_PATH)/flash/partitions.tsv:$(TARGET_COPY_OUT_VENDOR)/etc/edge1-partitions.tsv

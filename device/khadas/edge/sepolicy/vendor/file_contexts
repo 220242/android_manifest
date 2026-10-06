@@ -81,6 +81,7 @@
 /vendor/firmware(/.*)?              u:object_r:vendor_firmware_file:s0
 /vendor/bin/edge1-bootwatch\.sh      u:object_r:edge1_bootwatch_exec:s0
 /vendor/bin/edge1-ctl\.sh           u:object_r:edge1_ctl_exec:s0
+/vendor/bin/edge1-install-boot\.sh  u:object_r:edge1_install_exec:s0
 
 # The FFmpeg Codec2 service (hardware video decoding): AOSP's vendor Codec2 server
 # domain, as for any vendor codec service. mediacodec.te has what it adds.

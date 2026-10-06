@@ -72,6 +72,24 @@ service edge1_ctl_boot /vendor/bin/edge1-ctl.sh boot ${persist.sys.edge1.perf:-n
     oneshot
     disabled
 
+# The installer card: "install=emmc" or "install=nvme" in the card's
+# edge1-options.txt, which boot.scr passes as androidboot.edge1.install (only when
+# it runs from the card). Once the system is up, bin/edge1-install-boot.sh copies it
+# onto that disk with bin/edge1-install-internal.sh. After the boot, not before:
+# the copy reads the card's partitions, and the system it copies has to be the one
+# that has just shown it can boot.
+service edge1_install /vendor/bin/edge1-install-boot.sh ${ro.boot.edge1.install:-none}
+    user root
+    group root
+    oneshot
+    disabled
+
+on property:sys.boot_completed=1 && property:ro.boot.edge1.install=emmc
+    start edge1_install
+
+on property:sys.boot_completed=1 && property:ro.boot.edge1.install=nvme
+    start edge1_install
+
 on early-init
     # Mali-T860 (Midgard) devfreq governor. simple_ondemand is what the
     # Rockchip 4.19 BSP validates the T860 OPP table against.

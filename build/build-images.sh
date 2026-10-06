@@ -8,6 +8,9 @@
 #   sdcard   edge1-sdcard.img   bootable card, written from a desktop with Etcher
 #   emmc     edge1-emmc.img     bootable eMMC image
 #   nvme     edge1-nvme.img     Android partitions for the M.2 SSD, no bootloader
+#   install-emmc  edge1-install-emmc.img  the SD card, with install=emmc in
+#   install-nvme  edge1-install-nvme.img  edge1-options.txt (or nvme): booted, it
+#                                         installs itself (bin/edge1-install-boot.sh)
 #
 # Environment:
 #   EDGE1_USERDATA_MIB    size of userdata, the last partition (default 16384, 16GiB);
@@ -149,7 +152,7 @@ TARGETS=("$@")
 # "nvme" still build when named on the command line.
 (( ${#TARGETS[@]} )) || TARGETS=(sdcard)   # emmc nvme
 
-for t in sgdisk dd od; do
+for t in sgdisk dd od mtype mcopy; do
     command -v "$t" >/dev/null 2>&1 || { echo "$t not found (apt-get install gdisk)" >&2; exit 1; }
 done
 [[ -f "$LAYOUT" ]] || { echo "no layout at $LAYOUT" >&2; exit 1; }
@@ -166,6 +169,8 @@ target_file() {
         sdcard) echo "$OUT/edge1-sdcard${TAG}.img" ;;
         emmc)   echo "$OUT/edge1-emmc${TAG}.img" ;;
         nvme)   echo "$OUT/edge1-nvme${TAG}.img" ;;
+        install-emmc) echo "$OUT/edge1-install-emmc${TAG}.img" ;;
+        install-nvme) echo "$OUT/edge1-install-nvme${TAG}.img" ;;
         *) return 1 ;;
     esac
 }
@@ -174,7 +179,7 @@ target_file() {
 target_size() {
     local dflt=$(( FIRST_PART_MIB + fixed_mib + ${EDGE1_USERDATA_MIB:-16384} + GPT_TAIL_MIB ))
     case "$1" in
-        sdcard) echo "${EDGE1_SD_SIZE_MIB:-$dflt}" ;;
+        sdcard|install-*) echo "${EDGE1_SD_SIZE_MIB:-$dflt}" ;;
         emmc)   echo "${EDGE1_EMMC_SIZE_MIB:-$dflt}" ;;
         nvme)   echo "${EDGE1_NVME_SIZE_MIB:-$dflt}" ;;
         *) return 1 ;;
@@ -183,7 +188,7 @@ target_size() {
 # The one real difference. See the header.
 target_wants_bootloader() {
     case "$1" in
-        sdcard|emmc) return 0 ;;
+        sdcard|emmc|install-*) return 0 ;;
         nvme)        return 1 ;;
         *)           return 1 ;;
     esac
@@ -191,8 +196,34 @@ target_wants_bootloader() {
 
 for t in "${TARGETS[@]}"; do
     target_file "$t" >/dev/null || {
-        echo "unknown target '$t'; known: sdcard emmc nvme" >&2; exit 1; }
+        echo "unknown target '$t'; known: sdcard emmc nvme install-emmc install-nvme" >&2; exit 1; }
 done
+
+# The installer cards: an SD card image like "sdcard" in every byte but one file -
+# bootfs's edge1-options.txt carries install=emmc or install=nvme, switched on. Booted,
+# it copies itself onto that disk (bin/edge1-install-boot.sh). The bootfs is a copy,
+# so the plain card's is untouched; mtools edits it without mounting anything.
+installer_bootfs() {
+    local target="$1" src="$2" dst="$TMP/bootfs-$1.img" what="${1#install-}" shown=eMMC
+    [[ "$what" == nvme ]] && shown="NVMe SSD"
+    mkdir -p "$TMP"
+    cp -f "$src" "$dst"
+    mtype -i "$dst" ::edge1-options.txt > "$TMP/options-$target.txt"
+    cat >> "$TMP/options-$target.txt" <<EOF
+
+# --- Установка с этой карты ------------------------------------------
+# Это карта-установщик. Через минуту после загрузки Android копирует себя
+# с неё на ${shown} - всё, что там было, стирается (на экране предупреждение,
+# отменить - выключить питание). Потом строка ниже сама закомментируется.
+# eMMC: плата выключится; выньте карту и включите - система на eMMC.
+# NVMe: плата перезагрузится; карта остаётся (с неё грузится ядро, U-Boot
+# платы NVMe не читает), система работает с SSD - строка system=nvme.
+# Ход установки - в edge1-install.log на этой карте.
+install=${what}
+EOF
+    mcopy -o -i "$dst" "$TMP/options-$target.txt" ::edge1-options.txt
+    echo "$dst"
+}
 
 # A bootloader is needed if any requested target wants one. The external pair
 # satisfies that requirement on its own - that is the whole point of it.
@@ -501,8 +532,12 @@ build_target() {
             # a raw 4.6GiB super.img whose free blocks are zeros does not turn a 7GiB
             # sparse file into 7GiB on disk. sparse is only safe because the file was
             # just created by truncate and every byte of it is already zero.
-            local bytes; bytes=$(stat -c %s "${RAW[$i]}")
-            dd if="${RAW[$i]}" of="$img" bs=1M seek="$start" \
+            local src="${RAW[$i]}"
+            if [[ "$target" == install-* && "$name" == bootfs ]]; then
+                src="$(installer_bootfs "$target" "$src")" || return 1
+            fi
+            local bytes; bytes=$(stat -c %s "$src")
+            dd if="$src" of="$img" bs=1M seek="$start" \
                conv=notrunc,sparse,fsync status=none
             printf '    %-12s <- %-16s %s\n' "$name" "${IMAGES[$i]}" \
                    "$(numfmt --to=iec --suffix=B "$bytes" 2>/dev/null || echo "${bytes}B")"
@@ -555,6 +590,11 @@ cat <<'EOF'
   edge1-sdcard.img   Balena Etcher, straight onto the card, from the desktop.
                      Nothing has to be running on the board. The eMMC is not
                      touched, so pulling the card out puts the board back.
+
+  edge1-install-emmc.img   The same card, set to install itself: boot it, wait,
+  edge1-install-nvme.img   and it copies itself onto the eMMC (then powers off) or
+                     the NVMe SSD (then reboots, the card staying in for the kernel).
+                     No PC and no adb. edge1-install.log on the card says how it went.
 
   edge1-emmc.img     Not writable from a desktop on its own - the eMMC is not
   edge1-nvme.img     removable. Two ways in:

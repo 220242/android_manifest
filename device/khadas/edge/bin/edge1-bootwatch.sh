@@ -278,6 +278,8 @@ alive() {
 #                      does not connect "HDMI Out"; audio_policy_configuration.xml)
 #   pd, vop, ui        boot.scr's (USB PD, the VOP on HDMI, the menus' size):
 #                      recorded here only
+#   pcie, system, install   boot.scr's too: the M.2 slot, Android on the NVMe,
+#                      the installer card
 # The image ships one with ready-made modes, commented in Russian, full speed
 # switched on (build/build-bootfs.sh has the file and the reasons).
 apply_options() {
@@ -292,7 +294,9 @@ apply_options() {
         case "$key" in ''|\#*) continue ;; esac
         # boot.scr's: which display controller drives HDMI (big or lit), and the
         # size the menus are drawn at (1080 or native).
-        case "$key" in vop|ui) applied="$applied $key=$val"; continue ;; esac
+        # And the disks: the M.2 slot (pcie), where Android lives (system=nvme) and
+        # the installer card's target (install, bin/edge1-install-boot.sh).
+        case "$key" in vop|ui|pcie|system|install) applied="$applied $key=$val"; continue ;; esac
         case "$val" in ''|*[!0-9]*) log "options: $key: not a number"; continue ;; esac
         case "$key" in
             cpu_big_max_mhz) big=$val ;;
