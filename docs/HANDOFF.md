@@ -20,7 +20,11 @@ the board; there is **no serial adapter**. One iteration:
    eMMC), and send back from the card's `EDGE1BOOT` drive **`edge1-boot.log`**,
    **`edge1-pstore.bin`** and the whole **`edge1-logs`** folder (zipped), plus photos
    of the HDMI screen.
-4. Read `edge1-logs/boots.txt` first: one line per boot - when it started, its options,
+4. Run `build/edge1-logcheck.py <EDGE1BOOT folder or the zip>` first: it prints OK/FAIL/WARN
+   for each open check (boots and resets, ui=, the RNG, HDMI audio, video on a plane, the
+   overlay's alpha, temperatures, crashes, signatures, the installer) and the `perf:`
+   summary; `--all` for every boot, `--boot N` for one. A "--" is a check the logs
+   could not answer, not a pass. Then read `edge1-logs/boots.txt`: one line per boot - when it started, its options,
    how long it lasted, whether it completed, whether its ramoops was saved. Then the
    boot directories, `edge1-logs/boot-NNNNN/` (the last ten): `logcat.txt` and
    `dmesg.txt` are the whole boot, streamed from its first line (main/system/crash/
@@ -78,6 +82,7 @@ has the full story.
 | Tool | Checks |
 |---|---|
 | `build/verify-tree.sh` | the whole tree's consistency checks; must end `errors: 0` |
+| `build/dev/test-edge1-logcheck.py` | `build/edge1-logcheck.py` against two synthetic cards, and that the lines it reads (bootwatch, Edge1 Tools, ffmpeg_codec2) are still written that way; also run by verify-tree [13] |
 | `build/dev/check-kernel-fragment.sh <linux-6.12>` | the kernel patches apply, and every symbol in the kernel fragment takes, via the kernel's own defconfig + merge_config + olddefconfig and `scripts/dummy-tools` (seconds, no cross compiler). A miss stops the owner's Kernel stage. |
 | `build/dev/check-edge1tools.sh <android-all-14.jar>` | Edge1 Tools' resources link (aapt2) and its Java compiles against the R that comes out - what the build does to the app; Robolectric's android-all 14 stands in for the framework (the script says where to get it) |
 | `build/dev/check-kernel-build.sh <linux-6.12> <outdir> <targets>` | compiles patched kernel objects and dtbs for arm64 with clang (LLVM=1, W=1) and the device config, patches applied and taken off again; `CHECK_DTBS=y` validates a dtb against the bindings (pip install dtschema) |
@@ -333,7 +338,9 @@ not reachable from it.
   error, `/sys/class/misc/hw_random/rng_current` says rockchip-rng, `head -c 64
   /dev/hw_random | od -x` is not all zeros or one repeated word, and logcat has no
   prng_seeder failure. A poll timeout in the read means the TRNG never finished:
-  the clocks or the reset. Until then:
+  the clocks or the reset. The bootwatch's `misc.txt` records `rng_current` and
+  those 64 bytes from card 30 on (card 29 was built before); edge1-logcheck reads
+  both. Until then:
 * `prng_seeder` (no `/dev/hw_random` before patches 0009/0010);
   `flags_health_check` floods the console with permissive denials whenever an
   "updatable" process crash-loops; SELinux enforcing; the

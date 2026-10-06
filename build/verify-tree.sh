@@ -1452,6 +1452,18 @@ else
 fi
 echo
 
+# --- 13. the log checker ------------------------------------------------------
+# build/edge1-logcheck.py reads what bootwatch, Edge1 Tools and ffmpeg_codec2 log;
+# its test checks those lines are still written as it expects, and runs it on two
+# synthetic cards.
+echo "[13] log checker vs the lines it reads"
+if out=$(python3 "$ROOT/build/dev/test-edge1-logcheck.py" 2>&1); then
+    ok "$out"
+else
+    while IFS= read -r l; do err "edge1-logcheck: $l"; done <<< "$out"
+fi
+echo
+
 echo "=========================================="
 echo "errors: $errors   warnings: $warns"
 (( errors )) && exit 1

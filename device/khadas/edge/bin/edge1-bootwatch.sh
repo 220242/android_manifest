@@ -94,7 +94,12 @@ snapshot() {
     { cat /proc/uptime; echo; cat /proc/mounts; echo; ls -l /dev/block/by-name; echo
       ls -lZ /dev/dri /dev/snd /dev/cec* /dev/video* /dev/media* /dev/rfkill; echo
       getenforce; cat /proc/swaps; echo
-      ls -l /sys/class/wakeup /sys/class/extcon; } > "$s/misc.txt" 2>&1
+      ls -l /sys/class/wakeup /sys/class/extcon; echo
+      # The hardware RNG (kernel 0009/0010): which driver /dev/hw_random is, and 64
+      # bytes of it - all zeros or one repeated word is a TRNG that never ran, and
+      # a read that times out one that never finished. build/edge1-logcheck.py.
+      echo "rng_current: $(cat /sys/class/misc/hw_random/rng_current 2>&1)"
+      echo "hw_random bytes:"; timeout 5 head -c 64 /dev/hw_random | od -x; } > "$s/misc.txt" 2>&1
     timeout 20 dumpsys -l > "$s/services.txt" 2>&1
     timeout 20 dumpsys SurfaceFlinger > "$s/surfaceflinger.txt" 2>&1
     # Wi-Fi and Bluetooth: interfaces, rfkill switches, and what the framework
