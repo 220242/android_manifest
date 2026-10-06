@@ -313,8 +313,8 @@ not reachable from it.
   the physical address the bridge sets from the TV's EDID. Domain `hal_tv_hdmi_edge1`
   (server of both). `cec=0` in edge1-options.txt -> `androidboot.edge1.cec=0` -> the
   HAL opens no adapter. Written against the real r75 AIDL (copied off the owner's
-  tree); the AIDL half has not been compiled - `m android.hardware.tv.hdmi-service.edge1`
-  on the build machine first. Card 30 checks (edge1-logcheck "HDMI-CEC"): logcat
+  tree); `m android.hardware.tv.hdmi-service.edge1` builds on the owner's r75 tree
+  (a70f061, lunch edge1_tv-trunk_staging-userdebug). Card 30 checks (edge1-logcheck "HDMI-CEC"): logcat
   `edge1-hdmi: /dev/cec0: ...` with a physical address (1.0.0.0 on a TV's first input)
   and `logical address 4`; the TV lists "Edge1"/the device name as a source; the TV's
   remote moves through the menus; turning the Edge1 on switches the TV's input; and the
