@@ -318,8 +318,17 @@ not reachable from it.
   the third try in that boot - the first two timed out waiting for the remote, 30s
   each, likely out of pairing mode by then - and worked over HID. After a reboot
   (boot-00006) the stack had it bonded and armed the background connection, but the
-  remote never connected in 510s. Unknown whether its keys were pressed; the next
-  step is an HCI snoop log of a boot where they are.
+  remote never connected in 510s although the owner pressed its keys. The stack
+  ran with LE privacy on (a new random address each boot), which cheap remotes
+  that call back to the address they bonded with do not follow: device.mk now
+  sets bluetooth.core.gap.le.privacy.enabled=false (expect "Local BLE Privacy
+  enabled:false" in logcat; the remote must be paired again once). A guess until a
+  board shows it - so the bootwatch now also turns on Bluetooth's HCI log and
+  copies btsnoop_hci.log into the boot's folder every minute (open it in
+  Wireshark: does the remote advertise after a key press, and to which address).
+  **Not yet run on a board.** The TV (Samsung UA46F5000) has no HDMI-CEC at all:
+  it acknowledges nothing, so its remote cannot drive Android; the owner declined
+  the board's IR receiver.
 * Bluetooth audio (A2DP source): the provider factory registers since the card 19 round
   (`android.hardware.bluetooth.audio-impl`); not tried with headphones yet.
 * HDMI-CEC (card 30, **built, not yet run on a board**; the owner asked for it on

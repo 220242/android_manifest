@@ -489,6 +489,16 @@ PRODUCT_PACKAGES += \
     android.hardware.bluetooth-service.default \
     android.hardware.bluetooth.audio-impl
 
+# LE privacy off: the box talks to LE devices from its public address instead of a
+# resolvable private one that changes every boot and every 15 minutes. A TV box
+# has nothing to hide that way, and cheap BLE remotes (the owner's "BLE_TEST_412",
+# 2026-10-11) bond fine but, after a reboot, call back to the address they paired
+# with - with privacy on, an address the box no longer answers to. The stack logs
+# "BTIF_dm_enable: Local BLE Privacy enabled:false" when this took. A remote paired
+# before the change has to be paired again.
+PRODUCT_PROPERTY_OVERRIDES += \
+    bluetooth.core.gap.le.privacy.enabled?=false
+
 PRODUCT_PROPERTY_OVERRIDES += \
     ro.vendor.bluetooth.device=bcm4359 \
     bluetooth.device.class_of_device?=38,4,36 \
