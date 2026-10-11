@@ -300,7 +300,20 @@ not reachable from it.
   Card 25 negotiates PD; next a long session at full speed.
 * Hardware video decode: docs/HW_DECODE.md. Phases 1-3 confirmed (cards 21, 23);
   3b on card 24; HEVC needs a newer kernel (rkvdec HEVC is not in 6.12).
-* Bluetooth pairing of a remote/gamepad not yet tried by the owner.
+* Wi-Fi lost for a whole boot, now and then (logs of 2026-10-11, boot-00005): the
+  SDIO card turned up between the switch to /system and the /vendor mount, so
+  brcmfmac found its firmware in neither the ramdisk nor /vendor (dmesg: "Direct
+  firmware load for brcm/brcmfmac4359-sdio.bin failed with error -2", then "HT
+  Avail timeout"; wificond: "Can't get wlan0 index"). init.edge1.rc now binds
+  brcmfmac again on post-fs-data. **Not yet run on a board**; the log checker's
+  Wi-Fi line says "a second probe loaded it" when it saves a boot. Not Bluetooth's
+  doing: Wi-Fi runs on 5 GHz (5220 MHz), and Bluetooth was up in that boot.
+* Bluetooth remote (a generic BLE one, "BLE_TEST_412", 11:22:33:01:0F:99) paired on
+  the third try in that boot - the first two timed out waiting for the remote, 30s
+  each, likely out of pairing mode by then - and worked over HID. After a reboot
+  (boot-00006) the stack had it bonded and armed the background connection, but the
+  remote never connected in 510s. Unknown whether its keys were pressed; the next
+  step is an HCI snoop log of a boot where they are.
 * Bluetooth audio (A2DP source): the provider factory registers since the card 19 round
   (`android.hardware.bluetooth.audio-impl`); not tried with headphones yet.
 * HDMI-CEC (card 30, **built, not yet run on a board**; the owner asked for it on

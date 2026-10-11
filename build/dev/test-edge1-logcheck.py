@@ -77,6 +77,10 @@ for line in ('ALOGI("%s: %s (%s), %u logical addresses, physical address %x.%x.%
              'ALOGI("logical address %u%s"', '"cec=0 in edge1-options.txt: ',
              '"no CEC adapter: '):
     expect(line in cec, f"the CEC HAL no longer logs {line}")
+# The Wi-Fi line's "second probe" is init.edge1.rc binding brcmfmac again.
+initrc = src("init", "init.edge1.rc")
+expect("write /sys/bus/sdio/drivers/brcmfmac/bind mmc0:0001:2" in initrc,
+       "init.edge1.rc no longer binds brcmfmac a second time")
 install = src("bin", "edge1-install-boot.sh")
 expect('exited $rc"' in install and '"done; powering off"' in install and "; rebooting\"" in install,
        "edge1-install-boot.sh's ending lines changed")
@@ -168,7 +172,10 @@ def card(base, good):
              "policy4=1800MHz gpu=200MHz vdd_cpu_b=1125mV vdd_gpu=975mV\n"
              + ("[   35.0] edge1-bootwatch: thermal cpu=88C gpu=80C policy4=1800MHz\n" if not good else "")
              + ("" if good else "[    2.5] rockchip-rng ff8b8000.crypto: probe failed: -110\n")
-             + ("" if good else "[  300.0] Unable to handle kernel NULL pointer dereference at 0x0\n"))
+             + ("" if good else "[  300.0] Unable to handle kernel NULL pointer dereference at 0x0\n")
+             + ("[    1.9] brcmfmac: brcmf_c_preinit_dcmds: Firmware: BCM4359/9 wl0: Feb 22 2022\n" if good else
+                "[    1.8] brcmfmac mmc0:0001:1: Direct firmware load for brcm/brcmfmac4359-sdio.bin "
+                "failed with error -2\n[    2.8] brcmfmac: brcmf_sdio_htclk: HT Avail timeout (1000000)\n"))
     write(os.path.join(b2, "dmesg.txt"), dmesg)
     logcat = (lc("I", "Edge1HdmiAudio", "connecting HDMI Out (persist.sys.edge1.hdmi_audio=1)")
               + lc("I", "C2FFMPEGVideoDecodeComponent",
@@ -179,6 +186,13 @@ def card(base, good):
                + lc("I", "edge1-hdmi", "logical address 4") if good else
                lc("E", "edge1-hdmi", "/dev/cec0: No such file or directory")
                + lc("E", "edge1-hdmi", "no CEC adapter: CEC is off, HDMI reads as unplugged"))
+    logcat += (lc("I", "AdapterState", "ON : entered ")
+               + lc("W", "bt_btif_hh", "btif_hh_add_added_dev: Added device xx:xx:xx:xx:0f:99[public][BT_TRANSPORT_AUTO]"))
+    logcat += (lc("I", "wpa_supplicant", "wlan0: CTRL-EVENT-CONNECTED - Connection to 90:9a:4a:0c:59:13 completed")
+               + lc("D", "wpa_supplicant", "wlan0: Event ASSOC freq=5220")
+               + lc("D", "CachedBluetoothDevice",
+                    "onProfileStateChanged: profile HID, device XX:XX:XX:XX:0F:99, newProfileState 2")
+               if good else lc("E", "wificond", "Can't get wlan0 index: No such device"))
     if not good:
         logcat += (lc("E", "AHAL_StreamPrimary", "transfer: error -5")
                    + lc("E", "prng_seeder", "Could not open /dev/hw_random")
@@ -221,8 +235,9 @@ try:
     rc, out = run(card(os.path.join(tmp, "good"), True))
     st = statuses(out)
     expect(rc == 0, f"a good card exits {rc}:\n{out}")
-    for name in ("boots", "ui (menus)", "hardware RNG", "HDMI audio", "HDMI-CEC", "video playing-1.txt",
-                 "overlay alpha", "thermal", "crashes", "signatures", "install"):
+    for name in ("boots", "ui (menus)", "hardware RNG", "HDMI audio", "HDMI-CEC", "Wi-Fi",
+                 "Bluetooth remotes", "video playing-1.txt", "overlay alpha", "thermal", "crashes",
+                 "signatures", "install"):
         expect(st.get(name) == "OK", f"good card: {name} is {st.get(name)}, want OK\n{out}")
     expect("perf 3840x2160 vp9: 2 lines, fps 30-59" in out, f"good card: perf summary missing\n{out}")
 
@@ -230,10 +245,10 @@ try:
     rc, out = run(bad)
     st = statuses(out)
     expect(rc == 1, f"a bad card exits {rc}")
-    for name in ("boots", "ui (menus)", "hardware RNG", "HDMI audio", "HDMI-CEC", "video playing-1.txt",
-                 "overlay alpha", "crashes", "install"):
+    for name in ("boots", "ui (menus)", "hardware RNG", "HDMI audio", "HDMI-CEC", "Wi-Fi",
+                 "video playing-1.txt", "overlay alpha", "crashes", "install"):
         expect(st.get(name) == "FAIL", f"bad card: {name} is {st.get(name)}, want FAIL\n{out}")
-    for name in ("thermal", "signatures"):
+    for name in ("thermal", "signatures", "Bluetooth remotes"):
         expect(st.get(name) == "WARN", f"bad card: {name} is {st.get(name)}, want WARN\n{out}")
 
     # hdmi_audio=0 is a choice, not a failure.
