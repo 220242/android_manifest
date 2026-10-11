@@ -12,6 +12,7 @@
 #    runs streams into it:
 #      logcat.txt   main, system, crash and events, from the start of logd's buffers
 #      dmesg.txt    the kernel log, from the first line of the boot
+#      btsnoop_hci.log  Bluetooth's HCI log, copied every minute while it grows
 #      alive.txt    how long this boot has run and whether it completed, rewritten
 #                   every SYNC seconds: after a reset it says when the boot died
 #    Both logs are complete: they start with everything already buffered and follow
@@ -79,6 +80,20 @@ start_streams() {
 stop_streams() {
     [ -n "$streams" ] && kill $streams 2>/dev/null
     streams=
+}
+
+# Bluetooth's HCI log (btsnoop, "full": every packet between the stack and the
+# BCM4359), copied into this boot's directory as it grows. A bonded BLE remote that
+# never came back after a reboot left no trace in logcat (2026-10-11 logs): only the
+# HCI log says whether it advertised at all, and to which address. Switched on below
+# before the Bluetooth stack starts, so it covers the whole boot; Wireshark reads it.
+BTSNOOP=/data/misc/bluetooth/logs
+bt_size=
+copy_btsnoop() {
+    local size
+    size=$(cat "$BTSNOOP"/btsnoop_hci.log* 2>/dev/null | wc -c)
+    [ "$size" -gt 0 ] && [ "$size" != "$bt_size" ] || return
+    cp "$BTSNOOP"/btsnoop_hci.log* "$OUT/" 2>/dev/null && bt_size=$size
 }
 
 # $1: subdirectory of this boot's directory.
@@ -473,6 +488,9 @@ if [ -n "$mounted" ]; then
     else
         start_streams
         log "streaming logcat and dmesg to EDGE1BOOT:edge1-logs/${OUT##*/}"
+        # Read by the stack when it starts; persist, so it holds on later boots too.
+        [ "$(getprop persist.bluetooth.btsnooplogmode)" = full ] \
+            || setprop persist.bluetooth.btsnooplogmode full
     fi
 fi
 
@@ -516,6 +534,7 @@ while :; do
             log "EDGE1BOOT is nearly full; logging to the card stopped"
         fi
         [ $t -eq 120 ] && snapshot 120s
+        [ -n "$streams" ] && [ $((t % 60)) -eq 0 ] && copy_btsnoop
     fi
     if [ -z "$done_at" ] && completed; then
         done_at=$t
