@@ -18,7 +18,9 @@ edge1-install-boot.sh, for an installer card):
                                     misc.txt, packages.txt ...
   boot-NNNNN/playing-N.txt          while a video played: decode rate, DRM state,
                                     SurfaceFlinger
-  boot-NNNNN/pstore/                the boot's ramoops, if it ended in a reset
+  boot-NNNNN/pstore/                the boot's ramoops, kept through a warm restart
+                                    (a reboot from Android, a panic or a reset);
+                                    its console says which
   edge1-install.log                 the installer card's log
 
 and the checks are the ones docs/HANDOFF.md lists for the card under test: boots
@@ -109,6 +111,27 @@ def snapshot(boot, name):
 UP_RE = re.compile(r"up (\d+)s, boot (?:completed at (\d+)s|not completed)")
 
 
+def pstore_ending(boot):
+    """How a boot whose ramoops was saved ended, from the end of its console:
+    "restart" or "power off" (the kernel's own last line of an orderly reboot),
+    "panic", "reset" (the console just stops), or None (nothing saved). The RAM
+    survives any warm restart, so "pstore saved" alone is not a reset - card 30's
+    reboots from Android's menu all saved one."""
+    d = os.path.join(boot, "pstore")
+    if not os.path.isdir(d):
+        return None
+    text = "".join(read(os.path.join(d, f)) or "" for f in sorted(os.listdir(d))
+                   if f.startswith("console-ramoops"))
+    if "Kernel panic - not syncing" in text:
+        return "panic"
+    tail = text[-4096:]
+    if "reboot: Restarting system" in tail:
+        return "restart"
+    if "reboot: Power down" in tail:
+        return "power off"
+    return "reset"
+
+
 def check_boots(logs, boots):
     print("== boots")
     text = read(os.path.join(logs, "boots.txt")) if logs else None
@@ -126,26 +149,34 @@ def check_boots(logs, boots):
         else:
             ended[m.group(1)] = m.group(2)
     names = sorted(set(started) | set(ended) | {os.path.basename(b) for b in boots})
-    resets = 0
+    resets = restarts = 0
     for name in names:
         end = ended.get(name)
         if end is None:     # the last boot: no later boot has written its ending
             end = (read(os.path.join(logs, name, "alive.txt")) or "no record").strip()
             end += " (last boot)"
         opts = re.search(r"options:(.*)", started.get(name, ""))
-        print(f"     {name}: {end}" + (f"; options:{opts.group(1)}" if opts else ""))
+        how = None
         if "pstore saved" in end:
-            resets += 1
+            how = pstore_ending(os.path.join(logs, name)) or "reset"
+            if how in ("restart", "power off"):
+                restarts += 1
+            else:
+                resets += 1
+        print(f"     {name}: {end}" + (f" ({how})" if how else "")
+              + (f"; options:{opts.group(1)}" if opts else ""))
     done = sum(1 for n in names if "completed at" in (ended.get(n) or
                read(os.path.join(logs, n, "alive.txt")) or ""))
     if not names:
         report("--", "boots", "boots.txt lists none")
     elif resets:
-        report("FAIL", "boots", f"{len(names)} boot(s), {resets} ended in a reset (pstore saved)")
+        report("FAIL", "boots", f"{len(names)} boot(s), {resets} ended in a reset or panic "
+               "(the console in pstore stops without the kernel's reboot line)")
     elif done < len(names):
         report("WARN", "boots", f"{len(names)} boot(s), {len(names) - done} never completed")
     else:
-        report("OK", "boots", f"{len(names)} boot(s), all completed, no reset")
+        report("OK", "boots", f"{len(names)} boot(s), all completed, no reset"
+               + (f"; {restarts} restarted in order (reboot from Android)" if restarts else ""))
 
 
 # --- one boot -----------------------------------------------------------------
@@ -326,8 +357,14 @@ def check_video(lc, boot):
             label, total, failed, eff = stats[-1]
             details.append(f"drm_hwcomposer since {label}: {failed}/{total} failed test commits, "
                            f"efficiency {eff}")
-            if total and failed * 20 > total:     # above 5%
-                status = "FAIL"
+            # The counter covers everything since the previous dump - the menus and
+            # the previews before the video too (card 30: 554 of 1813 between the
+            # boot's snapshot and the first playing-N, 0 of 3043 in a 4K stretch).
+            # With the video on a plane and no CLIENT layer in this dump, the
+            # failures were elsewhere: worth a look, not a failure of the video.
+            if total and failed * 20 > total and status == "OK":     # above 5%
+                status = "WARN"
+                details.append("the failures predate this frame (menus, previews)")
         report(status, f"video {p}", "; ".join(details))
     if perf:
         # "perf: 3840x2160 vp9, 30.0 fps: decode 4.1, fetch 12.0, map 0.3, copy 9.8 ms/frame (max 14.0 ms)"
@@ -491,8 +528,9 @@ def check_boot(boot):
     name = os.path.basename(boot)
     alive = (read(os.path.join(boot, "alive.txt")) or "no alive.txt").strip()
     snaps = [s for s in SNAPSHOTS if os.path.isdir(os.path.join(boot, s))]
+    how = pstore_ending(boot)
     print(f"== {name}: {alive}; snapshots: {', '.join(snaps) or 'none'}"
-          + ("; pstore saved (ended in a reset)" if os.path.isdir(os.path.join(boot, "pstore")) else ""))
+          + (f"; pstore saved (ended in a {how})" if how else ""))
     dmesg = lines(os.path.join(boot, "dmesg.txt"))
     lc = logcat(boot)
     check_ui(dmesg, boot)

@@ -152,6 +152,11 @@ def write(path, text):
         f.write(text)
 
 
+def read_text(path):
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
 def card(base, good):
     logs = os.path.join(base, "EDGE1BOOT", "edge1-logs")
     b1, b2 = os.path.join(logs, "boot-00041"), os.path.join(logs, "boot-00042")
@@ -252,6 +257,35 @@ try:
                 zf.write(p, os.path.relpath(p, os.path.dirname(good)))
     rc, out = run(z)
     expect(rc == 0 and statuses(out).get("video playing-1.txt") == "OK", f"zip: rc {rc}\n{out}")
+
+    # A warm restart keeps the ramoops: "pstore saved" is a reset only when the
+    # console stops without the kernel's reboot line (card 30's menu restarts).
+    logs = os.path.join(good, "edge1-logs")
+    boots_txt = read_text(os.path.join(logs, "boots.txt"))
+    write(os.path.join(logs, "boots.txt"), boots_txt.replace(
+        "boot-00041: up 400s, boot completed at 100s\n",
+        "boot-00041: up 400s, boot completed at 100s, pstore saved\n"))
+    console = os.path.join(logs, "boot-00041", "pstore", "console-ramoops-0")
+    for ending, want in (("[  400.1] reboot: Restarting system with command ''\n", "OK"),
+                         ("[  400.1] reboot: Power down\n", "OK"),
+                         ("[  399.0] Kernel panic - not syncing: Oops: Fatal exception\n", "FAIL"),
+                         ("[  399.0] edge1-bootwatch: thermal cpu=60C\n", "FAIL")):
+        write(console, "[    0.0] Kernel command line: panic=20 androidboot.init_fatal_panic=true\n"
+              "[  398.0] init: Reboot ending, jumping to kernel\n" * (want == "OK") + ending)
+        rc, out = run(good)
+        expect(statuses(out).get("boots") == want, f"pstore ending {ending.strip()!r}: want {want}\n{out}")
+    shutil.rmtree(os.path.join(logs, "boot-00041", "pstore"))
+    write(os.path.join(logs, "boots.txt"), boots_txt)
+
+    # Failed test commits with the video on a plane and every layer DEVICE: the
+    # counter covers the menus since the last dump too, so a WARN, not a FAIL.
+    ppath = os.path.join(logs, "boot-00042", "playing-1.txt")
+    playing = read_text(ppath)
+    write(ppath, playing.replace(" Total frames count: 600\n Failed to test commit frames: 0",
+                                 " Total frames count: 600\n Failed to test commit frames: 360"))
+    rc, out = run(good)
+    expect(statuses(out).get("video playing-1.txt") == "WARN", f"failures before the frame: want WARN\n{out}")
+    write(ppath, playing)
 
     # A single boot folder, and --boot.
     rc, out = run(os.path.join(good, "edge1-logs", "boot-00042"))

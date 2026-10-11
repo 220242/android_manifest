@@ -127,6 +127,7 @@ not reachable from it.
 | 26 | **12V over USB PD** on the second port (fusb302 at i2c4): the supply offered 5/9/12/15/20V and PPS while the kernel started, tcpm asked for 12V 3A at 1.4s, no Hard Reset needed; 928s at the power-test clocks, no reset. Video on the hardware decoder with cached buffers (`capture buffers cached`), but 60 fps streams (VP9 and H.264, 720p and 1080p) played at 30 and 1440p VP9 at ~9. Every frame went out as YV12, which minigbm allocates without scanout, so the GPU composed every video frame (the display is 1080p60; composition of the UI was DEVICE); rkvdec's core and CABAC clocks are set by nothing | ffmpeg_codec2 0003: NV12 output for hardware frames (flexible YUV = NV12 with scanout in minigbm; plane copies, not swscale) and a per-frame `perf:` log line; kernel 0007: rkvdec core/CABAC at 400 MHz; bootwatch `playing-N.txt` while a video plays; full speed is the default mode again |
 | 27 | 708s at **full speed** (A72 1800, GPU 800) on 12V PD, no reset. Video: 1080p60 at 60 fps, 1440p60 at 41-50, 4K60 at ~26 (`perf:` decode 17-24 + copy 14-17 ms per 4K frame, serial). NV12 never reached the screen: minigbm refused it (`Unsupported combination ... DRM_FOURCC_9999 ... HW_COMPOSER`; AOSP's generic gralloc has no DRV_ROCKCHIP, so rockchip-drm gets the dumb driver, NV12 without scanout) and the component fell back to YV12. And SurfaceFlinger had every layer CLIENT (composition efficiency 0.07): HDMI ran from the little VOP (CRTC 0, `ports = <&vopl_out>, <&vopb_out>`), one plane besides the cursor | Kernel 0008: little VOP off, HDMI on the big one (3 planes, NV12 + scaling on two); `vop=lit` undoes it in boot.scr. minigbm 0001: NV12 + SCANOUT for "rockchip" in the dumb driver (host-tested). ffmpeg_codec2 0004: 2 frame threads for the hwaccel - decode overlaps the copy. edge1-options: `vop`, `video_hw`, `video_nv12`, `video_threads`; `playing-N.txt` adds the DRM state |
 | 28 | Owner: "4K plays fine at 30 fps". `edge1_vop=big`; 516s, no reset. 4K VP9 at a steady 30 (the clips' rate: `fetch` 10-13 ms is the player pacing), decode 4-5 ms (waiting on the worker, `2 frame thread(s)`), copy 13-20 ms; 1440p at 30, bursting to 54. The DRM state shows the 4K NV12 buffer on plane 0, scaled by the VOP to 1209x680, the GPU at 200 MHz. But with the video full screen everything went back to CLIENT (`Failed to test commit` 60% of frames, GPU at 800 MHz): the performance overlay has alpha 0.8 - the window manager's cap for an untrusted overlay that lets touches through - and the VOP's planes have no alpha property, so drm_hwcomposer had no plane for it and no plan at all | Edge1 Tools: the overlay is a trusted one (`setTrustedOverlay`, INTERNAL_SYSTEM_WINDOW; system uid, platform-signed), alpha 1. ffmpeg_codec2 0005: frames above 1080p copied in 64-row bands by 2 threads (`video_copy_threads`) - one core is over budget for 4K60 |
+| 30 | Six boots (b8e833f + PR #4, built 2026-10-06 18:13 IDT), none reset: the two with a saved pstore were restarts from Android - the console ends in `reboot: Restarting system` (edge1-logcheck called them resets; it now reads the ending). Video, boot 3 (SmartTube, VP9 on rkvdec, `capture buffers cached`): **card 28's fix holds** - with the trusted overlay at alpha 1 and a 4K video full screen, three layers DEVICE, the NV12 buffer on win0 scaled to 1920x1080, 0 of 3043 frames failed a test commit, the GPU at 200 MHz. 1440p60 at a steady 60 (card 27: 41-50); a 3500x2150 24 fps clip at its own rate. **4K60 at 35-43 fps**: decode 5 ms, map 2, copy 16-17 ms per frame - the copy with 2 threads is no shorter than card 28's on one (13-20 ms), and 1440p copies at the same ~0.75 GB/s, so the copy is limited by memory, not a core: the destination is the dumb buffer rockchip-drm maps write-combined. The failed test commits in playing-1/2 (30%, 6%) were counted since the previous dump, menus and previews included; the cursor plane (win3) is the one drm_hwcomposer ignores, win2 cannot scale | edge1-logcheck: pstore with an orderly ending is a restart, failed test commits with the video on a plane and no CLIENT layer are a WARN |
 
 ## Lessons that cost a card each (check these first next time)
 
@@ -272,11 +273,16 @@ not reachable from it.
 
 ## Open, in rough order
 
-* Card 29, video: with the overlay on and a video full screen, SurfaceFlinger's
-  dump should have every layer DEVICE and the drm_hwcomposer statistics no new
-  "Failed to test commit frames"; the overlay's layer `color{... 1 >}`. A 4K60
-  clip (YouTube: "2160p60") for the copy threads: `perf:` copy near half of
-  card 28's 13-20 ms, fps near 60. `video_copy_threads=1` is card 28's copy.
+* Video, 4K60 (card 30: 35-43 fps; every layer DEVICE, the overlay at alpha 1 -
+  confirmed). The frame copy into the output buffer takes 16-17 ms whether one
+  thread or two do it (~0.75 GB/s, 1440p the same rate): the write-combined dumb
+  buffer is the limit, so more copy threads will not reach 60. Two ways on: a
+  cached destination (minigbm allocating the video buffer from a cached dma-buf
+  heap and importing it into rockchip-drm for scanout - the VOP has an IOMMU - with
+  a cache clean on unlock), or no copy at all (rkvdec decoding into the gralloc
+  buffers, V4L2 DMABUF import in FFmpeg's request hwaccel). Neither measured yet:
+  first time a memcpy into a scanout NV12 AHardwareBuffer against one into malloc'd
+  memory on the board. On a 1080p TV, 1080p60 plays at 60 (copy 4 ms).
 * On a 4K TV the big VOP offers 3840x2160 modes, and Android picks the
   TV's preferred mode - the UI rendered at 4K by a Mali T860. Now capped: `ui=` in
   edge1-options.txt (default 1080) goes through boot.scr as androidboot.edge1.ui, and
