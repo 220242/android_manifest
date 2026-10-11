@@ -412,6 +412,20 @@ def check_cec(lc):
     elif not claimed:
         status = "WARN"
         details.append("the framework claimed no logical address (HDMI control off in Settings?)")
+    # Who answered. A message to the TV (logical address 0, "40:..") that comes back
+    # with errorCode=1 was not acknowledged: the TV is not on the CEC bus, which on
+    # a Samsung means Anynet+ is off. The devices discovery found did answer.
+    to_tv = [msg for _, tag, msg in lc if tag == "HdmiCecController"
+             and re.search(r"Failed to send <[^>]*> 40:", msg)]
+    nacked = [m for m in to_tv if "errorCode=1" in m]
+    found = re.findall(r"display_name: (.*?) power_status", " ".join(
+        msg for _, tag, msg in lc if tag == "DeviceDiscoveryAction"))
+    if found:
+        details.append("other devices on the bus: " + ", ".join(dict.fromkeys(found)))
+    if nacked and claimed:
+        status = "WARN"
+        details.append(f"the TV acknowledged none of {len(nacked)} message(s) sent to it"
+                       " (its HDMI-CEC / Anynet+ off?)")
     report(status, "HDMI-CEC", "; ".join(details))
 
 
