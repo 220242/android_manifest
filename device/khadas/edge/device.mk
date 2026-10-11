@@ -422,7 +422,8 @@ PRODUCT_PROPERTY_OVERRIDES += \
 #
 # Firmware: brcmfmac is built in and probes at 1.4s, before /vendor is mounted,
 # so the files are in the ramdisk's /lib/firmware as well - see the kernel config
-# fragment. The /vendor copies serve any later reload.
+# fragment. The /vendor copies serve any later reload, including init.edge1.rc's
+# second probe for a card that turned up in the gap before /vendor is mounted.
 # ---------------------------------------------------------------------------
 PRODUCT_PACKAGES += \
     wpa_supplicant \

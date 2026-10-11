@@ -24,9 +24,9 @@ edge1-install-boot.sh, for an installer card):
   edge1-install.log                 the installer card's log
 
 and the checks are the ones docs/HANDOFF.md lists for the card under test: boots
-and resets, the 1080p menus (ui=), the hardware RNG, HDMI audio, HDMI-CEC, video on a display
-plane, the overlay's alpha, temperatures, crashes, Bluetooth's signature, the
-installer. Each prints OK, FAIL, WARN (worth a look) or "--" (not in the logs: the
+and resets, the 1080p menus (ui=), the hardware RNG, HDMI audio, HDMI-CEC, Wi-Fi,
+Bluetooth remotes, video on a display plane, the overlay's alpha, temperatures,
+crashes, Bluetooth's signature, the installer. Each prints OK, FAIL, WARN (worth a look) or "--" (not in the logs: the
 boot ended first, nothing played, an older card). The exit status is 1 if anything
 FAILed.
 
@@ -415,6 +415,81 @@ def check_cec(lc):
     report(status, "HDMI-CEC", "; ".join(details))
 
 
+def check_wifi(dmesg, lc):
+    """The AP6398S's wlan0: did brcmfmac get its firmware, and did Wi-Fi connect."""
+    fw_fail = [l for l in dmesg if re.search(r"Direct firmware load for brcm/brcmfmac\d+-sdio\.bin failed", l)]
+    fw_ok = [l for l in dmesg if "brcmf_c_preinit_dcmds: Firmware:" in l]
+    no_iface = any(tag == "wificond" and "Can't get wlan0 index" in msg for _, tag, msg in lc)
+    connected = [msg for _, tag, msg in lc
+                 if tag == "wpa_supplicant" and "CTRL-EVENT-CONNECTED" in msg]
+    freqs = re.findall(r"\bfreq=(\d+)", " ".join(msg for _, tag, msg in lc if tag == "wpa_supplicant"))
+    details = []
+    if fw_fail:
+        details.append("the first firmware load failed (probed between the switch to /system"
+                       " and the /vendor mount)")
+        details.append("a second probe loaded it" if fw_ok else "no second probe brought it up")
+    if no_iface:
+        details.append("wificond found no wlan0")
+    if connected:
+        band = ""
+        if freqs:
+            f = int(freqs[-1])
+            band = f" on {f} MHz ({'2.4' if f < 3000 else '5'} GHz)"
+        details.append("connected" + band)
+    if not (fw_ok or fw_fail or no_iface):
+        report("--", "Wi-Fi", "no brcmfmac firmware line in dmesg")
+    elif not fw_ok or no_iface:
+        report("FAIL", "Wi-Fi", "; ".join(details))
+    elif fw_fail:
+        report("WARN", "Wi-Fi", "; ".join(details))
+    elif connected:
+        report("OK", "Wi-Fi", "; ".join(details))
+    else:
+        report("--", "Wi-Fi", "wlan0 up, never connected to a network in this boot")
+
+
+def check_bt_remotes(lc):
+    """Bluetooth HID devices (remotes, keyboards): bonded ones, and which connected."""
+    if not any(tag == "AdapterState" and msg.startswith("ON") for _, tag, msg in lc):
+        if any(tag == "AdapterState" for _, tag, _m in lc):
+            report("FAIL", "Bluetooth remotes", "the adapter never reached ON")
+        else:
+            report("--", "Bluetooth remotes", "no AdapterState lines in the logcat")
+        return
+    bonded, paired, connected, failed = [], [], [], []
+    for _, tag, msg in lc:
+        m = re.search(r"Bond State Change Intent:(\S+) BOND_BONDING => BOND_BONDED", msg)
+        if m:
+            paired.append(m.group(1).lower())
+        m = re.search(r"btif_hh_add_added_dev: Added device (\S+?)\[", msg)
+        if m and m.group(1).lower() not in bonded:
+            bonded.append(m.group(1).lower())
+        m = re.search(r"onProfileStateChanged: profile HID, device (\S+), newProfileState 2", msg)
+        if m and m.group(1).lower() not in connected:
+            connected.append(m.group(1).lower())
+        m = re.search(r"LE authentication for (\S+) failed", msg)
+        if m:
+            failed.append(m.group(1).lower())
+    if not bonded and not connected:
+        report("--", "Bluetooth remotes", "no HID device bonded or paired in this boot")
+        return
+    tail = lambda a: a[-5:]
+    paired = [tail(a) for a in paired]
+    earlier = [a for a in bonded if tail(a) not in paired]
+    details = []
+    if earlier:
+        details.append("bonded before this boot: " + ", ".join(tail(a) for a in earlier))
+    if paired:
+        details.append("paired in this boot: " + ", ".join(dict.fromkeys(paired)))
+    details.append("HID connected: " + (", ".join(tail(a) for a in connected) or "none"))
+    if failed:
+        details.append(f"{len(failed)} failed pairing attempt(s)")
+    missing = [a for a in earlier if not any(tail(a) == tail(c) for c in connected)]
+    if missing:
+        details.append("never came back: " + ", ".join(tail(a) for a in missing))
+    report("WARN" if missing else "OK", "Bluetooth remotes", "; ".join(details))
+
+
 def check_overlay(boot):
     texts = [read(os.path.join(boot, p)) or "" for p in sorted(os.listdir(boot))
              if re.match(r"playing-\d+\.txt$", p)]
@@ -537,6 +612,8 @@ def check_boot(boot):
     check_rng(dmesg, lc, boot)
     check_audio(lc, boot)
     check_cec(lc)
+    check_wifi(dmesg, lc)
+    check_bt_remotes(lc)
     check_video(lc, boot)
     check_overlay(boot)
     check_thermal(dmesg)
