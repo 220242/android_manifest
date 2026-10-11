@@ -161,7 +161,18 @@ snapshot() {
                com.android.tv.settings com.android.shell; do
           echo "== $p"
           timeout 20 dumpsys package "$p" | grep -E "codePath=|sharedUser=|signatures=|pkgFlags="
-      done; } > "$s/packages.txt" 2>&1
+      done
+      # HOME: the role holder Android keeps, what a HOME intent resolves to, every
+      # launcher, and the role as written to /data. Card 30 lost a chosen launcher
+      # on reboot; Edge1 Tools logs (tag Edge1Launcher) what it found and put back.
+      echo "== HOME"
+      echo "role holder: $(timeout 20 cmd role get-role-holders android.app.role.HOME)"
+      echo "resolves to: $(timeout 20 cmd package resolve-activity --brief \
+          -a android.intent.action.MAIN -c android.intent.category.HOME | tail -n 1)"
+      timeout 20 cmd package query-activities --brief \
+          -a android.intent.action.MAIN -c android.intent.category.HOME
+      grep -A 3 'android.app.role.HOME' \
+          /data/misc_de/0/apexdata/com.android.permission/roles.xml; } > "$s/packages.txt" 2>&1
     sync
     log "state written to EDGE1BOOT:edge1-logs/${OUT##*/}/$1"
 }

@@ -14,6 +14,9 @@ import android.util.Log;
  * that never got there turn autostart off. Committed, not applied: a reset seconds
  * later must find it on disk.
  *
+ * And the launcher picked in Edge1 Tools (Launchers): put back as HOME if
+ * something else is.
+ *
  * Nothing is installed at boot: the bundled apps go in one by one, when the owner
  * presses their button in MainActivity.
  */
@@ -24,6 +27,10 @@ public class BootReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context context, Intent intent) {
         if (!Intent.ACTION_BOOT_COMPLETED.equals(intent.getAction())) return;
+
+        // goAsync: the role is set by a callback, which should get to log its result.
+        PendingResult launcher = goAsync();
+        Launchers.restore(context, launcher::finish);
 
         SharedPreferences p = Prefs.get(context);
         if (!p.getBoolean(Prefs.HUD_AUTOSTART, false)) return;

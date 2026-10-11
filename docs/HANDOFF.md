@@ -293,6 +293,15 @@ not reachable from it.
   scales it (the `plane` in the DRM state has src 1920x1080, crtc 3840x2160); if
   drm_hwcomposer cannot find a scaling plane for it, the screen stays black and
   `ui=native` is the way back.
+* Launcher choice lost on reboot (card 30: another launcher installed and chosen,
+  the stock one back after a reboot). Card 30's logs cover no switch, so the cause
+  is not known. Edge1 Tools now keeps the launcher picked with its "Default
+  launcher" button and, after boot, makes it HOME again and goes home to it if
+  Android has another one; bootwatch's packages.txt shows the HOME role holder,
+  what HOME resolves to, every launcher and the role in roles.xml, and the log
+  checker's `launcher` line says whether the kept one came back. **Not yet run on a
+  board.** To check: pick the launcher with the button, reboot, send the logs; the
+  `Edge1Launcher` lines in logcat say what Android had at boot.
 * PD stays to be watched (power.txt); full speed is the default mode now.
   Edge1 Tools' Power card and the logs switch, still untried.
 * Bluetooth signing (task left from card 22): packages.txt on card 23 shows
