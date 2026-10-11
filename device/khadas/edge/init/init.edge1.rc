@@ -143,6 +143,23 @@ on property:sys.boot_completed=1
 # exists on this kernel, and both are gone.
 # ---------------------------------------------------------------------------
 
+# Wi-Fi's second chance at its firmware. The ramdisk's /lib/firmware covers a
+# brcmfmac that probes before the switch to /system, /vendor/firmware one that
+# probes after /vendor is mounted, and nothing covers the 50 ms between the two.
+# boot-00005 of the logs sent on 2026-10-11 fell into it: the SDIO card turned up
+# at 1.843s, 15 ms after "Switching root", /vendor came at 1.895s, so "Direct firmware load for
+# brcm/brcmfmac4359-sdio.bin failed with error -2", brcmfmac let go of the chip
+# ("HT Avail timeout" on the way out) and that boot had no wlan0 at all (wificond:
+# "Can't get wlan0 index"). boot-00006 missed the gap by 0.2 ms.
+# A failed firmware load unbinds both SDIO functions, so binding them again here,
+# with /vendor long mounted, is the whole probe over with the firmware in reach.
+# When the first probe worked they are bound already and the writes fail with
+# EBUSY, which init logs and nothing else. Long before the framework switches
+# Wi-Fi on, so wificond finds wlan0 there. Function 1 first, as the bus probed it.
+on post-fs-data
+    write /sys/bus/sdio/drivers/brcmfmac/bind mmc0:0001:1
+    write /sys/bus/sdio/drivers/brcmfmac/bind mmc0:0001:2
+
 # A USB Wi-Fi adapter instead of the AP6398S. Android drives one Wi-Fi interface,
 # the one named by wifi.interface (read each time Wi-Fi is switched on, HAL-less),
 # and the AP6398S always comes up first as wlan0, so a USB adapter is wlan1 and
