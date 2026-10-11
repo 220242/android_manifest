@@ -529,6 +529,39 @@ def check_overlay(boot):
            (" - an untrusted overlay's cap: drm_hwcomposer has no plane for it" if bad else ""))
 
 
+HOME_START_RE = re.compile(r"START u0 \{act=android.intent.action.MAIN "
+                           r"cat=\[android.intent.category.HOME\].*?cmp=([\w.]+)/")
+
+
+def check_launcher(lc, boot):
+    """Which launcher HOME went to, and whether Edge1 Tools' kept one (Launchers.java) won."""
+    homes = [m.group(1) for m in (HOME_START_RE.search(msg) for lvl, tag, msg in lc)
+             if m and m.group(1) != "com.android.tv.settings"]
+    notes = [msg for lvl, tag, msg in lc if tag == "Edge1Launcher"]
+    holder = None
+    path = snapshot(boot, "packages.txt")
+    for line in lines(path) if path else []:
+        m = re.match(r"role holder: (.*)", line)
+        if m:
+            holder = m.group(1).strip() or "none"
+    kept = None
+    for n in notes:
+        m = re.search(r"kept (\S+?),", n)
+        if m and m.group(1) != "null":
+            kept = m.group(1)
+    if not homes and not notes and holder is None:
+        report("--", "launcher", "no HOME start, Edge1Launcher line or role snapshot")
+        return
+    detail = f"HOME started {homes[-1] if homes else 'nothing'}"
+    if holder is not None:
+        detail += f", role holder {holder}"
+    detail += f", kept in Edge1 Tools {kept or 'nothing'}"
+    failed = any("FAILED" in n for n in notes)
+    lost = kept is not None and (holder or (homes[-1] if homes else None)) not in (kept, None)
+    report("WARN" if failed or lost else "OK", "launcher",
+           detail + (" - the kept launcher did not come back" if failed or lost else ""))
+
+
 def check_thermal(dmesg):
     hot, rails, n = {}, {}, 0
     for line in dmesg:
@@ -630,6 +663,7 @@ def check_boot(boot):
     check_bt_remotes(lc)
     check_video(lc, boot)
     check_overlay(boot)
+    check_launcher(lc, boot)
     check_thermal(dmesg)
     check_crashes(lc, dmesg)
     check_signing(boot)

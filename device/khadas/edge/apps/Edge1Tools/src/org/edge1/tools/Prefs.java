@@ -12,6 +12,8 @@ final class Prefs {
     /** Set when those tries turned autostart off; MainActivity says so. */
     static final String HUD_AUTOSTART_TRIPPED = "hud_autostart_tripped";
     static final String STATUS_PREFIX = "status:";
+    /** The owner's launcher (Launchers): put back as HOME after each boot. */
+    static final String LAUNCHER = "launcher";
 
     /** Overlay corners, in the order the position button cycles through them. */
     static final int POS_TOP_RIGHT = 0;
