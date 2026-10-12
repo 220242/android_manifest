@@ -206,7 +206,7 @@
        raspberry-vanilla's android_external_mesa3d, branch android-14.0: Mesa
        25.0.3 with its own android/Android.mk, which runs meson with the AOSP
        toolchain, selected by BOARD_MESA3D_* in BoardConfig.mk. Built on the
-       laptop against r75 on 2026-10-12 (commit dc51e80; libEGL_mesa,
+       laptop against r75 on 2026-10-12 (the pinned commit; libEGL_mesa,
        libGLESv2_mesa, libgallium_dri, 32 and 64 bit).
 
        Not upstream 26.2: in 26.2 panfrost is on meson's with_driver_using_cl
@@ -221,6 +221,8 @@
        ================================================================== -->
   <remove-project name="platform/external/mesa3d" />
   <project name="android_external_mesa3d" path="external/mesa3d"
-           remote="raspberry-vanilla" revision="android-14.0" clone-depth="1" />
+           remote="raspberry-vanilla"
+           revision="dc51e8043f0af39e10937659ef462a41043e77e4" upstream="android-14.0"
+           clone-depth="1" />
 
 </manifest>

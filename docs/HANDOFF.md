@@ -277,7 +277,7 @@ not reachable from it.
   boot-00003) drew with some textures missing and logged no GPU fault, Panfrost
   error or shader error: a rendering bug in AOSP's old Mesa snapshot is the likely
   cause. external/mesa3d is now raspberry-vanilla's android_external_mesa3d,
-  android-14.0 (Mesa 25.0.3, built dc51e80), built by Mesa's own android/Android.mk
+  android-14.0 (Mesa 25.0.3, pinned to dc51e80), built by Mesa's own android/Android.mk
   (meson inside the Make build; BOARD_MESA3D_USES_MESON_BUILD,
   BOARD_MESA3D_GALLIUM_DRIVERS := panfrost), packages libEGL_/libGLESv1_CM_/
   libGLESv2_mesa + libgallium_dri. Host: meson >= 1.4 from pip into
