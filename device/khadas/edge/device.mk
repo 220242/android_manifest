@@ -206,52 +206,36 @@ PRODUCT_PACKAGES += \
 #
 # What does exist is external/mesa3d, which is the whole reason this port moved to
 # a mainline kernel: panfrost binds to drivers/gpu/drm/panfrost and gives the
-# Mali-T860 GLES with no proprietary blob. Android's EGL loader looks for
-# libGLES_$(ro.hardware.egl).so, which Mesa installs as libGLES_mesa.
+# Mali-T860 GLES with no proprietary blob.
 #
-# Which driver Mesa builds is BOARD_GPU_DRIVERS in BoardConfig.mk - confirmed as
-# the variable external/mesa3d reads, not guessed: its Android.mk has
-#   MESA_BUILD_GALLIUM := $(strip $(foreach d, $(BOARD_GPU_DRIVERS), ...))
+# Since 2026-10-12 that is Mesa 25.0.3, built by its own android/Android.mk
+# (meson driven from Make, selected by BOARD_MESA3D_* in BoardConfig.mk), not
+# AOSP's Android.mk snapshot of Mesa 20.3.4. Upstream installs the
+# libEGL_/libGLESv1_CM_/libGLESv2_ triplet under /vendor/lib64/egl plus
+# libgallium_dri.so - the four packages dragonboard and raspberry-vanilla's rpi5
+# list. The old snapshot defined only libGLES_mesa and libglapi, which is why
+# those were the names here before. frameworks/native's EGL loader tries
+# libGLES_$(ro.hardware.egl).so first and falls back to the triplet, so
+# ro.hardware.egl=mesa below stays. external/mesa3d is no longer in
+# PRODUCT_SOONG_NAMESPACES: the old snapshot demanded it (its Android.mk:41),
+# 25.0.3 has no Android.bp at all.
 #
-# The rest of this block is copied from device/linaro/dragonboard's Mesa
-# integration, the one working example of this in the tree, rather than assembled
-# from what seemed necessary. Two things came from it that were missing here:
+# Check the names against the build: core/main.mk only enforces that
+# PRODUCT_PACKAGES exist with PRODUCT_ENFORCE_PACKAGES_EXIST, so a name that
+# matches no module is dropped in silence.
 #
-#   PRODUCT_SOONG_NAMESPACES. external/mesa3d refuses to build without it -
-#     "external/mesa3d must be in PRODUCT_SOONG_NAMESPACES" (its Android.mk:41) -
-#     and that was the whole of the last build failure.
-#   ro.opengles.version. The framework reports what this says, not what the driver
-#     can do. 196608 is 3.0 (0x30000), which is what panfrost delivers on Midgard;
-#     claiming 3.1 here would only make applications ask for what is not there.
+# ro.opengles.version stays 196608 (3.0) until a board report shows what this
+# Mesa returns for GL_VERSION on the T860; the framework reports what the
+# property says, not what the driver can do.
 #
-# What was NOT copied from dragonboard, on purpose: libEGL_mesa,
-# libGLESv1_CM_mesa, libGLESv2_mesa and libgallium_dri. dragonboard lists all
-# four, but nothing in this tree defines them - two independent scans of the
-# synced tree agree, one over every Android.bp/Android.mk in it and one over
-# external/mesa3d alone, and the only EGL/GLES modules mesa3d defines are
-# libGLES_mesa and libglapi. Those four names come from the newer meson-based
-# Mesa packaging, which this snapshot does not use (dragonboard's default is
-# BOARD_USE_CUSTOMIZED_MESA, a prebuilt).
-#
-# Naming them cost nothing and bought nothing, which is the problem:
-# core/main.mk:1341 only checks that PRODUCT_PACKAGES exist when a product opts
-# in with PRODUCT_ENFORCE_PACKAGES_EXIST, so a name that matches no module is
-# dropped in silence. The list read like five libraries being installed when one
-# was.
-#
-# One library is the supported form. frameworks/native's EGL loader takes
-# libGLES_$(ro.hardware.egl).so as a single combined driver, and only falls back
-# to the libEGL_/libGLESv1_CM_/libGLESv2_ triplet when that is absent.
-#
-# Vulkan is deliberately absent, which is where this diverges from dragonboard:
-# panvk on Midgard is not something to depend on, and HWUI uses GLES unless told
-# otherwise. So no vulkan.* package and no android.hardware.vulkan permission.
-PRODUCT_SOONG_NAMESPACES += \
-    external/mesa3d
-
+# Vulkan is deliberately absent: panvk supports Bifrost and Valhall, not Midgard,
+# and HWUI uses GLES unless told otherwise. So no vulkan.* package and no
+# android.hardware.vulkan permission.
 PRODUCT_PACKAGES += \
-    libGLES_mesa \
-    libglapi
+    libEGL_mesa \
+    libGLESv1_CM_mesa \
+    libGLESv2_mesa \
+    libgallium_dri
 
 PRODUCT_PROPERTY_OVERRIDES += \
     ro.hardware.egl=mesa \

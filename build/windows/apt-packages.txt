@@ -85,3 +85,17 @@ pigz
 # without mounting anything, which a WSL build user could not do.
 dosfstools
 mtools
+
+# ---- upstream Mesa (external/mesa3d) ----
+#
+# Mesa's android/Android.mk runs meson and then ninja from inside the Make build,
+# with PATH=/usr/bin:/usr/local/bin first - the host's ninja, not the tree's
+# prebuilt ("Could not detect Ninja v1.8.2 or newer" without it) - and meson's
+# generators are Python with mako templates and yaml/packaging imports. meson itself is NOT from apt: jammy has
+# 0.61 and Mesa needs >= 1.4, so stage_deps installs it with pip into
+# /usr/local/bin - and an apt meson in /usr/bin would shadow that, which is why it
+# must stay off this list.
+python3-mako
+python3-yaml
+python3-packaging
+ninja-build

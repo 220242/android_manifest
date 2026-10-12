@@ -273,6 +273,23 @@ not reachable from it.
 
 ## Open, in rough order
 
+* Mesa 20.3.4 -> 25.0.3 (owner's go-ahead 2026-10-12). Dead Cells (card 30,
+  boot-00003) drew with some textures missing and logged no GPU fault, Panfrost
+  error or shader error: a rendering bug in AOSP's old Mesa snapshot is the likely
+  cause. external/mesa3d is now raspberry-vanilla's android_external_mesa3d,
+  android-14.0 (Mesa 25.0.3, pinned to dc51e80), built by Mesa's own android/Android.mk
+  (meson inside the Make build; BOARD_MESA3D_USES_MESON_BUILD,
+  BOARD_MESA3D_GALLIUM_DRIVERS := panfrost), packages libEGL_/libGLESv1_CM_/
+  libGLESv2_mesa + libgallium_dri. Host: meson >= 1.4 from pip into
+  /usr/local/bin, ninja-build, python3-mako/yaml/packaging. **Built on the laptop
+  (those modules, against r75), not yet run on a board.** Upstream 26.2 was tried
+  first and does not configure: in 26.2 panfrost needs CLC, hence LLVM ("CLC
+  requires LLVM", meson.build:977), or a host mesa_clc with precompiled shaders.
+  Still unknown until the board: Mesa's gralloc access (HIDL mapper 4.0 is not
+  served here, so u_gralloc must fall back to the cros_api path through
+  gralloc.minigbm). On the board: menus, SmartTube video on the overlay plane,
+  then Dead Cells; GL_VERSION in SurfaceFlinger's dump decides whether
+  ro.opengles.version can say 3.1.
 * Video, 4K60 (card 30: 35-43 fps; every layer DEVICE, the overlay at alpha 1 -
   confirmed). The frame copy into the output buffer takes 16-17 ms whether one
   thread or two do it (~0.75 GB/s, 1440p the same rate): the write-combined dumb

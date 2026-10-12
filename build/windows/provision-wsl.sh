@@ -73,6 +73,13 @@ stage_deps() {
     # binary those projects fetch fine and then fail at checkout, deterministically
     # and with no mention of LFS in the error - which is exactly how it presented.
     git lfs install --skip-repo >/dev/null 2>&1 || true
+    # meson for upstream Mesa's android/Android.mk (see apt-packages.txt for why
+    # not from apt). /usr/local/bin, because Mesa's makefile puts /usr/bin and
+    # /usr/local/bin first on PATH, not ~/.local/bin.
+    if ! /usr/local/bin/meson --version 2>/dev/null | grep -qE '^(1\.([4-9]|[1-9][0-9])|[2-9])'; then
+        log "installing meson for Mesa"
+        sudo -E python3 -m pip install -q --upgrade 'meson>=1.4'
+    fi
 
     if ! command -v repo >/dev/null 2>&1; then
         log "installing the repo launcher"
@@ -474,6 +481,10 @@ PY_INNER
         else
             echo "    ABSENT at $db"
         fi
+        echo "  upstream Mesa: VERSION $(cat "$md/VERSION" 2>/dev/null || echo none), android/Android.mk $([[ -f $md/android/Android.mk ]] && echo present || echo ABSENT)"
+        echo "  meson: $(PATH=/usr/bin:/usr/local/bin:$PATH meson --version 2>&1 | head -1) at $(PATH=/usr/bin:/usr/local/bin:$PATH command -v meson || echo MISSING)"
+        echo "  python modules: $(for m in mako yaml packaging; do python3 -c "import $m" 2>/dev/null && printf '%s ok ' $m || printf '%s MISSING ' $m; done)"
+        echo "  libdrm in the tree: $(grep -m1 -oE "version *: *'[0-9.]+'" "$TREE/external/libdrm/meson.build" 2>/dev/null || echo unknown)"
         echo "  ours: $(grep -hE '^BOARD_(MESA3D|GPU)' "$MANIFEST/device/khadas/edge/BoardConfig.mk" | tr '\n' ' ' || echo NONE)"
         echo
 
