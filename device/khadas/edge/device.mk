@@ -208,7 +208,7 @@ PRODUCT_PACKAGES += \
 # a mainline kernel: panfrost binds to drivers/gpu/drm/panfrost and gives the
 # Mali-T860 GLES with no proprietary blob.
 #
-# Since 2026-10-12 that is upstream Mesa 26.2, built by its own android/Android.mk
+# Since 2026-10-12 that is Mesa 25.0.3, built by its own android/Android.mk
 # (meson driven from Make, selected by BOARD_MESA3D_* in BoardConfig.mk), not
 # AOSP's Android.mk snapshot of Mesa 20.3.4. Upstream installs the
 # libEGL_/libGLESv1_CM_/libGLESv2_ triplet under /vendor/lib64/egl plus
@@ -218,7 +218,7 @@ PRODUCT_PACKAGES += \
 # libGLES_$(ro.hardware.egl).so first and falls back to the triplet, so
 # ro.hardware.egl=mesa below stays. external/mesa3d is no longer in
 # PRODUCT_SOONG_NAMESPACES: the old snapshot demanded it (its Android.mk:41),
-# upstream has no Android.bp at all.
+# 25.0.3 has no Android.bp at all.
 #
 # Check the names against the build: core/main.mk only enforces that
 # PRODUCT_PACKAGES exist with PRODUCT_ENFORCE_PACKAGES_EXIST, so a name that

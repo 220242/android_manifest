@@ -321,8 +321,9 @@ BOARD_USES_MINIGBM := true
 
 # Mesa: which gallium driver to build.
 #
-# external/mesa3d is upstream Mesa 26.2 (manifests/khadas_edge_tv14.xml), not
-# AOSP's Android.mk snapshot (Mesa 20.3.4, late 2020). Upstream builds for Android
+# external/mesa3d is Mesa 25.0.3 from raspberry-vanilla (manifests/
+# khadas_edge_tv14.xml), not AOSP's Android.mk snapshot (Mesa 20.3.4, late 2020).
+# Mesa builds for Android
 # through android/Android.mk, which runs meson with the AOSP toolchain, and it
 # reads exactly these board variables - the same ones device/linaro/dragonboard
 # and raspberry-vanilla's rpi4/rpi5 set. BOARD_GPU_DRIVERS was the old snapshot's
@@ -335,7 +336,7 @@ BOARD_USES_MINIGBM := true
 #
 # Why the move (2026-10-12): Dead Cells drew with textures missing on 20.3.4 and
 # logged no GPU fault, the signature of a rendering bug in the driver itself.
-# Upstream Panfrost has five years of Midgard fixes since then, plus GLES 3.1.
+# Panfrost has four years of Midgard fixes since then.
 #
 # No Vulkan driver: panvk supports Bifrost and Valhall, not the T860.
 BOARD_MESA3D_USES_MESON_BUILD := true
