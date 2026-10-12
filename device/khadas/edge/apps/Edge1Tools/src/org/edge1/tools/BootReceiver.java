@@ -15,7 +15,8 @@ import android.util.Log;
  * later must find it on disk.
  *
  * And the launcher picked in Edge1 Tools (Launchers): put back as HOME if
- * something else is.
+ * something else is; and the remote pairing screen if nothing to steer with has
+ * connected (RemotePairing).
  *
  * Nothing is installed at boot: the bundled apps go in one by one, when the owner
  * presses their button in MainActivity.
@@ -31,6 +32,9 @@ public class BootReceiver extends BroadcastReceiver {
         // goAsync: the role is set by a callback, which should get to log its result.
         PendingResult launcher = goAsync();
         Launchers.restore(context, launcher::finish);
+
+        // No remote connected a little later: the pairing screen (RemotePairing).
+        RemotePairing.schedule(context);
 
         SharedPreferences p = Prefs.get(context);
         if (!p.getBoolean(Prefs.HUD_AUTOSTART, false)) return;

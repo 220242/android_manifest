@@ -484,8 +484,11 @@ def check_bt_remotes(lc):
         m = re.search(r"LE authentication for (\S+) failed", msg)
         if m:
             failed.append(m.group(1).lower())
+    # Edge1 Tools' RemotePairing: whether it opened the pairing screen.
+    pair = [msg for _, tag, msg in lc if tag == "Edge1Pair"]
     if not bonded and not connected:
-        report("--", "Bluetooth remotes", "no HID device bonded or paired in this boot")
+        report("--", "Bluetooth remotes", "no HID device bonded or paired in this boot"
+               + (f"; Edge1Pair: {pair[-1]}" if pair else ""))
         return
     tail = lambda a: a[-5:]
     paired = [tail(a) for a in paired]
@@ -498,6 +501,8 @@ def check_bt_remotes(lc):
     details.append("HID connected: " + (", ".join(tail(a) for a in connected) or "none"))
     if failed:
         details.append(f"{len(failed)} failed pairing attempt(s)")
+    if pair:
+        details.append("Edge1Pair: " + pair[-1])
     missing = [a for a in earlier if not any(tail(a) == tail(c) for c in connected)]
     if missing:
         details.append("never came back: " + ", ".join(tail(a) for a in missing))
