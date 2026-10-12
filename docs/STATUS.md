@@ -461,7 +461,7 @@ none of that work is reusable anywhere else.
 
 | | driver | userspace, already in AOSP 14 |
 |---|---|---|
-| GPU | `drivers/gpu/drm/panfrost` | `external/mesa3d` → `libGLES_mesa` |
+| GPU | `drivers/gpu/drm/panfrost` | `external/mesa3d` (upstream Mesa 26.2) → `libEGL_mesa`/`libGLESv2_mesa` |
 | Display | `drivers/gpu/drm/rockchip` | `external/drm_hwcomposer` + minigbm |
 | Decode | `staging/media/rkvdec` (H.264 only) | `external/v4l2_codec2` |
 | Wi-Fi | `brcmfmac` over SDIO | AOSP `wpa_supplicant`, no vendor Wi-Fi HAL |
@@ -558,9 +558,9 @@ survive in a diff.
 | `BOARD_BOOT_HEADER_VERSION := 2`, no `vendor_boot` | With a vendor_boot the kernel command line and the dtb move out of `boot.img` into `vendor_boot` (`core/Makefile:1600-1614`), where a bootloader that reads only `boot.img` never looks. See below. |
 | `BOARD_USES_FULL_RECOVERY_IMAGE := true`, no `BOARD_INCLUDE_RECOVERY_DTBO` | Boot header v2 and up have no `recovery_dtbo` field worth using here; the flag handed mkbootimg an argument it cannot place. |
 | Four AVB recovery variables | `core/Makefile:4460` errors with `BOARD_AVB_RECOVERY_KEY_PATH must be defined` on a non-A/B device with AVB: a discrete recovery image has to be self-signed. |
-| `BOARD_GPU_DRIVERS := panfrost kmsro`, not `BOARD_MESA3D_GALLIUM_DRIVERS` | The only mention of `BOARD_MESA3D_*` in the tree is dragonboard's own makefiles, which drive meson themselves. `external/mesa3d/Android.mk` reads `BOARD_GPU_DRIVERS`: `MESA_BUILD_GALLIUM := $(strip $(foreach d, $(BOARD_GPU_DRIVERS), ...))`. |
-| `PRODUCT_SOONG_NAMESPACES += external/mesa3d` | Mesa refuses to build without it — `external/mesa3d must be in PRODUCT_SOONG_NAMESPACES`, its `Android.mk:41`. |
-| `libGLES_mesa` and `libglapi`, not the six packages dragonboard lists | Nothing in the tree defines `libEGL_mesa`, `libGLESv1_CM_mesa`, `libGLESv2_mesa` or `libgallium_dri`; those names come from the newer meson-based packaging. The EGL loader takes `libGLES_<name>.so` as a complete driver and only falls back to the triplet when it is absent. |
+| `BOARD_MESA3D_USES_MESON_BUILD := true`, `BOARD_MESA3D_GALLIUM_DRIVERS := panfrost` | Since 2026-10-12 external/mesa3d is upstream Mesa 26.2, whose `android/Android.mk` reads exactly these (dragonboard and raspberry-vanilla set the same). The old AOSP snapshot (20.3.4) read `BOARD_GPU_DRIVERS`; kmsro is no longer a driver to name, meson enables it with panfrost. **Not yet built.** |
+| No `PRODUCT_SOONG_NAMESPACES += external/mesa3d` | The 20.3.4 snapshot refused to build without it (its `Android.mk:41`); upstream Mesa has no Android.bp. |
+| `libEGL_mesa`, `libGLESv1_CM_mesa`, `libGLESv2_mesa`, `libgallium_dri` | What upstream's `android/Android.mk` defines (the 20.3.4 snapshot defined only `libGLES_mesa` and `libglapi`). The EGL loader falls back to the triplet when `libGLES_$(ro.hardware.egl)` is absent. |
 | Four `PRODUCT_*` variables deleted | `PRODUCT_BUILD_PROP_OVERRIDES`, `PRODUCT_HAS_CAMERA`, `PRODUCT_HAVE_OPTEE`, `PRODUCT_TARGET_VNDK_VERSION` appear nowhere in AOSP 14. They were read by `device/rockchip/common`, which this tree does not have, so they were decoration that read like configuration. |
 | No `ro.product.first_api_level`, `ro.product.board`, `ro.board.platform` or `ro.sf.lcd_density` set by hand | `core/main.mk:284,332-341` emits all four from product and board variables. Setting one as well produces two assignments in the same `build.prop`, which `post_process_props.py` rejects unless the values happen to be identical. |
 | `TARGET_USERIMAGES_SPARSE_EXT_DISABLED := true` | The only switch that makes `lpmake` drop `--sparse` (`core/Makefile:6145-6148` → `build_super_image.py:136`). A sparse `super.img` is a container, not a filesystem, and `dd`ing one leaves a partition with no superblock and no log. |

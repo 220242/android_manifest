@@ -63,7 +63,7 @@
        gralloc integration, MPP, the display HAL. Mainline inverts that trade:
        the drivers are upstream and AOSP already ships userspace for them.
 
-         GPU      drivers/gpu/drm/panfrost  <- external/mesa3d, libmesa_pipe_panfrost
+         GPU      drivers/gpu/drm/panfrost  <- external/mesa3d (upstream Mesa), panfrost
          Display  drivers/gpu/drm/rockchip  <- external/drm_hwcomposer + minigbm
          Decode   staging/media/rkvdec      <- external/v4l2_codec2  (H.264 only)
          Wi-Fi    brcmfmac over SDIO        <- AOSP wpa_supplicant
@@ -180,8 +180,9 @@
        config for them, hardware decoding of those four in the service, and
        E-AC-3/DTS/TrueHD audio. build/apply-patches.sh puts them on after sync.
 
-       Not raspberry-vanilla's libdav1d, libdrm or Mesa: AOSP's stay, and FFmpeg
-       is built without libdav1d (AV1 stays with c2.android.av1).
+       Not raspberry-vanilla's libdav1d, libdrm or Mesa: AOSP's libdav1d and
+       libdrm stay, FFmpeg is built without libdav1d (AV1 stays with
+       c2.android.av1), and Mesa comes from upstream (below).
        ================================================================== -->
   <remote name="raspberry-vanilla" fetch="https://github.com/raspberry-vanilla/" />
   <project name="android_external_ffmpeg" path="external/ffmpeg" remote="raspberry-vanilla"
@@ -195,5 +196,28 @@
            remote="raspberry-vanilla"
            revision="0ad91b71bcff531a6f3a98f028fe2bcad033c332" upstream="android-14.0"
            clone-depth="1" />
+
+  <!-- ==================================================================
+       GLES: upstream Mesa 26.2 in place of AOSP's external/mesa3d.
+
+       AOSP's external/mesa3d is an Android.mk snapshot of Mesa 20.3.4 (late
+       2020). Its Panfrost has five years of Midgard fixes missing - Dead Cells
+       drew with textures absent and no GPU fault logged (2026-10-07 logs) - and
+       stops at GLES 3.0. Upstream builds for Android itself: android/Android.mk
+       runs meson with the AOSP toolchain, selected by BOARD_MESA3D_* in
+       BoardConfig.mk. raspberry-vanilla runs the same arrangement on AOSP 14
+       (Mesa 25.0.3, android-14.0 branch of android_external_mesa3d), which is
+       the fallback if 26.2 will not build here.
+
+       The host needs meson >= 1.4 and python3-mako/yaml/packaging for it
+       (build/windows/apt-packages.txt, provision-wsl.sh stage_deps).
+
+       Pinned to the 26.2.0 release tag; move it to the newest 26.2.x tag the
+       build was actually run against.
+       ================================================================== -->
+  <remove-project name="platform/external/mesa3d" />
+  <remote name="freedesktop" fetch="https://gitlab.freedesktop.org/" />
+  <project name="mesa/mesa" path="external/mesa3d" remote="freedesktop"
+           revision="refs/tags/mesa-26.2.0" clone-depth="1" />
 
 </manifest>

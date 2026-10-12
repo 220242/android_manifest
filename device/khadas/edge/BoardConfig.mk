@@ -321,32 +321,25 @@ BOARD_USES_MINIGBM := true
 
 # Mesa: which gallium driver to build.
 #
-# external/mesa3d builds nothing by default - the drivers are selected per board,
-# and with none selected libGLES_mesa still builds and ships and then finds no
-# driver at run time. That is the failure mode worth spending a round to avoid,
-# because it looks like a working build.
-#
-# BOARD_MESA3D_GALLIUM_DRIVERS was set here first, from Mesa's upstream Android
-# documentation. The probe then found that the only place in the whole tree that
-# mentions BOARD_MESA3D_* is device/linaro/dragonboard, which sets it alongside
-# BOARD_MESA3D_USES_MESON_BUILD := true and drives meson from its own makefiles -
-# so those names are dragonboard's interface to its own build, not Mesa's to the
-# platform. external/mesa3d itself never reads them.
-#
-# BOARD_GPU_DRIVERS is the variable the Android.mk build in that snapshot reads
-# (Android.common.mk: MESA_GPU_DRIVERS := $(strip $(BOARD_GPU_DRIVERS))), and this
-# snapshot is Android.mk-based - libGLES_mesa is a LOCAL_MODULE in it. The probe
-# now prints every driver-selection variable external/mesa3d actually reads, with
-# the lines that read them, so the next report confirms or corrects this.
+# external/mesa3d is upstream Mesa 26.2 (manifests/khadas_edge_tv14.xml), not
+# AOSP's Android.mk snapshot (Mesa 20.3.4, late 2020). Upstream builds for Android
+# through android/Android.mk, which runs meson with the AOSP toolchain, and it
+# reads exactly these board variables - the same ones device/linaro/dragonboard
+# and raspberry-vanilla's rpi4/rpi5 set. BOARD_GPU_DRIVERS was the old snapshot's
+# variable and nothing reads it any more.
 #
 # panfrost is the Midgard gallium driver and binds to drivers/gpu/drm/panfrost,
-# which this kernel builds in. kmsro is what lets it render on a display
-# controller that is not the GPU - the Rockchip VOP here - which is exactly the
-# split this SoC has.
+# which this kernel builds in. kmsro (rendering on a display controller that is
+# not the GPU, the Rockchip VOP here) is no longer a driver of its own: meson
+# turns it on with panfrost.
 #
-# No Vulkan driver: panvk on Midgard is not something to depend on, and nothing in
-# this configuration asks for Vulkan.
-BOARD_GPU_DRIVERS := panfrost kmsro
+# Why the move (2026-10-12): Dead Cells drew with textures missing on 20.3.4 and
+# logged no GPU fault, the signature of a rendering bug in the driver itself.
+# Upstream Panfrost has five years of Midgard fixes since then, plus GLES 3.1.
+#
+# No Vulkan driver: panvk supports Bifrost and Valhall, not the T860.
+BOARD_MESA3D_USES_MESON_BUILD := true
+BOARD_MESA3D_GALLIUM_DRIVERS := panfrost
 
 # 4608 MiB super. Leaves room on a 16GB eMMC for userdata.
 BOARD_SUPER_PARTITION_SIZE := 4831838208

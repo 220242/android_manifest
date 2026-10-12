@@ -44,7 +44,7 @@ Rockchip HIDL stack meant re-writing all of it:
 
 | | driver | userspace, from AOSP 14 |
 |---|---|---|
-| GPU | `drivers/gpu/drm/panfrost` | `external/mesa3d` → `libGLES_mesa` |
+| GPU | `drivers/gpu/drm/panfrost` | `external/mesa3d` (upstream Mesa 26.2) → `libEGL_mesa`/`libGLESv2_mesa` |
 | Display | `drivers/gpu/drm/rockchip` | `external/drm_hwcomposer` + minigbm |
 | Decode | `drivers/staging/media/rkvdec` | `external/v4l2_codec2` (not wired up yet) |
 | Wi-Fi | `brcmfmac` over SDIO | AOSP `wpa_supplicant` |
