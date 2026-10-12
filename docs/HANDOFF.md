@@ -338,6 +338,11 @@ not reachable from it.
   **Not yet run on a board.** The TV (Samsung UA46F5000) has no HDMI-CEC at all:
   it acknowledges nothing, so its remote cannot drive Android; the owner declined
   the board's IR receiver.
+* Pairing a remote with nothing else to steer with (owner, 2026-10-12): Edge1
+  Tools' RemotePairing opens TvSettings' "Add accessory" screen 45s after each
+  boot when no external remote, keyboard or gamepad is connected; TvSettings pairs
+  a lone input device in pairing mode after its countdown. logcat tag Edge1Pair.
+  **Not yet built or run** (no Java compile in the cloud).
 * Bluetooth audio (A2DP source): the provider factory registers since the card 19 round
   (`android.hardware.bluetooth.audio-impl`); not tried with headphones yet.
 * HDMI-CEC (card 30, **built, not yet run on a board**; the owner asked for it on

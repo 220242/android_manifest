@@ -69,6 +69,12 @@
             android:exported="false"
             android:permission="android.permission.BIND_JOB_SERVICE" />
 
+        <!-- Opens TvSettings' pairing screen after a boot with no remote. -->
+        <service
+            android:name=".RemotePairing"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
+
         <receiver
             android:name=".BootReceiver"
             android:exported="true">
